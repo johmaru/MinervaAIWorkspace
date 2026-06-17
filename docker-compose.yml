@@ -34,7 +34,7 @@ services:
       EMBED_MODEL: ${EMBED_MODEL:-text-embedding-3-small}
       EMBED_DIM: ${EMBED_DIM:-1536}
     ports:
-      - "3000:3000"
+      - "3001:3000"
 
 volumes:
   umanschat-db:

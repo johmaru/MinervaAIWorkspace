@@ -66,10 +66,12 @@ embeddings
 - OpenAI 互換クライアント（`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` env）
 - 自動テスト: Vitest + React Testing Library（実 API で SSE 疎通検証含む、30 tests green）
 
-### Phase 2: Threads + persistence
-- サイドバー：スレッド CRUD
-- メッセージ Postgres 永続化
-- 楽観更新（useSWR / React Query）
+### Phase 2: Threads + persistence ✅
+- サイドバー：スレッド CRUD（作成/選択/リネーム/削除）
+- メッセージ Postgres 永続化（/api/chat が user/assistant を DB に保存）
+- 楽観更新（state + fetch、SWR/React Query は最適化フェーズで検討）
+- title 自動生成（初回 user 発言から先頭40字）
+- 自動テスト: 55 tests green（実 API SSE + DB 永続化含む）
 
 ### Phase 3: Markdown + theme
 - `react-markdown` + `remark-gfm` + `rehype-highlight` + KaTeX

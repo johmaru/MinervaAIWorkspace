@@ -3,11 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useChat, type ChatMessage } from "@/hooks/useChat";
 
-export function ChatWindow() {
-  const { messages, isStreaming, error, send, stop } = useChat();
-  const [input, setInput] = useState("");
+export function ChatWindow({
+  threadId,
+  onConversationEnded,
+}: {
+  threadId: string | null;
+  onConversationEnded?: () => void;
+}) {
+  const { messages, isStreaming, isLoading, error, send, stop } = useChat(threadId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const [input, setInput] = useState("");
 
   // 自動スクロール
   useEffect(() => {
@@ -25,7 +31,9 @@ export function ChatWindow() {
 
   function submit() {
     if (!input.trim() || isStreaming) return;
-    void send(input);
+    void send(input).then(() => {
+      onConversationEnded?.();
+    });
     setInput("");
   }
 
@@ -40,8 +48,9 @@ export function ChatWindow() {
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
-          {messages.length === 0 && (
-            <EmptyState />
+          {isLoading && <p className="text-sm text-muted-foreground">読み込み中…</p>}
+          {messages.length === 0 && !isLoading && (
+            threadId ? <EmptyState /> : <NoThreadState />
           )}
           {messages.map((m) => (
             <MessageBubble key={m.id} m={m} streaming={isStreaming} />
@@ -92,6 +101,15 @@ function EmptyState() {
     <div className="mt-20 flex flex-col items-center gap-2 text-center text-muted-foreground">
       <p className="text-lg font-semibold">UmansChat</p>
       <p className="text-sm">メッセージを送って会話を始めてください。</p>
+    </div>
+  );
+}
+
+function NoThreadState() {
+  return (
+    <div className="mt-20 flex flex-col items-center gap-2 text-center text-muted-foreground">
+      <p className="text-lg font-semibold">UmansChat</p>
+      <p className="text-sm">左の「+ 新規チャット」からスレッドを作成してください。</p>
     </div>
   );
 }
