@@ -1,0 +1,40 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: umanschat-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: umans
+      POSTGRES_PASSWORD: umans
+      POSTGRES_DB: umanschat
+    ports:
+      - "5432:5432"
+    volumes:
+      - umanschat-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umans -d umanschat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: umanschat-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://umans:umans@db:5432/umanschat
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      EMBED_MODEL: ${EMBED_MODEL:-text-embedding-3-small}
+      EMBED_DIM: ${EMBED_DIM:-1536}
+    ports:
+      - "3000:3000"
+
+volumes:
+  umanschat-db:
