@@ -81,3 +81,11 @@ Design direction:
   なければ新規セクションを作成）。
 - 追記後、整理して重複や矛盾がないか確認し、必要があれば既存内容を統合・整理する。
 - 追記・整理が終わったら Git Workflow に従って commit + push する。
+
+## Documentation Sync
+
+- 機能を追加・変更・削除した場合は、`README.md`（EN）と `README.ja.md`（JA）の
+  両方に反映する。Features リスト、Configuration の env 変数表、Usage、
+  Architecture など該当セクションを更新する。
+- 両ファイルで同一情報を保ち、EN と JA で内容が乖離しないこと。
+- README 更新も実装の一部として扱い、1コミットに含める（別コミットに分けない）。
