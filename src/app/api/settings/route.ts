@@ -168,7 +168,7 @@ export async function POST(req: Request) {
     return new Response("webSearchMaxResults must be 1-20", { status: 400 });
   }
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
-    return new Response("thinkingEffort must be alphanumeric (e.g. low, medium, high, xhigh)", { status: 400 });
+    return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
   const dbVectorDim = await getVectorDim();
 

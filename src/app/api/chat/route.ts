@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { createLLM, defaultModel } from "@/lib/llm";
+import { createLLM, defaultModel, getReasoningLevels, getDefaultReasoningEffort } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
@@ -84,10 +84,20 @@ export async function POST(req: Request) {
         // 生成開始をクライアントに通知（user メッセージの DB id を返す）
         send("start", { userMessageId: userMsg.id });
 
+        const thinkingEffort = process.env.THINKING_EFFORT;
+        const validLevels = getReasoningLevels(model);
+        const reasoningEffort =
+          thinkingEffort && validLevels.includes(thinkingEffort)
+            ? thinkingEffort
+            : getDefaultReasoningEffort(model);
+
         const completion = await llm.chat.completions.create({
           model,
           messages: llmMessages,
           stream: true,
+          ...(reasoningEffort
+            ? { reasoning_effort: reasoningEffort as "none" | "low" | "medium" | "high" }
+            : {}),
         });
 
         for await (const chunk of completion) {

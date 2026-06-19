@@ -35,6 +35,42 @@ export function availableModels(): string[] {
   return models.length > 0 ? models : [defaultModel()];
 }
 
+/**
+ * UmansAI 各モデルの reasoning effort 定義。
+ * API: https://api.code.umans.ai/v1/models/info の capabilities.reasoning に基づく。
+ * levels が空配列のモデルは思考強度を制御不能（reasoning_effort を送らない）。
+ */
+export type ReasoningConfig = {
+  levels: string[];
+  defaultLevel: string | null;
+};
+
+export const MODEL_REASONING: Record<string, ReasoningConfig> = {
+  "umans-kimi-k2.6": { levels: [], defaultLevel: null },
+  "umans-kimi-k2.7": { levels: [], defaultLevel: null },
+  "umans-glm-5.1": { levels: ["none", "medium"], defaultLevel: "medium" },
+  "umans-glm-5.2": { levels: ["none", "high", "max"], defaultLevel: "high" },
+  "umans-coder": { levels: [], defaultLevel: null },
+  "umans-flash": { levels: ["none", "low", "medium", "high"], defaultLevel: "medium" },
+  "umans-qwen3.6-35b-a3b": { levels: ["none", "low", "medium", "high"], defaultLevel: "medium" },
+};
+
+/**
+ * 指定モデルの有効な reasoning effort レベル一覧を返す。
+ * モデルが未知、または levels が空（制御不可）の場合は空配列を返す。
+ */
+export function getReasoningLevels(model: string): string[] {
+  return MODEL_REASONING[model]?.levels ?? [];
+}
+
+/**
+ * 指定モデルのデフォルト reasoning effort を返す。
+ * 制御不可モデル（levels 空 / defaultLevel null）の場合は null。
+ */
+export function getDefaultReasoningEffort(model: string): string | null {
+  return MODEL_REASONING[model]?.defaultLevel ?? null;
+}
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string | Array<

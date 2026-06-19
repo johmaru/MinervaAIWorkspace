@@ -12,7 +12,7 @@
 - **セマンティック検索** — 全スレッド横断で pgvector のコサイン類似度により検索
 - **Web ページスクレイピング → 知識化** — スクレイプしたページを RAG ソースとして取り込み、以降の回答に活用
 - **Tor プロキシ** — 匿名スクレイピングのための Tor 対応
-- **Thinking Effort 制御** — `low` / `medium` / `high` / `xhigh`（GLM-5.2）、`low` / `medium` / `high`（OpenAI o 系）
+- **Thinking Effort 制御** — モデル毎に対応レベルが異なる（GLM-5.2: `none`/`high`/`max`、Flash: `none`/`low`/`medium`/`high`）。制御非対応モデルでは無視される
 - **埋め込みモデル切替** — transformers.js によるローカル ONNX、または HTTP Python embedder サービス
 - **フォルダ分け** — スレッドをフォルダで整理
 - **ダーク / ライト / システムテーマ**
@@ -122,7 +122,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `LLM_API_KEY`           | API キー（必須）                                                  | —                                                    |
 | `LLM_MODEL`             | デフォルトモデル                                                  | `gpt-4o-mini`                                        |
 | `LLM_MODELS`            | モデルセレクタ用のカンマ区切りモデル一覧                          | —                                                    |
-| `THINKING_EFFORT`       | LLM の推論強度（`low`/`medium`/`high`/`xhigh`）                    | `medium`                                             |
+| `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
 | `EMBED_MODEL`           | 埋め込みモデル名                                                  | `Xenova/all-MiniLM-L6-v2`                            |
 | `EMBED_DIM`             | 埋め込み次元数                                                    | `384`                                                |
 | `EMBED_PROVIDER`        | `local`（transformers.js）または `http`（Python embedder サービス）| `local`                                              |

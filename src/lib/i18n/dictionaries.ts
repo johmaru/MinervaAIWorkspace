@@ -6,7 +6,7 @@
  *
  * 翻訳しない文字列（この辞書に含めない）:
  * - ブランド名 `UmansChat`
- * - 環境変数名（LLM_BASE_URL, LLM_API_KEY, ...）・技術値（low/medium/high/xhigh, socks5://tor:9050）
+ * - 環境変数名（LLM_BASE_URL, LLM_API_KEY, ...）・技術値（none/low/medium/high/max, socks5://tor:9050）
  * - API バリデーションエラーの英語文字列（開発者向け）
  * - DB に保存されるデフォルトタイトル "New chat" / "New folder"
  */
@@ -100,8 +100,8 @@ const ja = {
     llmSettings: "LLM 設定",
     llmModel: "LLM_MODEL（デフォルトモデル）",
     llmModels: "LLM_MODELS（カンマ区切り）",
-    thinkingEffort: "Thinking Effort（モデル毎に異なる。例: low, medium, high, xhigh）",
-    thinkingEffortDesc: "LLM の推論強度。GLM-5.2 は xhigh まで対応、OpenAI o 系は low/medium/high。",
+    thinkingEffort: "Thinking Effort（モデル毎に異なる。例: none, low, medium, high, max）",
+    thinkingEffortDesc: "LLM の推論強度。モデル毎に対応レベルが異なる（GLM-5.2: none/high/max、Flash: none/low/medium/high）。未対応モデルでは反映されません。",
     embedModel: "埋め込みモデル",
     embedLocal: "ローカル",
     embedHttp: "Python バックエンド",
@@ -301,8 +301,8 @@ const en: typeof ja = {
     llmSettings: "LLM Settings",
     llmModel: "LLM_MODEL (default model)",
     llmModels: "LLM_MODELS (comma-separated)",
-    thinkingEffort: "Thinking Effort (varies per model, e.g. low, medium, high, xhigh)",
-    thinkingEffortDesc: "LLM reasoning strength. GLM-5.2 supports up to xhigh; OpenAI o-series supports low/medium/high.",
+    thinkingEffort: "Thinking Effort (varies per model, e.g. none, low, medium, high, max)",
+    thinkingEffortDesc: "LLM reasoning strength. Levels vary per model (GLM-5.2: none/high/max, Flash: none/low/medium/high). Ignored for models that don't support reasoning control.",
     embedModel: "Embedding model",
     embedLocal: "local",
     embedHttp: "Python backend",

@@ -300,7 +300,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 type="text"
                 value={form.thinkingEffort ?? "medium"}
                 onChange={(e) => update("thinkingEffort", e.target.value)}
-                placeholder="low / medium / high / xhigh"
+                placeholder="none / low / medium / high / max"
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
               <p className="mt-1 text-xs text-muted-foreground">

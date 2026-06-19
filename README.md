@@ -12,7 +12,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Semantic search** across all threads (pgvector cosine similarity)
 - **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers
 - **Tor proxy** support for anonymous scraping
-- **Thinking effort control** — `low` / `medium` / `high` / `xhigh` (GLM-5.2), `low` / `medium` / `high` (OpenAI o-series)
+- **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control
 - **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service
 - **Folder organization** for threads
 - **Dark / light / system theme**
@@ -121,7 +121,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LLM_API_KEY`           | API key (required)                                                 | —                                                    |
 | `LLM_MODEL`             | Default model                                                      | `gpt-4o-mini`                                        |
 | `LLM_MODELS`            | Comma-separated model list for the model selector                  | —                                                    |
-| `THINKING_EFFORT`       | LLM reasoning strength (`low`/`medium`/`high`/`xhigh`)            | `medium`                                             |
+| `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
 | `EMBED_MODEL`           | Embedding model name                                               | `Xenova/all-MiniLM-L6-v2`                            |
 | `EMBED_DIM`             | Embedding dimension                                                | `384`                                                |
 | `EMBED_PROVIDER`        | `local` (transformers.js) or `http` (Python embedder service)      | `local`                                              |
