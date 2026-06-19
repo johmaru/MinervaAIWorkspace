@@ -1,36 +1,167 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# UmansChat
 
-## Getting Started
+A self-hosted, streaming AI chat platform with branching conversations, semantic search, and web knowledge ingestion.
 
-First, run the development server:
+[日本語 / Japanese](./README.ja.md)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Features
+
+- **Streaming chat** with SSE (token-by-token output)
+- **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
+- **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
+- **Semantic search** across all threads (pgvector cosine similarity)
+- **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers
+- **Tor proxy** support for anonymous scraping
+- **Thinking effort control** — `low` / `medium` / `high` / `xhigh` (GLM-5.2), `low` / `medium` / `high` (OpenAI o-series)
+- **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service
+- **Folder organization** for threads
+- **Dark / light / system theme**
+- **EN / JA i18n toggle** (English is the default)
+- **OpenAI-compatible LLM backend** — UmansAI, OpenAI, vLLM, Ollama, etc.
+- **Auto title generation** from the first user message
+- **Per-thread system prompt and model selection**
+- **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
+
+## Architecture
+
+UmansChat is a Next.js 16 + React 19 app backed by PostgreSQL 16 with pgvector, orchestrated by Docker Compose across five services:
+
+```mermaid
+flowchart LR
+    subgraph Client
+        Browser[Browser :3001]
+    end
+    subgraph Compose
+        app[app<br/>Next.js 16 + Bun]
+        db[(db<br/>pgvector pg16)]
+        embedder[embedder<br/>Python sentence-transformers]
+        scraper[scraper<br/>Scrapling FastAPI]
+        searxng[searxng<br/>meta search]
+        tor[tor<br/>dperson/torproxy]
+    end
+    Browser --> app
+    app --> db
+    app --> embedder
+    app --> scraper
+    scraper --> searxng
+    searxng --> tor
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Service    | Image / Build        | Role                                            | Port           |
+|------------|----------------------|-------------------------------------------------|----------------|
+| `app`      | Built from `Dockerfile` | Next.js app (chat UI, API, settings)         | `3001 → 3000`  |
+| `db`       | `pgvector/pgvector:pg16` | PostgreSQL 16 with vector extensions        | `5432`         |
+| `embedder` | Built from `./embedder` | Python `sentence-transformers` HTTP embedder | `8000` (exposed) |
+| `scraper`  | Built from `./scraper`  | Scrapling FastAPI scraper + SearXNG client    | `8000` (exposed) |
+| `searxng`  | `searxng/searxng:latest` | SearXNG meta-search engine                    | `8081 → 8080`  |
+| `tor`      | `dperson/torproxy:latest` | Tor SOCKS proxy for anonymous scraping      | `9050` (exposed) |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Requirements
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Node.js / Bun** — Bun is the primary runtime and package manager
+- **Docker** (with Docker Compose) — for the database, scraper, embedder, search, and Tor services
+- An **OpenAI-compatible LLM API key** (UmansAI, OpenAI, vLLM, Ollama, etc.)
 
-## Learn More
+## Quick Start (Docker)
 
-To learn more about Next.js, take a look at the following resources:
+This is the recommended path for running UmansChat as a self-contained service.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+# 1. Copy the environment template
+cp .env.example .env
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# 2. Set your LLM API key (required)
+#    Edit .env and fill in LLM_API_KEY
+#    Optionally set LLM_BASE_URL and LLM_MODEL for your provider
 
-## Deploy on Vercel
+# 3. Start all services
+docker compose up -d
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# 4. Open the app
+#    http://localhost:3001
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+On first run, database migrations are applied automatically by the app. If you change the embedding model after initial setup, see [Database Migrations](#database-migrations).
+
+## Quick Start (Local Dev)
+
+For development of the Next.js app itself.
+
+```bash
+# 1. Install dependencies
+bun install
+
+# 2. Start the database (and optionally other services) via Docker
+docker compose up -d db
+
+# 3. Copy the environment template and configure
+cp .env.example .env
+#    Set DATABASE_URL, LLM_API_KEY, and (for scraping/search) the service URLs
+
+# 4. Run the dev server
+bun run dev
+#    http://localhost:3000
+```
+
+The scraper, embedder, searxng, and tor services can be started alongside the database when you need scraping/search during local development:
+
+```bash
+docker compose up -d db scraper embedder searxng tor
+```
+
+Point `SCRAPER_URL`, `SEARXNG_URL`, and (for HTTP embeddings) `EMBEDDER_URL` in `.env` to the host-exposed ports when running the app outside Compose.
+
+## Configuration
+
+All configuration lives in `.env` (see `.env.example` as the source of truth). The in-app Settings GUI can edit most of these at runtime without a restart.
+
+| Variable                | Description                                                        | Default                                              |
+|-------------------------|--------------------------------------------------------------------|------------------------------------------------------|
+| `LLM_BASE_URL`          | Base URL of the OpenAI-compatible API                              | `https://api.openai.com/v1`                          |
+| `LLM_API_KEY`           | API key (required)                                                 | —                                                    |
+| `LLM_MODEL`             | Default model                                                      | `gpt-4o-mini`                                        |
+| `LLM_MODELS`            | Comma-separated model list for the model selector                  | —                                                    |
+| `THINKING_EFFORT`       | LLM reasoning strength (`low`/`medium`/`high`/`xhigh`)            | `medium`                                             |
+| `EMBED_MODEL`           | Embedding model name                                               | `Xenova/all-MiniLM-L6-v2`                            |
+| `EMBED_DIM`             | Embedding dimension                                                | `384`                                                |
+| `EMBED_PROVIDER`        | `local` (transformers.js) or `http` (Python embedder service)      | `local`                                              |
+| `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
+| `SCRAPER_URL`           | Scraper microservice URL                                           | `http://localhost:8000`                              |
+| `SEARXNG_URL`           | SearXNG URL                                                        | `http://localhost:8080`                              |
+| `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |
+| `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
+| `DATABASE_URL`          | PostgreSQL connection URL (used for local `bun run dev`)           | `postgres://umans:umans@localhost:5432/umanschat`    |
+
+## Usage
+
+- **Create a thread** — start typing in the composer; the thread is created on first send and an auto title is generated from your first message.
+- **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token.
+- **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
+- **Attachments** — attach images (sent to vision-capable models), PDFs (text extracted), or text/code files (up to 10MB each).
+- **Semantic search** — search across all threads; results are ranked by pgvector cosine similarity.
+- **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
+- **Tor** — toggle Tor in settings for anonymous scraping.
+- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
+
+## Database Migrations
+
+UmansChat uses Drizzle ORM with pgvector. To apply migrations manually (e.g. on a fresh local database):
+
+```bash
+bunx drizzle-kit migrate
+```
+
+When you switch the embedding model (changing `EMBED_MODEL` / `EMBED_DIM`), the existing `embeddings` and `page_embeddings` vector columns must be recreated with the new dimension. Use the Settings GUI's migration action (`applyMigration`) to drop and recreate the vector columns, then re-embed your content.
+
+## Testing
+
+```bash
+# Unit tests
+bun run test
+
+# Type checking
+bun run typecheck
+
+# Linting
+bun run lint
+```
