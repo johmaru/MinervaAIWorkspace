@@ -64,3 +64,12 @@ Design direction:
 - Copy buttons should not disturb text selection.
 - Stop / retry / regenerate actions should only appear when relevant.
 - Long conversations should remain navigable.
+
+## Git Workflow
+
+- 実装が1つ完了したら、`develop` に commit して `git push` する。
+  1実装 = 1コミットを基本とする。
+- 過去コミットの修正依頼が来たら、`git commit --amend` で前回コミットを
+  書き換えて `git push --force-with-lease` で再 push する。
+  （共同作業者がいる場合は履歴書き換えの同意を確認してから）
+- コミットメッセージは英語で、変更内容・検証結果を簡潔に記載する。
