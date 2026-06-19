@@ -22,6 +22,10 @@
 
 # misc
 .DS_Store
+
+# python bytecode
+__pycache__/
+*.pyc
 *.pem
 
 # debug
@@ -39,4 +43,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Claude Code skills (local-only)
+.claude/
+
+# Debug screenshots
+current-dark.png
+screenshot-light.png
+
+# Debug HTML
+home.html
+
 umanschat-dev.log

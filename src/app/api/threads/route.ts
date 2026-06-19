@@ -1,4 +1,5 @@
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
+import { defaultModel } from "@/lib/llm";
 import { db } from "@/db";
 import { threads } from "@/db/schema";
 
@@ -13,6 +14,7 @@ export async function GET() {
     .select({
       id: threads.id,
       title: threads.title,
+      folderId: threads.folderId,
       createdAt: threads.createdAt,
       updatedAt: threads.updatedAt,
     })
@@ -25,6 +27,7 @@ type CreateBody = {
   title?: string;
   systemPrompt?: string;
   model?: string;
+  folderId?: string | null;
 };
 
 /**
@@ -39,13 +42,13 @@ export async function POST(req: Request) {
       return new Response("Invalid JSON", { status: 400 });
     }
   }
-
   const [row] = await db
     .insert(threads)
     .values({
       title: body.title?.trim() || "New chat",
       systemPrompt: body.systemPrompt,
-      model: body.model,
+      model: body.model ?? defaultModel(),
+      folderId: body.folderId ?? null,
     })
     .returning();
   return Response.json(row, { status: 201 });
@@ -55,6 +58,7 @@ type PatchBody = {
   title?: string;
   systemPrompt?: string | null;
   model?: string;
+  folderId?: string | null;
 };
 
 /**
@@ -77,11 +81,12 @@ export async function PATCH(req: Request) {
   if (typeof body.title === "string") values.title = body.title.trim();
   if (body.systemPrompt !== undefined) values.systemPrompt = body.systemPrompt;
   if (typeof body.model === "string") values.model = body.model;
+  if (body.folderId !== undefined) values.folderId = body.folderId;
 
   const [row] = await db
     .update(threads)
     .set(values)
-    .where(and(eq(threads.id, id)))
+    .where(eq(threads.id, id))
     .returning();
   if (!row) return new Response("Not found", { status: 404 });
   return Response.json(row);

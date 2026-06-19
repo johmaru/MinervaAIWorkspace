@@ -2,18 +2,28 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useChat, type ChatMessage } from "@/hooks/useChat";
+import { Markdown } from "@/components/Markdown";
+import { ThreadSettings } from "@/components/ThreadSettings";
+import { AttachmentBar } from "@/components/AttachmentBar";
+import { useI18n } from "@/components/I18nProvider";
 
 export function ChatWindow({
   threadId,
+  onCreateThread,
   onConversationEnded,
 }: {
   threadId: string | null;
+  onCreateThread?: () => Promise<string | null>;
   onConversationEnded?: () => void;
 }) {
-  const { messages, isStreaming, isLoading, error, send, stop } = useChat(threadId);
+  const { messages, thread, isStreaming, isLoading, error, sources, send, stop, updateThread, regenerate, editMessage, switchBranch, getSiblingInfo, pendingAttachments, uploadAttachment, removeAttachment } = useChat(threadId);
+  const { t } = useI18n();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const pendingRef = useRef<string | null>(null);
 
   // 自動スクロール
   useEffect(() => {
@@ -29,13 +39,57 @@ export function ChatWindow({
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [input]);
 
-  function submit() {
-    if (!input.trim() || isStreaming) return;
-    void send(input).then(() => {
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (const file of Array.from(files)) {
+      await uploadAttachment(file);
+    }
+    // input をリセットして同じファイルを再選択可能にする
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function submit() {
+    const trimmed = input.trim();
+    if (!trimmed || isStreaming || isCreating || pendingRef.current !== null) return;
+
+    const attachmentIds = pendingAttachments.map((a) => a.id);
+
+    if (!threadId) {
+      if (!onCreateThread) return;
+      setIsCreating(true);
+      pendingRef.current = trimmed;
+      setInput("");
+      try {
+        const newId = await onCreateThread();
+        if (!newId) {
+          pendingRef.current = null;
+          setInput(trimmed);
+        }
+      } catch {
+        pendingRef.current = null;
+        setInput(trimmed);
+      } finally {
+        setIsCreating(false);
+      }
+      return;
+    }
+
+    void send(trimmed, { attachmentIds }).then(() => {
       onConversationEnded?.();
     });
     setInput("");
+    // 送信後に保留中の添付ファイルをクリア
+    for (const att of pendingAttachments) removeAttachment(att.id);
   }
+
+  // 新規スレッド作成が完了し threadId が切り替わったら、保留中の入力を自動送信する。
+  useEffect(() => {
+    if (!threadId || pendingRef.current === null) return;
+    const content = pendingRef.current;
+    pendingRef.current = null;
+    void send(content).then(() => onConversationEnded?.());
+  }, [threadId, send, onConversationEnded]);
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -45,49 +99,93 @@ export function ChatWindow({
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto flex max-w-3xl flex-col gap-4">
-          {isLoading && <p className="text-sm text-muted-foreground">読み込み中…</p>}
+    <div className="flex h-full min-w-0 flex-1 flex-col" role="region" aria-label={t("chat.regionChat")}>
+      {thread && (
+        <ThreadSettings thread={thread} onUpdate={updateThread} />
+      )}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 sm:px-4 sm:py-6" aria-live="polite" aria-label={t("chat.messageList")}>
+        <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:gap-4">
+          {isLoading && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
           {messages.length === 0 && !isLoading && (
             threadId ? <EmptyState /> : <NoThreadState />
           )}
-          {messages.map((m) => (
-            <MessageBubble key={m.id} m={m} streaming={isStreaming} />
-          ))}
+          {messages.map((m, i) => {
+            const isLastAssistant =
+              i === messages.length - 1 && m.role === "assistant";
+            return (
+              <MessageBubble
+                key={m.id}
+                m={m}
+                streaming={isStreaming}
+                isLast={i === messages.length - 1}
+                sources={isLastAssistant ? sources : []}
+                onRegenerate={regenerate}
+                onEdit={editMessage}
+                onSwitchBranch={switchBranch}
+                getSiblingInfo={getSiblingInfo}
+              />
+            );
+          })}
           {error && (
-            <p className="text-sm text-red-500">エラー: {error}</p>
+            <p className="text-sm text-red-500">{t("common.errorPrefix", { error })}</p>
           )}
         </div>
       </div>
 
-      <div className="border-t border-border px-4 py-3">
+      <div className="bg-background/80 px-3 py-3 backdrop-blur-md border-t border-border sm:px-4 sm:py-4" role="region" aria-label={t("chat.messageInput")}>
+        {pendingAttachments.length > 0 && (
+          <div className="mx-auto mb-2 max-w-3xl">
+            <AttachmentBar attachments={pendingAttachments} onRemove={removeAttachment} />
+          </div>
+        )}
         <div className="mx-auto flex max-w-3xl items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,application/pdf,text/*,.md,.txt"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isCreating || !threadId}
+            className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted text-sm transition-all duration-200 hover:bg-muted/80 disabled:opacity-40"
+            aria-label={t("chat.attachFile")}
+            title={t("chat.attachFile")}
+          >
+            📎
+          </button>
           <textarea
             ref={taRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             rows={1}
-            placeholder="メッセージを入力（Enter で送信、Shift+Enter で改行）"
-            className="min-h-[40px] flex-1 resize-none rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            disabled={isCreating}
+            placeholder={t("chat.placeholder")}
+            aria-label={t("chat.messageInput")}
+            className="min-h-[40px] flex-1 resize-none rounded-2xl bg-muted px-4 py-3 text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20 disabled:opacity-50"
           />
           {isStreaming ? (
             <button
               type="button"
               onClick={stop}
-              className="h-10 rounded border border-border px-3 text-sm hover:bg-muted"
+              className="h-10 rounded-2xl bg-muted px-3 text-sm transition-all duration-200 hover:bg-muted/80"
+              aria-label={t("chat.stopGeneration")}
             >
-              停止
+              {t("chat.stop")}
             </button>
           ) : (
             <button
               type="button"
               onClick={submit}
-              disabled={!input.trim()}
-              className="h-10 rounded bg-accent px-4 text-sm text-accent-foreground disabled:opacity-40"
+              disabled={!input.trim() || isCreating}
+              aria-label={t("chat.sendMessage")}
+              className="rounded-2xl bg-foreground px-4 py-2.5 text-sm font-medium text-background transition-all duration-200 hover:opacity-90 disabled:opacity-40"
             >
-              送信
+              {isCreating ? t("chat.creating") : t("chat.send")}
             </button>
           )}
         </div>
@@ -97,40 +195,248 @@ export function ChatWindow({
 }
 
 function EmptyState() {
+  const { t } = useI18n();
   return (
-    <div className="mt-20 flex flex-col items-center gap-2 text-center text-muted-foreground">
-      <p className="text-lg font-semibold">UmansChat</p>
-      <p className="text-sm">メッセージを送って会話を始めてください。</p>
+    <div className="mt-24 flex flex-col items-center gap-3 text-center text-muted-foreground" role="status">
+      <p className="text-lg font-semibold tracking-tight text-foreground">UmansChat</p>
+      <p className="text-sm">{t("chat.emptyThread")}</p>
     </div>
   );
 }
 
 function NoThreadState() {
+  const { t } = useI18n();
   return (
-    <div className="mt-20 flex flex-col items-center gap-2 text-center text-muted-foreground">
-      <p className="text-lg font-semibold">UmansChat</p>
-      <p className="text-sm">左の「+ 新規チャット」からスレッドを作成してください。</p>
+    <div className="mt-24 flex flex-col items-center gap-3 text-center text-muted-foreground" role="status">
+      <p className="text-lg font-semibold tracking-tight text-foreground">UmansChat</p>
+      <p className="text-sm">{t("chat.emptyNoThread")}</p>
     </div>
   );
 }
 
-function MessageBubble({ m, streaming }: { m: ChatMessage; streaming: boolean }) {
-  const isUser = m.role === "user";
-  const isStreamingThis = streaming && m.role === "assistant" && m.content === "";
+function ThinkingBlock({ content }: { content: string }) {
+  const { t } = useI18n();
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-          isUser
-            ? "bg-accent text-accent-foreground"
-            : "bg-muted text-foreground"
-        }`}
-      >
-        {m.content || (isStreamingThis ? "…" : "")}
-        {!isUser && streaming && m.content && (
-          <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-foreground align-middle" />
+    <details className="mb-2 rounded-xl bg-muted/50 px-3 py-2" aria-label={t("chat.thinkingProcess")}>
+      <summary className="cursor-pointer select-none text-xs text-muted-foreground" role="button" aria-expanded="false">{t("chat.thinking")}</summary>
+      <div className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground" role="region" aria-label={t("chat.thinkingContent")}>{content}</div>
+    </details>
+  );
+}
+
+function splitThinking(content: string): { thinking: string; answer: string } {
+  const parts: string[] = [];
+  const answer = content
+    .replace(/<thinking>([\s\S]*?)<\/thinking>/g, (_, inner: string) => {
+      const trimmed = inner.trim();
+      if (trimmed) parts.push(trimmed);
+      return "";
+    })
+    .trim();
+  return { thinking: parts.join("\n---\n"), answer };
+}
+
+type MessageBubbleProps = {
+  m: ChatMessage;
+  streaming: boolean;
+  isLast: boolean;
+  sources: { url: string; title: string; snippet: string }[];
+  onRegenerate: (userMessageId: string) => Promise<void>;
+  onEdit: (userMessageId: string, newContent: string) => Promise<void>;
+  onSwitchBranch: (messageId: string) => void;
+  getSiblingInfo: (messageId: string) => { siblings: string[]; currentIndex: number };
+};
+
+function MessageBubble({
+  m,
+  streaming,
+  isLast,
+  sources,
+  onRegenerate,
+  onEdit,
+  onSwitchBranch,
+  getSiblingInfo,
+}: MessageBubbleProps) {
+  const { t } = useI18n();
+  const isAssistant = m.role === "assistant";
+  // thinking 受信中も回答未生成の間はスピナー/進捗ラベルを表示する。
+  // answer が空で thinking も無い場合のみスピナーを表示し、thinking がある場合は
+  // 上の ThinkingBlock と併存する形で進捗ラベルを表示する。
+  const isStreamingThis = streaming && isAssistant && m.content === "";
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(m.content);
+
+  const { siblings, currentIndex } = getSiblingInfo(m.id);
+  const hasBranches = siblings.length > 1;
+
+  // assistant メッセージの再生成: 親 user メッセージの id が必要
+  const handleRegenerate = () => {
+    if (m.parentId) void onRegenerate(m.parentId);
+  };
+
+  const handleEditSubmit = () => {
+ const trimmed = editText.trim();
+    if (trimmed && trimmed !== m.content) {
+      void onEdit(m.id, trimmed);
+    }
+    setEditing(false);
+  };
+
+  if (isAssistant) {
+    const inline = !m.thinking ? splitThinking(m.content) : null;
+    const thinking = m.thinking ?? inline?.thinking ?? "";
+    const answer = inline ? inline.answer : m.content;
+
+    return (
+      <div className="flex flex-col items-start gap-1 animate-[msg-in_0.3s_ease-out]" role="article">
+        {thinking && <ThinkingBlock content={thinking} />}
+        <div className="w-full px-0 py-1 text-foreground">
+          {answer ? (
+            <Markdown content={answer} />
+          ) : null}
+          {/* 回答未生成中はスピナー + 進捗ラベルを表示。thinking 受信中も表示し続ける。 */}
+          {isStreamingThis && !m.thinking ? (
+            <span aria-label={t("chat.waitingResponse")} className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <span className="loading-spinner inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+              {m.statusLabel ?? t("chat.waitingResponseAria")}
+            </span>
+          ) : null}
+          {/* thinking 受信中はスピナーを省き進捗ラベルのみ表示（ThinkingBlock と併存）。 */}
+          {isStreamingThis && m.thinking && m.statusLabel ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="loading-spinner inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+              {m.statusLabel}
+            </span>
+          ) : null}
+          {streaming && answer && (
+            <span className="ml-0.5 inline-block h-3 w-1.5 animate-[blink_1s_ease-in-out_infinite] bg-foreground align-middle" aria-hidden="true" />
+          )}
+        </div>
+        {hasBranches && (
+          <BranchNav
+            currentIndex={currentIndex}
+            total={siblings.length}
+            onPrev={() => onSwitchBranch(siblings[Math.max(0, currentIndex - 1)])}
+            onNext={() => onSwitchBranch(siblings[Math.min(siblings.length - 1, currentIndex + 1)])}
+          />
+        )}
+        {!streaming && answer && isLast && (
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
+            aria-label={t("chat.regenerate")}
+          >
+            {t("chat.regenerateLabel")}
+          </button>
+        )}
+        {sources.length > 0 && (
+          <div className="mt-2 rounded-xl bg-muted/50 px-3 py-2" aria-label={t("chat.references")}>
+            <p className="text-[10px] text-muted-foreground mb-1">{t("chat.referenceCount", { count: sources.length })}</p>
+            <ul className="space-y-0.5">
+              {sources.map((s, i) => (
+                <li key={i}>
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-accent hover:underline"
+                  >
+                    {s.title || s.url}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1" role="article">
+      {editing ? (
+        <div className="flex max-w-[90%] flex-col gap-1 sm:max-w-[85%]">
+          <textarea
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            rows={2}
+            autoFocus
+            aria-label={t("chat.editMessage")}
+            className="resize-none rounded-2xl bg-muted px-3 py-2 text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleEditSubmit}
+              className="rounded-xl bg-foreground px-3 py-1 text-xs text-background hover:opacity-90"
+              aria-label={t("chat.submitEdit")}
+            >
+              {t("chat.send")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setEditText(m.content); }}
+              className="rounded-xl bg-muted px-3 py-1 text-xs hover:bg-muted/80"
+              aria-label={t("chat.cancelEdit")}
+            >
+              {t("common.cancel")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex max-w-[90%] flex-col items-end gap-1 sm:max-w-[85%]">
+          {m.attachments && m.attachments.length > 0 && (
+            <AttachmentBar attachments={m.attachments} />
+          )}
+          <div className="whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm text-foreground ring-1 ring-border animate-[msg-in_0.3s_ease-out]">
+            {m.content}
+          </div>
+        </div>
+      )}
+      {hasBranches && !editing && (
+        <BranchNav
+          currentIndex={currentIndex}
+          total={siblings.length}
+          onPrev={() => onSwitchBranch(siblings[Math.max(0, currentIndex - 1)])}
+          onNext={() => onSwitchBranch(siblings[Math.min(siblings.length - 1, currentIndex + 1)])}
+        />
+      )}
+      {!editing && !streaming && (
+        <button
+          type="button"
+          onClick={() => { setEditText(m.content); setEditing(true); }}
+          className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground"
+          aria-label={t("chat.editMessage")}
+        >
+          {t("chat.editLabel")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BranchNav({
+  currentIndex,
+  total,
+  onPrev,
+  onNext,
+}: {
+  currentIndex: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-1 text-xs text-muted-foreground" role="group" aria-label={t("chat.branchPosition", { current: currentIndex + 1, total })}>
+      <button type="button" onClick={onPrev} disabled={currentIndex === 0} className="rounded-lg px-2 py-0.5 transition-colors duration-150 hover:bg-muted hover:text-foreground disabled:opacity-30" aria-label={t("chat.prevBranch")}>
+        ‹
+      </button>
+      <span aria-current="true">{currentIndex + 1}/{total}</span>
+      <button type="button" onClick={onNext} disabled={currentIndex === total - 1} className="rounded-lg px-2 py-0.5 transition-colors duration-150 hover:bg-muted hover:text-foreground disabled:opacity-30" aria-label={t("chat.nextBranch")}>
+        ›
+      </button>
     </div>
   );
 }

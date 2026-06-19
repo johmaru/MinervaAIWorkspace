@@ -23,7 +23,22 @@ export function embedModel(): string {
   return process.env.EMBED_MODEL ?? "text-embedding-3-small";
 }
 
+/**
+ * 利用可能なモデル一覧。
+ * LLM_MODELS env（カンマ区切り）から解析。未設定時は defaultModel() のみ。
+ * 例: LLM_MODELS="umans-glm-5.2,gpt-4o-mini,gpt-4o"
+ */
+export function availableModels(): string[] {
+  const raw = process.env.LLM_MODELS;
+  if (!raw) return [defaultModel()];
+  const models = raw.split(",").map((m) => m.trim()).filter(Boolean);
+  return models.length > 0 ? models : [defaultModel()];
+}
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  >;
 };

@@ -1,0 +1,120 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/components/I18nProvider";
+
+export type FolderSummary = {
+  id: string;
+  name: string;
+  instruction: string | null;
+  memoryScope: "folder" | "global";
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CreateBody = {
+  name?: string;
+  instruction?: string | null;
+  memoryScope?: "folder" | "global";
+};
+
+type PatchBody = {
+  name?: string;
+  instruction?: string | null;
+  memoryScope?: "folder" | "global";
+};
+
+/**
+ * フォルダ一覧フック。useThreads と同構造。
+ *
+ * - 初回マウントで GET /api/folders を取得。
+ * - create(body?) は POST /api/folders → 先頭挿入。FolderSummary | null を返す。
+ * - update(id, patch) は PATCH /api/folders?id=... → 一覧に反映。
+ * - remove(id) は DELETE /api/folders/[id]。
+ * - refresh() で一覧を再取得。
+ */
+export function useFolders() {
+  const { t } = useI18n();
+  const [folders, setFolders] = useState<FolderSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/folders");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as FolderSummary[];
+      setFolders(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("sidebar.folderLoadError"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [t]);
+
+  // 初回ロード。effect 本体で同期的 setState しないよう async IIFE で包む。
+  useEffect(() => {
+    void (async () => {
+      await refresh();
+    })();
+  }, [refresh]);
+
+  const create = useCallback(
+    async (body?: CreateBody): Promise<FolderSummary | null> => {
+      try {
+        const res = await fetch("/api/folders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body ?? {}),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const folder = (await res.json()) as FolderSummary;
+        setFolders((prev) => [folder, ...prev]);
+        return folder;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("sidebar.folderCreateError"));
+        return null;
+      }
+    },
+    [t],
+  );
+
+  const update = useCallback(
+    async (id: string, patch: PatchBody): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/folders?id=${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const updated = (await res.json()) as FolderSummary;
+        setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)));
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("sidebar.folderUpdateError"));
+        return false;
+      }
+    },
+    [t],
+  );
+
+  const remove = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
+        if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`);
+        setFolders((prev) => prev.filter((f) => f.id !== id));
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("sidebar.folderDeleteError"));
+        return false;
+      }
+    },
+    [t],
+  );
+
+  return { folders, isLoading, error, refresh, create, update, remove };
+}

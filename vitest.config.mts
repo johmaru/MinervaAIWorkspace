@@ -17,5 +17,8 @@ export default defineConfig({
     testTimeout: 30_000,
     // watch せず1回実行して終わる（CI / 一発検証向け）。
     // `bun run test -- --watch` で watch 可能。
+    // sharp / @xenova/transformers の native module は forks pool で
+    // worker クラッシュを起こすため threads pool を使う。
+    pool: "threads",
   },
 });

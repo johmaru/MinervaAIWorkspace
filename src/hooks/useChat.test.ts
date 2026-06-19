@@ -84,10 +84,10 @@ describe("useChat — 初回ロード", () => {
 
     fetchMock().mockResolvedValue(
       threadResponse({
-        thread: { id, title: "useChat test", systemPrompt: null, model: "gpt-4o-mini" },
+        thread: { id, title: "useChat test", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: "m2" },
         messages: [
-          { id: "m1", role: "user", content: "hi" },
-          { id: "m2", role: "assistant", content: "hello" },
+          { id: "m1", parentId: null, role: "user", content: "hi" },
+          { id: "m2", parentId: "m1", role: "assistant", content: "hello" },
         ],
       }),
     );
@@ -159,6 +159,43 @@ describe("useChat — 送信", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("thinking イベントで assistant メッセージの thinking に蓄積", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            messages: [],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u1" } },
+            { event: "thinking", data: { delta: "考え中…" } },
+            { event: "thinking", data: { delta: "続け" } },
+            { event: "delta", data: { delta: "答え" } },
+            { event: "done", data: { assistantMessageId: "a1" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    const assistant = result.current.messages[1];
+    expect(assistant.content).toBe("答え");
+    expect(assistant.thinking).toBe("考え中…続け");
+  });
+
   it("空文字・ストリーミング中は送信しない", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
@@ -211,6 +248,129 @@ describe("useChat — 送信", () => {
     expect(result.current.error).toBe("boom");
     expect(result.current.messages[1].content).toBe("partial");
   });
+
+  it("sources イベントで参照元 state を更新", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            messages: [],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u1" } },
+            {
+              event: "sources",
+              data: {
+                sources: [
+                  { url: "https://example.com/a", title: "Source A", snippet: "snip a" },
+                  { url: "https://example.com/b", title: "Source B", snippet: "snip b" },
+                ],
+              },
+            },
+            { event: "delta", data: { delta: "answer" } },
+            { event: "done", data: { assistantMessageId: "a1" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.sources).toHaveLength(2);
+    expect(result.current.sources[0].url).toBe("https://example.com/a");
+    expect(result.current.sources[0].title).toBe("Source A");
+    expect(result.current.sources[1].url).toBe("https://example.com/b");
+  });
+
+  it("status イベントで assistant メッセージに statusLabel を設定し delta でクリア", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            messages: [],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u1" } },
+            { event: "status", data: { phase: "searching", label: "Web検索中…" } },
+            { event: "status", data: { phase: "thinking", label: "考え中…" } },
+            { event: "delta", data: { delta: "hello" } },
+            { event: "done", data: { assistantMessageId: "a1" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    // assistant メッセージ（user の次）の statusLabel は delta 受信後にクリア済み
+    const assistant = result.current.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.content).toBe("hello");
+    expect(assistant!.statusLabel).toBeUndefined();
+  });
+
+  it("status イベントで statusLabel が messages に伝播し thinking 受信後も保持", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            messages: [],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u1" } },
+            { event: "status", data: { phase: "thinking", label: "考え中…" } },
+            { event: "thinking", data: { delta: "推論" } },
+            // delta（回答本文）を送らずに done — statusLabel が保持されたまま終了
+            { event: "done", data: { assistantMessageId: "a1" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    const assistant = result.current.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant!.thinking).toBe("推論");
+    // thinking 受信後も statusLabel は "考え中…" のまま（Step 1 + buildChain コピーの効果）
+    expect(assistant!.statusLabel).toBe("考え中…");
+  });
 });
 
 describe("useChat — stop / clear", () => {
@@ -220,7 +380,7 @@ describe("useChat — stop / clear", () => {
       if (url === `/api/threads/${id}`) {
         return Promise.resolve(
           threadResponse({
-            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: null },
             messages: [],
           }),
         );
@@ -245,8 +405,8 @@ describe("useChat — stop / clear", () => {
     const id = await createThreadInDb();
     fetchMock().mockResolvedValue(
       threadResponse({
-        thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
-        messages: [{ id: "m1", role: "user", content: "hi" }],
+        thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: "m1" },
+        messages: [{ id: "m1", parentId: null, role: "user", content: "hi" }],
       }),
     );
     const { result } = renderHook(() => useChat(id));
@@ -257,5 +417,133 @@ describe("useChat — stop / clear", () => {
     });
     expect(result.current.messages).toHaveLength(0);
     expect(result.current.error).toBeNull();
+  });
+});
+
+describe("useChat — 枝分かれ", () => {
+  it("getSiblingInfo: 兄弟がある場合は siblings と index を返す", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockResolvedValue(
+      threadResponse({
+        thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: "a2" },
+        messages: [
+          { id: "u1", parentId: null, role: "user", content: "hi" },
+          { id: "a1", parentId: "u1", role: "assistant", content: "answer1" },
+          { id: "a2", parentId: "u1", role: "assistant", content: "answer2" },
+        ],
+      }),
+    );
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // currentLeafId = "a2" なので表示されるのは u1 → a2
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1].content).toBe("answer2");
+
+    // a1 と a2 は兄弟（同じ parentId "u1"）
+    const info = result.current.getSiblingInfo("a2");
+    expect(info.siblings).toHaveLength(2);
+    expect(info.currentIndex).toBeGreaterThanOrEqual(0);
+  });
+
+  it("switchBranch: 別の枝に切り替える", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockResolvedValue(
+      threadResponse({
+        thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: "a2" },
+        messages: [
+          { id: "u1", parentId: null, role: "user", content: "hi" },
+          { id: "a1", parentId: "u1", role: "assistant", content: "answer1" },
+          { id: "a2", parentId: "u1", role: "assistant", content: "answer2" },
+        ],
+      }),
+    );
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.messages[1].content).toBe("answer2");
+
+    act(() => {
+      result.current.switchBranch("a1");
+    });
+
+    // a1 に切り替わる
+    expect(result.current.messages[1].content).toBe("answer1");
+  });
+
+  it("regenerate: ユーザーメッセージの下に新しい assistant を生成", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: "a1" },
+            messages: [
+              { id: "u1", parentId: null, role: "user", content: "hi" },
+              { id: "a1", parentId: "u1", role: "assistant", content: "old answer" },
+            ],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: {} },
+            { event: "delta", data: { delta: "new" } },
+            { event: "done", data: { assistantMessageId: "a2" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.regenerate("u1");
+    });
+
+    // 新しい assistant メッセージが表示される
+    expect(result.current.messages[1].content).toBe("new");
+    expect(result.current.thread?.currentLeafId).toBe("a2");
+  });
+
+  it("editMessage: ユーザーメッセージを編集して新しい枝を作成", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: "a1" },
+            messages: [
+              { id: "u1", parentId: null, role: "user", content: "hi" },
+              { id: "a1", parentId: "u1", role: "assistant", content: "old" },
+            ],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u2" } },
+            { event: "delta", data: { delta: "edited" } },
+            { event: "done", data: { assistantMessageId: "a2" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.editMessage("u1", "edited question");
+    });
+
+    // 新しい user メッセージ + 新しい assistant が表示される
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[0].content).toBe("edited question");
+    expect(result.current.messages[1].content).toBe("edited");
   });
 });

@@ -8,6 +8,27 @@
       "when": 1781703445526,
       "tag": "0000_colossal_moondragon",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781710888084,
+      "tag": "0001_clumsy_vance_astro",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781746893978,
+      "tag": "0002_abandoned_nocturne",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781766016914,
+      "tag": "0003_curved_namora",
+      "breakpoints": true
     }
   ]
 }

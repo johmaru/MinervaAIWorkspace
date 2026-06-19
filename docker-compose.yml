@@ -26,15 +26,78 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      embedder:
+        condition: service_started
+    # ホストの .env をマウント: GUI で設定変更した .env が
+    # 再ビルド後も保持される（イメージに焼き込まれない）
+    volumes:
+      - ./.env:/app/.env
+      # Tor コンテナ起動/停止用: Docker socket + compose ファイルをマウント
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgres://umans:umans@db:5432/umanschat
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      EMBED_MODEL: ${EMBED_MODEL:-text-embedding-3-small}
-      EMBED_DIM: ${EMBED_DIM:-1536}
+      SCRAPER_URL: http://scraper:8000
+      SEARXNG_URL: http://searxng:8080
+      EMBEDDER_URL: http://embedder:8001
+      # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY は
+      # .env ファイルから読み込む（GUI 書き換え対応）
     ports:
       - "3001:3000"
 
+  scraper:
+    build:
+      context: ./scraper
+      dockerfile: Dockerfile
+    container_name: umanschat-scraper
+    restart: unless-stopped
+    expose:
+      - "8000"
+    depends_on:
+      - searxng
+    environment:
+      SCRAPE_TIMEOUT: ${SCRAPE_TIMEOUT:-30}
+      SEARXNG_URL: http://searxng:8080
+      SCRAPE_PROXY: ${SCRAPE_PROXY:-}
+
+  embedder:
+    build:
+      context: ./embedder
+      dockerfile: Dockerfile
+    container_name: umanschat-embedder
+    restart: unless-stopped
+    expose:
+      - "8001"
+    environment:
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-LiquidAI/LFM2.5-Embedding-350M}
+    volumes:
+      - umanschat-embedder-hf:/root/.cache/huggingface
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: umanschat-searxng
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080
+    depends_on:
+      - tor
+
+  tor:
+    image: dperson/torproxy:latest
+    container_name: umanschat-tor
+    restart: unless-stopped
+    expose:
+      - "9050"
+      - "9051"
+    environment:
+      - TORPASSWORD=umanschat-tor-control
+
 volumes:
   umanschat-db:
+  umanschat-embedder-hf:

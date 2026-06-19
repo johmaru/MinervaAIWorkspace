@@ -1,0 +1,257 @@
+"""scraper/main.py の単体テスト。
+
+ネットワーク不要テスト（parse_robots_txt, extract_text, extract_title）と
+実URLテスト（/scrape エンドポイント、SCRAPE_TEST_URL env で制御）。
+"""
+import asyncio
+import os
+
+import pytest
+from fastapi.testclient import TestClient
+
+from main import app, extract_text, is_safe_host, parse_robots_txt, scrape_url_safe
+from scrapling.parser import Adaptor
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+# --- parse_robots_txt ---
+
+class TestParseRobotsTxt:
+    def test_disallow_paths_from_wildcard_block(self):
+        text = """User-agent: *
+Disallow: /private
+Disallow: /admin/
+User-agent: GoogleBot
+Disallow: /google-only"""
+        rules = parse_robots_txt(text)
+        assert "/private" in rules["disallow_paths"]
+        assert "/admin/" in rules["disallow_paths"]
+        assert "/google-only" not in rules["disallow_paths"]
+
+    def test_empty_robots_txt(self):
+        assert parse_robots_txt("")["disallow_paths"] == []
+
+    def test_comments_and_blank_lines_ignored(self):
+        text = """# comment
+
+User-agent: *
+# inline comment
+Disallow: /blocked"""
+        assert parse_robots_txt(text)["disallow_paths"] == ["/blocked"]
+
+    def test_empty_disallow_ignored(self):
+        text = """User-agent: *
+Disallow:"""
+        assert parse_robots_txt(text)["disallow_paths"] == []
+
+
+# --- extract_text / extract_title ---
+
+def make_adaptor(html: str) -> Adaptor:
+    return Adaptor(html, url="http://example.com/")
+
+
+class TestExtractText:
+    def test_main_priority_over_article_and_body(self):
+        html = """<html><body>
+        <main><p>main content</p></main>
+        <article><p>article content</p></article>
+        </body></html>"""
+        text = extract_text(make_adaptor(html))
+        assert "main content" in text
+        assert "article content" not in text
+
+    def test_article_fallback_when_no_main(self):
+        html = """<html><body>
+        <article><p>article content</p></article>
+        </body></html>"""
+        text = extract_text(make_adaptor(html))
+        assert "article content" in text
+
+    def test_body_fallback_when_no_main_no_article(self):
+        html = """<html><body><p>body content</p></body></html>"""
+        text = extract_text(make_adaptor(html))
+        assert "body content" in text
+
+    def test_ignore_tags_removed(self):
+        html = """<html><body>
+        <main>
+            <script>alert('x')</script>
+            <style>body{color:red}</style>
+            <nav>navigation</nav>
+            <footer>footer text</footer>
+            <p>real content</p>
+        </main>
+        </body></html>"""
+        text = extract_text(make_adaptor(html))
+        assert "real content" in text
+        assert "alert" not in text
+        assert "navigation" not in text
+        assert "footer text" not in text
+
+    def test_truncates_at_max_length(self, monkeypatch):
+        import main as main_module
+        monkeypatch.setattr(main_module, "MAX_CONTENT_LENGTH", 50)
+        html = f"<html><body><main><p>{'x' * 200}</p></main></body></html>"
+        text = extract_text(make_adaptor(html))
+        assert len(text) <= 50
+
+    def test_empty_html_returns_empty(self):
+        text = extract_text(make_adaptor("<html><body></body></html>"))
+        assert text == ""
+
+
+class TestExtractTitle:
+    def test_title_tag(self):
+        from main import extract_title
+        html = "<html><head><title>Page Title</title></head><body></body></html>"
+        assert extract_title(make_adaptor(html)) == "Page Title"
+
+    def test_og_title_fallback(self):
+        from main import extract_title
+        html = """<html><head>
+        <meta property="og:title" content="OG Title">
+        </head><body></body></html>"""
+        assert extract_title(make_adaptor(html)) == "OG Title"
+
+    def test_no_title_returns_empty(self):
+        from main import extract_title
+        html = "<html><body><p>no title here</p></body></html>"
+        assert extract_title(make_adaptor(html)) == ""
+
+
+# --- /scrape endpoint ---
+
+class TestScrapeEndpoint:
+    def test_invalid_scheme_returns_400(self, client):
+        resp = client.post("/scrape", json={"url": "ftp://example.com"})
+        assert resp.status_code == 400
+
+    def test_missing_url_returns_422(self, client):
+        # Pydantic バリデーション
+        resp = client.post("/scrape", json={})
+        assert resp.status_code == 422
+
+    def test_real_url(self, client):
+        url = os.environ.get("SCRAPE_TEST_URL")
+        if not url:
+            pytest.skip("SCRAPE_TEST_URL env not set")
+        resp = client.post("/scrape", json={"url": url})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == 200
+        assert data["url"]
+        assert isinstance(data["content"], str)
+        assert len(data["content"]) > 0
+
+
+# --- is_safe_host (SSRF protection) ---
+
+class TestIsSafeHost:
+    def test_loopback_ipv4_rejected(self):
+        assert is_safe_host("127.0.0.1") is False
+
+    def test_loopback_ipv6_rejected(self):
+        assert is_safe_host("::1") is False
+
+    def test_private_10_rejected(self):
+        assert is_safe_host("10.0.0.1") is False
+
+    def test_private_172_rejected(self):
+        assert is_safe_host("172.16.0.1") is False
+
+    def test_private_192_rejected(self):
+        assert is_safe_host("192.168.1.1") is False
+
+    def test_link_local_rejected(self):
+        assert is_safe_host("169.254.169.254") is False
+
+    def test_unspecified_rejected(self):
+        assert is_safe_host("0.0.0.0") is False
+
+    def test_decimal_ip_rejected(self):
+        # 3232235521 = 192.0.0.1 → private
+        assert is_safe_host("3232235521") is False
+
+    def test_nonexistent_domain_rejected(self):
+        # fail-closed: DNS解決失敗は不許可
+        assert is_safe_host("nonexistent-xyz-invalid.test") is False
+
+    def test_public_domain_allowed(self):
+        # example.com は公開IPに解決されるはず
+        assert is_safe_host("example.com") is True
+
+
+class TestScrapeEndpointSSRF:
+    def test_loopback_blocked(self, client):
+        resp = client.post("/scrape", json={"url": "http://127.0.0.1:5432/"})
+        assert resp.status_code == 400
+        assert "private or reserved IP" in resp.json()["error"]
+
+    def test_metadata_endpoint_blocked(self, client):
+        resp = client.post("/scrape", json={"url": "http://169.254.169.254/latest/meta-data/"})
+        assert resp.status_code == 400
+        assert "private or reserved IP" in resp.json()["error"]
+
+    def test_decimal_ip_blocked(self, client):
+        resp = client.post("/scrape", json={"url": "http://3232235521/"})
+        assert resp.status_code == 400
+        assert "private or reserved IP" in resp.json()["error"]
+
+
+# --- /search endpoint ---
+
+class TestSearchEndpoint:
+    def test_empty_query_returns_400(self, client):
+        resp = client.post("/search", json={"query": "   "})
+        assert resp.status_code == 400
+        assert "query is required" in resp.json()["error"]
+
+    def test_missing_query_returns_422(self, client):
+        # Pydantic バリデーション
+        resp = client.post("/search", json={})
+        assert resp.status_code == 422
+
+    def test_searxng_unreachable_returns_502(self, client, monkeypatch):
+        # SearXNG が未起動/無効アドレス → 502
+        monkeypatch.setenv("SEARXNG_URL", "http://invalid-searxng-host:8080")
+        resp = client.post("/search", json={"query": "python programming", "max_results": 3})
+        assert resp.status_code == 502
+        assert "search failed" in resp.json()["error"]
+
+    def test_real_search(self, client):
+        query = os.environ.get("SEARCH_TEST_QUERY")
+        if not query:
+            pytest.skip("SEARCH_TEST_QUERY env not set")
+        resp = client.post("/search", json={"query": query, "max_results": 3})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["query"] == query
+        assert isinstance(data["results"], list)
+        for r in data["results"]:
+            assert "url" in r
+            assert "title" in r
+            assert "snippet" in r
+            assert "scraped" in r
+            assert "content" in r
+            assert "scrape_title" in r
+
+
+# --- scrape_url_safe (SSRF protection wrapper) ---
+
+class TestScrapeUrlSafe:
+    def test_invalid_scheme_returns_empty(self):
+        result = asyncio.run(scrape_url_safe("ftp://example.com"))
+        assert result == {}
+
+    def test_loopback_blocked_returns_empty(self):
+        result = asyncio.run(scrape_url_safe("http://127.0.0.1:5432/"))
+        assert result == {}
+
+    def test_metadata_endpoint_blocked_returns_empty(self):
+        result = asyncio.run(scrape_url_safe("http://169.254.169.254/latest/meta-data/"))
+        assert result == {}

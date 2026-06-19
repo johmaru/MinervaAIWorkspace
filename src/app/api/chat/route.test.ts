@@ -1,10 +1,22 @@
 // @vitest-environment node
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { threads } from "@/db/schema";
+import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { POST } from "@/app/api/chat/route";
 
+// searchWeb / upsertPage をモック: SearXNG/DB副作用なしで sources イベントを検証
+vi.mock("@/lib/scraper", () => ({
+  searchWeb: vi.fn(),
+  scrapeUrl: vi.fn(),
+  normalizeUrl: (u: string) => u,
+  SourceInfo: {} as never,
+}));
+vi.mock("@/lib/pageStore", () => ({
+  upsertPage: vi.fn().mockResolvedValue("mock-page-id"),
+}));
+
+import { searchWeb } from "@/lib/scraper";
+import { POST } from "@/app/api/chat/route";
 // Phase 2: /api/chat は DB 永続化 + 実 API ストリーミング。
 // .env の LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を使用（vitest.setup.ts で読み込み済み）。
 // テストごとにスレッドを作成し、afterAll で掃除。
@@ -13,10 +25,14 @@ const hasCreds = Boolean(process.env.LLM_BASE_URL && process.env.LLM_API_KEY);
 const itReal = hasCreds ? it : it.skip;
 
 const createdIds: string[] = [];
+const createdFolderIds: string[] = [];
 
 afterAll(async () => {
   for (const id of createdIds) {
     await db.delete(threads).where(eq(threads.id, id));
+  }
+  for (const id of createdFolderIds) {
+    await db.delete(folders).where(eq(folders.id, id));
   }
 });
 
@@ -142,5 +158,43 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
     const [row] = await db.select().from(threads).where(eq(threads.id, id));
     expect(row).toBeDefined();
     expect(row!.title).toContain("日本の首都");
+  }, 60_000);
+});
+
+describe("POST /api/chat — Web 検索 sources イベント", () => {
+  itReal("送信時に searchWeb を呼び sources イベントを送信", async () => {
+    const id = await createThread();
+
+    vi.mocked(searchWeb).mockResolvedValueOnce({
+      query: "python",
+      results: [
+        {
+          url: "https://example.com/python",
+          title: "Python",
+          snippet: "Python is a programming language",
+          scraped: true,
+          content: "Python is a high-level programming language.",
+          scrapeTitle: "Python",
+        },
+      ],
+    });
+
+    const res = await POST(chatReq(id, "Pythonとは何ですか？"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    const sources = events.filter((e) => e.event === "sources");
+    expect(sources).toHaveLength(1);
+    const srcs = sources[0].data.sources as Array<{ url: string; title: string }>;
+    expect(srcs).toHaveLength(1);
+    expect(srcs[0].url).toBe("https://example.com/python");
+    expect(srcs[0].title).toBe("Python");
+
+    // start → sources → ... → done の順序（sources は start の直後）
+    const startIdx = events.findIndex((e) => e.event === "start");
+    const sourcesIdx = events.findIndex((e) => e.event === "sources");
+    expect(sourcesIdx).toBeGreaterThan(startIdx);
   }, 60_000);
 });

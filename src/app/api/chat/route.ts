@@ -1,7 +1,8 @@
 import { and, asc, eq } from "drizzle-orm";
-import { createLLM, defaultModel, type ChatMessage } from "@/lib/llm";
+import { createLLM, defaultModel } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads } from "@/db/schema";
+import { getRequestLocale, t } from "@/lib/i18n";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,7 @@ type Body = {
  * Phase 2 は flat 線形会話（parent_id = NULL）。Phase 5 でツリー化する。
  */
 export async function POST(req: Request) {
+  const locale = getRequestLocale(req);
   let body: Body;
   try {
     body = (await req.json()) as Body;
@@ -65,11 +67,11 @@ export async function POST(req: Request) {
   const model = body.model ?? thread.model ?? defaultModel();
 
   const systemContent = thread.systemPrompt ?? body.systemPrompt;
-  const llmMessages: ChatMessage[] = [
-    ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
-    ...history.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
-    { role: "user" as const, content },
-  ];
+    const llmMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
+      ...history.map((m) => ({ role: m.role, content: m.content })),
+      { role: "user" as const, content },
+    ];
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -110,7 +112,7 @@ export async function POST(req: Request) {
             .values({ threadId: body.threadId, role: "assistant", content: assistantContent })
             .returning();
         }
-        send("error", { message: err instanceof Error ? err.message : "stream error" });
+        send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") });
       } finally {
         // スレッドの更新日時を更新
         await db

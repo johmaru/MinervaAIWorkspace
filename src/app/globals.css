@@ -1,23 +1,82 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --muted: #f5f5f5;
-  --muted-foreground: #6b7280;
-  --border: #e5e7eb;
-  --accent: #2563eb;
+  --background: #f7f7f8;
+  --foreground: #0c0c0f;
+  --muted: #ededf0;
+  --muted-foreground: #5a5a66;
+  --border: rgba(12, 12, 15, 0.08);
+  --accent: #4b5563;
   --accent-foreground: #ffffff;
+  --focus-ring: #4b5563;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(12, 12, 15, 0.06);
+  --glow: rgba(75, 85, 99, 0.10);
+  --card: #ffffff;
+  --card-foreground: #0c0c0f;
+  --popover: #ffffff;
+  --popover-foreground: #0c0c0f;
+  --primary: #4b5563;
+  --primary-foreground: #ffffff;
+  --secondary: #ededf0;
+  --secondary-foreground: #0c0c0f;
+  --destructive: oklch(0.577 0.245 27.325);
+  --input: rgba(12, 12, 15, 0.06);
+  --ring: #4b5563;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: #f2f2f4;
+  --sidebar-foreground: #0c0c0f;
+  --sidebar-primary: #4b5563;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ededf0;
+  --sidebar-accent-foreground: #0c0c0f;
+  --sidebar-border: rgba(12, 12, 15, 0.08);
+  --sidebar-ring: #4b5563;
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --muted: #171717;
-  --muted-foreground: #9ca3af;
-  --border: #262626;
-  --accent: #3b82f6;
-  --accent-foreground: #ffffff;
+  --background: #08090c;
+  --foreground: #e6e7eb;
+  --muted: #14151a;
+  --muted-foreground: #8a8b95;
+  --border: rgba(255, 255, 255, 0.06);
+  --accent: #9ca3af;
+  --accent-foreground: #08090c;
+  --focus-ring: #9ca3af;
+  --glass-bg: rgba(20, 21, 26, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --glow: rgba(156, 163, 175, 0.12);
+  --card: #14151a;
+  --card-foreground: #e6e7eb;
+  --popover: #14151a;
+  --popover-foreground: #e6e7eb;
+  --primary: #9ca3af;
+  --primary-foreground: #08090c;
+  --secondary: #14151a;
+  --secondary-foreground: #e6e7eb;
+  --destructive: oklch(0.704 0.191 22.216);
+  --input: rgba(255, 255, 255, 0.06);
+  --ring: #9ca3af;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: #0d0e12;
+  --sidebar-foreground: #e6e7eb;
+  --sidebar-primary: #9ca3af;
+  --sidebar-primary-foreground: #08090c;
+  --sidebar-accent: #14151a;
+  --sidebar-accent-foreground: #e6e7eb;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: #9ca3af;
 }
 
 @theme inline {
@@ -28,8 +87,44 @@
   --color-border: var(--border);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  --font-sans: var(--font-geist-sans);
+  --color-focus-ring: var(--focus-ring);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+  --color-glow: var(--glow);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-destructive: var(--destructive);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 html,
@@ -38,13 +133,167 @@ body {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background-color: var(--background);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* 低速ドリフトする極彩色オーロラ: 疑似要素で分離しコンテンツ再描画コストなし */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 60% 50% at 10% 10%, rgba(34, 211, 238, 0.07), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 90% 15%, rgba(232, 121, 249, 0.06), transparent 60%),
+    radial-gradient(ellipse 65% 55% at 50% 95%, rgba(251, 191, 36, 0.05), transparent 60%);
+  background-size: 180% 180%, 160% 160%, 200% 200%;
+  background-repeat: no-repeat;
+  animation: aurora-drift 30s ease-in-out infinite;
+}
+
+/* ダーク背景ではオーロラの alpha を高めて可視性を確保 */
+.dark body::before {
+  background-image:
+    radial-gradient(ellipse 60% 50% at 10% 10%, rgba(34, 211, 238, 0.10), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 90% 15%, rgba(232, 121, 249, 0.09), transparent 60%),
+    radial-gradient(ellipse 65% 55% at 50% 95%, rgba(251, 191, 36, 0.08), transparent 60%);
 }
 
 /* 細いスクロールバー（ミニマル） */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+}
+
+/* Tailwind v4: class ベースのダークモードを有効化 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* アニメーションキーフレーム */
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* 低速ドリフトオーロラ: background-position を二次元的に緩やかに移動 */
+@keyframes aurora-drift {
+  0% {
+    background-position: 0% 0%, 100% 0%, 50% 100%;
+  }
+  33% {
+    background-position: 50% 30%, 50% 60%, 30% 70%;
+  }
+  66% {
+    background-position: 100% 60%, 0% 100%, 70% 30%;
+  }
+  100% {
+    background-position: 0% 0%, 100% 0%, 50% 100%;
+  }
+}
+
+/* prefers-reduced-motion: 装飾アニメーションを無効化。
+   ローディングスピナーは状態フィードバックのため回転を維持。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* ローディング状態のスピナーは回転を維持（フィードバック欠如より UX 上重大） */
+  .loading-spinner {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* Markdown レンダリングの調整 */
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* highlight.js: ライトモードで github-dark テーマの背景を上書き */
+:not(.dark) .hljs {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+/* KaTeX: ダークモードで数式の色を foreground に合わせる */
+.dark .katex {
+  color: var(--foreground);
+}
+
+/* キーボードフォーカスの視認性（a11y） */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* マウスクリック時はアウトライン抑制 */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* モバイル: メッセージバブルの最大幅を広げる */
+@media (max-width: 640px) {
+  .markdown-body {
+    font-size: 0.875rem;
+  }
+}
+
+/* ダークモード: コードブロックの境界を明確化 */
+.dark .hljs {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* テーブルの水平スクロール */
+.markdown-body table {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* カード/バブルの内側ハイライト + 外側微光 */
+.glass-card {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.02),
+    0 4px 24px -8px rgba(0, 0, 0, 0.4);
+}
+.dark .glass-card {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.03),
+    0 4px 24px -8px rgba(0, 0, 0, 0.5);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
 }
