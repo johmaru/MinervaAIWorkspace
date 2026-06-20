@@ -1,10 +1,10 @@
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// searchWeb / upsertPage をモック: SearXNG/DB副作用なしで sources イベントを検証
+// searchWeb / upsertPage / decideSearch をモック: SearXNG/DB/LLM副作用なしで sources イベントを検証
 vi.mock("@/lib/scraper", () => ({
   searchWeb: vi.fn(),
   scrapeUrl: vi.fn(),
@@ -14,9 +14,37 @@ vi.mock("@/lib/scraper", () => ({
 vi.mock("@/lib/pageStore", () => ({
   upsertPage: vi.fn().mockResolvedValue("mock-page-id"),
 }));
+vi.mock("@/lib/searchDecision", () => ({
+  decideSearch: vi.fn(),
+}));
+vi.mock("@/lib/memoryStore", () => ({
+  buildMemoryContext: vi.fn(),
+}));
+vi.mock("@/lib/memory", () => ({
+  generateMemories: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { searchWeb } from "@/lib/scraper";
+import { decideSearch } from "@/lib/searchDecision";
+import { buildMemoryContext } from "@/lib/memoryStore";
 import { POST } from "@/app/api/chat/route";
+
+// テスト間でモックの呼び出し履歴・戻り値をリセット（leak 防止）
+beforeEach(() => {
+  vi.mocked(searchWeb).mockReset();
+  vi.mocked(decideSearch).mockReset();
+  vi.mocked(buildMemoryContext).mockReset();
+  // デフォルト: 検索不要（通常チャットのテストで実 LLM ルーターを呼ばない）
+  vi.mocked(decideSearch).mockResolvedValue({
+    needsSearch: false,
+    reason: "default mock",
+    userNotice: null,
+    queries: [],
+  });
+  // デフォルト: 記憶なし（null = 注入しない）
+  vi.mocked(buildMemoryContext).mockResolvedValue(null);
+});
+
 // Phase 2: /api/chat は DB 永続化 + 実 API ストリーミング。
 // .env の LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を使用（vitest.setup.ts で読み込み済み）。
 // テストごとにスレッドを作成し、afterAll で掃除。
@@ -162,11 +190,19 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
 });
 
 describe("POST /api/chat — Web 検索 sources イベント", () => {
-  itReal("送信時に searchWeb を呼び sources イベントを送信", async () => {
+  itReal("検索判定 → status → sources の順でイベントを送信", async () => {
     const id = await createThread();
 
+    // 検索判定ルーターをモック: needsSearch:true でクエリを返す
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      needsSearch: true,
+      reason: "latest info",
+      userNotice: "最新情報を確認するね。",
+      queries: ["python programming language"],
+    });
+
     vi.mocked(searchWeb).mockResolvedValueOnce({
-      query: "python",
+      query: "python programming language",
       results: [
         {
           url: "https://example.com/python",
@@ -185,6 +221,12 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
+    // status イベント（userNotice）が送信される
+    const statusEvents = events.filter((e) => e.event === "status");
+    expect(statusEvents.length).toBeGreaterThanOrEqual(1);
+    expect(statusEvents[0].data.label).toBe("最新情報を確認するね。");
+
+    // sources イベント
     const sources = events.filter((e) => e.event === "sources");
     expect(sources).toHaveLength(1);
     const srcs = sources[0].data.sources as Array<{ url: string; title: string }>;
@@ -192,9 +234,68 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     expect(srcs[0].url).toBe("https://example.com/python");
     expect(srcs[0].title).toBe("Python");
 
-    // start → sources → ... → done の順序（sources は start の直後）
+    // start → status → sources → ... → done の順序
     const startIdx = events.findIndex((e) => e.event === "start");
+    const statusIdx = events.findIndex((e) => e.event === "status");
     const sourcesIdx = events.findIndex((e) => e.event === "sources");
-    expect(sourcesIdx).toBeGreaterThan(startIdx);
+    expect(statusIdx).toBeGreaterThan(startIdx);
+    expect(sourcesIdx).toBeGreaterThan(statusIdx);
+  }, 60_000);
+
+  itReal("検索不要時は status/sources イベントを出さない", async () => {
+    const id = await createThread();
+
+    // 検索判定ルーターをモック: needsSearch:false
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      needsSearch: false,
+      reason: "stable knowledge",
+      userNotice: null,
+      queries: [],
+    });
+
+    const res = await POST(chatReq(id, "Pythonのリスト内包表記を教えて"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // status / sources は出ない
+    expect(events.filter((e) => e.event === "status")).toHaveLength(0);
+    expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
+    // searchWeb は呼ばれない
+    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
+  }, 60_000);
+});
+
+describe("POST /api/chat — 記憶注入", () => {
+  itReal("記憶がある場合、LLM への messages に memory system message が含まれる", async () => {
+    const id = await createThread();
+
+    // 記憶注入をモック: 記憶あり
+    vi.mocked(buildMemoryContext).mockResolvedValueOnce({
+      role: "system",
+      content: "Past memories from previous conversations (use when relevant, ignore if not):\n- [fact] User uses FPGA",
+    });
+
+    const res = await POST(chatReq(id, "私の得意分野は？"));
+    expect(res.status).toBe(200);
+
+    // ストリームを消費してからアサート（buildMemoryContext は start() 内で呼ばれる）
+    await sseChunks(res);
+
+    // buildMemoryContext が呼ばれた
+    expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
+  }, 60_000);
+
+  itReal("記憶が無い場合は buildMemoryContext が呼ばれるが null を返す", async () => {
+    const id = await createThread();
+
+    // 記憶なし（デフォルト mock のまま）
+    const res = await POST(chatReq(id, "こんにちは"));
+    expect(res.status).toBe(200);
+
+    await sseChunks(res);
+    // buildMemoryContext は呼ばれる（結果は null）
+    expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
   }, 60_000);
 });

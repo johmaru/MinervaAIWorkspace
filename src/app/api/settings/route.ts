@@ -63,21 +63,27 @@ export function getEmbedModelOptions(locale: Locale) {
 export { EMBED_MODEL_BASE };
 
 /**
- * embeddings テーブルの vector 列の次元を取得。
+ * 指定テーブルの vector 列の次元を取得。
  * 行が存在する場合は vector_dims() で、空の場合は列の宣言型（vector(N)）から取得。
  * どちらも取得できない場合は 0。
+ *
+ * table は "memories" | "page_embeddings" のみ（呼び出し元で固定）。
+ * FROM ${tableName} は sql.raw で識別子を埋め込むため、引数を union 型にして
+ * 型レベルで安全を保証する。
  */
-async function getVectorDim(): Promise<number> {
+async function getTableVectorDim(table: "memories" | "page_embeddings"): Promise<number> {
+  const tableName = table === "page_embeddings" ? sql.raw("page_embeddings") : sql.raw("memories");
   try {
     // 行があれば vector_dims() で実次元
-    const result = await db.execute(sql`SELECT vector_dims(embedding) as dim FROM embeddings LIMIT 1`);
+    const result = await db.execute(sql`SELECT vector_dims(embedding) as dim FROM ${tableName} LIMIT 1`);
     const rows = (result as { rows?: Array<{ dim: number }> }).rows;
     if (rows && rows.length > 0) return rows[0].dim;
-    // 行が空でも列の宣言型 vector(N) から次元を取得
+    // 行が空でも列の宣言型 vector(N) から次元を取得。
+    // ${table} は文字列リテラルとして bind され '::regclass' でキャストされるため安全。
     const colResult = await db.execute(sql`
       SELECT format_type(atttypid, atttypmod) as ty
       FROM pg_attribute
-      WHERE attrelid = 'embeddings'::regclass AND attname = 'embedding'
+      WHERE attrelid = ${table}::regclass AND attname = 'embedding'
     `);
     const colRows = (colResult as { rows?: Array<{ ty: string }> }).rows;
     if (colRows && colRows.length > 0) {
@@ -91,17 +97,30 @@ async function getVectorDim(): Promise<number> {
 }
 
 /**
+ * memories / page_embeddings 両テーブルの vector 列次元を取得。
+ * 検索クエリは両テーブルを横断するため、次元不整合を両方で検出する必要がある。
+ */
+async function getVectorDim(): Promise<{ memories: number; pageEmbeddings: number }> {
+  const [memories, pageEmbeddings] = await Promise.all([
+    getTableVectorDim("memories"),
+    getTableVectorDim("page_embeddings"),
+  ]);
+  return { memories, pageEmbeddings };
+}
+
+
+/**
  * GET /api/settings — 現在の全設定 + 候補リストを返す。
  */
 export async function GET(req: Request) {
   const locale = getRequestLocale(req);
-  const dbVectorDim = await getVectorDim();
+  const dbVectorDim = (await getVectorDim()).memories;
 
   return Response.json({
     // LLM
     llmBaseUrl: process.env.LLM_BASE_URL || "",
     llmApiKey: process.env.LLM_API_KEY || "",
-    llmModel: process.env.LLM_MODEL || "gpt-4o-mini",
+    llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
     llmModels: process.env.LLM_MODELS || "",
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
     // Embeddings
@@ -112,6 +131,7 @@ export async function GET(req: Request) {
     dbVectorDim,
     // Web 検索
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
+    webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2,
     scraperUrl: process.env.SCRAPER_URL || "http://localhost:8000",
     searxngUrl: process.env.SEARXNG_URL || "http://localhost:8080",
     // Tor プロキシ
@@ -135,6 +155,7 @@ type SettingsBody = {
   embedProvider?: string;
   // Web 検索
   webSearchMaxResults?: number;
+  webSearchMaxRounds?: number;
   scraperUrl?: string;
   searxngUrl?: string;
   // Tor プロキシ
@@ -167,14 +188,24 @@ export async function POST(req: Request) {
   if (body.webSearchMaxResults && (body.webSearchMaxResults < 1 || body.webSearchMaxResults > 20)) {
     return new Response("webSearchMaxResults must be 1-20", { status: 400 });
   }
+  if (body.webSearchMaxRounds !== undefined && (body.webSearchMaxRounds < 1 || body.webSearchMaxRounds > 5)) {
+    return new Response("webSearchMaxRounds must be 1-5", { status: 400 });
+  }
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
-  const dbVectorDim = await getVectorDim();
+  const dims = await getVectorDim();
+  const dbVectorDim = dims.memories;
 
   // 新しい次元を決定
   const newDim = body.embedDim ?? Number(process.env.EMBED_DIM) ?? 384;
-  const needsMigration = dbVectorDim > 0 && dbVectorDim !== newDim;
+  // 両テーブルの次元が newDim と一致しない、または互いに不一致なら要マイグレーション。
+  // 検索クエリは memories と page_embeddings を横断するため、片方だけずれても
+  // "different vector dimensions" エラーになる。
+  const needsMigration =
+    (dims.memories > 0 && dims.memories !== newDim) ||
+    (dims.pageEmbeddings > 0 && dims.pageEmbeddings !== newDim) ||
+    (dims.memories > 0 && dims.pageEmbeddings > 0 && dims.memories !== dims.pageEmbeddings);
 
   if (needsMigration && !body.applyMigration) {
     return Response.json(
@@ -192,17 +223,21 @@ export async function POST(req: Request) {
     // newDim は 1-4096 の整数としてバリデーション済み。DDL の型修飾子
     // vector(N) は bind parameter を許可しないため raw で埋め込む。
     const dim = sql.raw(String(newDim));
-    await db.execute(sql`DROP INDEX IF EXISTS "embeddings_embedding_hnsw"`);
+    // 1. インデックス削除（列削除前に依存を解除）
+    await db.execute(sql`DROP INDEX IF EXISTS "memories_embedding_hnsw"`);
     await db.execute(sql`DROP INDEX IF EXISTS "page_embeddings_embedding_hnsw"`);
-    await db.execute(sql`ALTER TABLE "embeddings" DROP COLUMN "embedding"`);
-    await db.execute(sql`ALTER TABLE "embeddings" ADD COLUMN "embedding" vector(${dim}) NOT NULL`);
+    // 2. 既存ベクトルデータを全削除（次元が変わるため変換不可）。
+    //    先に削除することで、空テーブルに対する ADD COLUMN ... NOT NULL が成功する。
+    await db.execute(sql`DELETE FROM memories`);
+    await db.execute(sql`DELETE FROM page_embeddings`);
+    // 3. 列を再作成（テーブルが空なので NOT NULL でも失敗しない）
+    await db.execute(sql`ALTER TABLE "memories" DROP COLUMN "embedding"`);
+    await db.execute(sql`ALTER TABLE "memories" ADD COLUMN "embedding" vector(${dim}) NOT NULL`);
     await db.execute(sql`ALTER TABLE "page_embeddings" DROP COLUMN "embedding"`);
     await db.execute(sql`ALTER TABLE "page_embeddings" ADD COLUMN "embedding" vector(${dim}) NOT NULL`);
-    await db.execute(sql`ALTER TABLE "page_embeddings" ALTER COLUMN "embedding" DROP DEFAULT`);
-    await db.execute(sql`CREATE INDEX "embeddings_embedding_hnsw" ON "embeddings" USING hnsw ("embedding" vector_cosine_ops)`);
+    // 4. インデックス再作成
+    await db.execute(sql`CREATE INDEX "memories_embedding_hnsw" ON "memories" USING hnsw ("embedding" vector_cosine_ops)`);
     await db.execute(sql`CREATE INDEX "page_embeddings_embedding_hnsw" ON "page_embeddings" USING hnsw ("embedding" vector_cosine_ops)`);
-    await db.execute(sql`DELETE FROM embeddings`);
-    await db.execute(sql`DELETE FROM page_embeddings`);
   }
 
   // .env に全設定を保存
@@ -229,8 +264,8 @@ export async function POST(req: Request) {
     if (body.embedModel !== undefined) updates.EMBED_MODEL = body.embedModel;
     if (body.embedDim !== undefined) updates.EMBED_DIM = String(body.embedDim);
     if (body.embedProvider !== undefined) updates.EMBED_PROVIDER = body.embedProvider;
-    // Web 検索
     if (body.webSearchMaxResults !== undefined) updates.WEB_SEARCH_MAX_RESULTS = String(body.webSearchMaxResults);
+    if (body.webSearchMaxRounds !== undefined) updates.WEB_SEARCH_MAX_ROUNDS = String(body.webSearchMaxRounds);
     if (body.scraperUrl !== undefined) updates.SCRAPER_URL = body.scraperUrl;
     if (body.searxngUrl !== undefined) updates.SEARXNG_URL = body.searxngUrl;
     // Tor プロキシ

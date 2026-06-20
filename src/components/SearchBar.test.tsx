@@ -14,19 +14,19 @@ beforeEach(() => {
             Promise.resolve<{ results: SearchResult[] }>({
               results: [
                 {
-                  messageId: "m1",
+                  memoryId: "m1",
                   threadId: "t1",
                   threadTitle: "テストスレッド",
-                  role: "user",
-                  content: "こんにちは",
+                  kind: "fact",
+                  content: "ユーザーは日本人",
                   similarity: 0.85,
                 },
                 {
-                  messageId: "m2",
+                  memoryId: "m2",
                   threadId: "t2",
                   threadTitle: "別スレッド",
-                  role: "assistant",
-                  content: "こんにちは！元気ですか？",
+                  kind: "working",
+                  content: "チャット機能を実装中",
                   similarity: 0.72,
                 },
               ],
@@ -144,10 +144,10 @@ describe("SearchBar — Web知識結果", () => {
         Promise.resolve({
           results: [
             {
-              messageId: "m1",
+              memoryId: "m1",
               threadId: "t1",
               threadTitle: "Thread",
-              role: "user",
+              kind: "fact",
               content: "msg content",
               similarity: 0.7,
             },

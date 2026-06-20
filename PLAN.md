@@ -188,6 +188,23 @@ embeddings
 - 安全リスト維持: テキスト・aria・role・`text-red-500`・`.h-px.bg-border` は一切変更せず、className/CSS のみ
 - 検証: typecheck green / build green / Docker 再ビルド + 本番 CSS チャンクで feTurbulence=0（砂嵐解消）、glass-card・radial-gradient・0a0e17・1c2235・background-attachment:fixed,fixed 確認済み
 
+### Phase 12: 会話記憶システム — fact/working 記憶の抽出・検索・注入 ✅
+- `embeddings` テーブル（死んだテーブル: 書き込み・読み込みなし）を削除し、新規 `memories` テーブルを追加
+  - `kind` (fact/working), `content`, `embedding`, `importance`, `suppressedAt` (論理削除), `folderId` (スコープ判定)
+  - HNSW インデックスで cosine 類似検索
+- 記憶生成 (`src/lib/memory.ts`): アシスタント応答完了後に LLM で会話を要約・分類
+  - fact (不変情報) / working (一時文脈) で分類
+  - new / replace (suppressedAt で論理削除) / merge (LLM で content 統合) の action 判定
+  - fire-and-forget で非同期実行（ストリーム完了を待たせない）
+- 記憶検索 (`src/lib/memoryStore.ts`): 次回送信時に pgvector 検索 → LLM rerank → recency スコアで top-5
+  - `folders.memoryScope` が "folder" の場合は同フォルダのみ検索、"global" は全スレッド横断
+  - recency: `importance * 0.6 + exp(-age_days / 14) * 0.4`（2週間で半減）
+- chat route 統合: `buildFinalMessages` に memory system message を注入（systemPrompt 直後、history 前）
+- search route 切り替え: `embeddings` → `memories` テーブル、レスポンス型 `messageId`→`memoryId`/`role`→`kind`
+- settings route 切り替え: `embeddings` → `memories` の vector 列次元管理
+- マイグレーション `0005_memories.sql`: CREATE memories + DROP embeddings CASCADE + HNSW index
+- テスト: 31 tests green（memory.test.ts 6 + memoryStore.test.ts 4 + search 4 + settings 4 + chat 11 + SearchBar 2）
+
 ## 環境変数（想定）
 
 ```

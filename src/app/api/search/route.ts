@@ -13,9 +13,10 @@ type Body = {
  * POST /api/search — セマンティック検索。
  *
  * ユーザー入力を embedding し、pgvector のコサイン距離で
- * 全スレッドから類似メッセージを検索。
+ * memories テーブルから関連記憶を検索（スレッド横断）。
+ * 別途 page_embeddings から Web 知識ページを検索。
  *
- * レスポンス: { results: [{ messageId, threadId, threadTitle, role, content, similarity }] }
+ * レスポンス: { results: [{ memoryId, threadId, threadTitle, kind, content, similarity }], pages: [...] }
  */
 export async function POST(req: Request) {
   let body: Body;
@@ -36,23 +37,22 @@ export async function POST(req: Request) {
     : sql``;
 
   const rawResults = await db.execute(sql`
-    SELECT m.id as message_id, m.thread_id, t.title as thread_title,
-           m.role, m.content,
-           1 - (e.embedding <=> ${JSON.stringify(queryVector)}::vector) as similarity
-    FROM embeddings e
-    JOIN messages m ON e.message_id = m.id
+    SELECT m.id as memory_id, m.thread_id, t.title as thread_title,
+           m.kind, m.content,
+           1 - (m.embedding <=> ${JSON.stringify(queryVector)}::vector) as similarity
+    FROM memories m
     JOIN threads t ON m.thread_id = t.id
-    WHERE 1=1
+    WHERE m.suppressed_at IS NULL
       ${excludeClause}
-    ORDER BY e.embedding <=> ${JSON.stringify(queryVector)}::vector
+    ORDER BY m.embedding <=> ${JSON.stringify(queryVector)}::vector
     LIMIT 10
   `);
 
   const rows = (rawResults as { rows?: Array<{
-    message_id: string;
+    memory_id: string;
     thread_id: string;
     thread_title: string;
-    role: string;
+    kind: string;
     content: string;
     similarity: number;
   }> }).rows ?? [];
@@ -60,10 +60,10 @@ export async function POST(req: Request) {
   const results = rows
     .filter((r) => r.similarity > 0.3)
     .map((r) => ({
-      messageId: r.message_id,
+      memoryId: r.memory_id,
       threadId: r.thread_id,
       threadTitle: r.thread_title,
-      role: r.role,
+      kind: r.kind as "fact" | "working",
       content: r.content.slice(0, 200),
       similarity: Number(r.similarity.toFixed(3)),
     }));

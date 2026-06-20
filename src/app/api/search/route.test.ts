@@ -1,8 +1,26 @@
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { db } from "@/db";
-import { pages, pageEmbeddings } from "@/db/schema";
+import { pages, pageEmbeddings, memories, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
+
+// embedText をモック: 実 embedder に依存せず、bag-of-characters で
+// 類似内容に類似ベクトルを割り当てる。検索クエリとコンテンツが
+// 文字を共有すればコサイン類似度が高くなる。
+vi.mock("@/lib/embed", () => ({
+  embedText: vi.fn().mockImplementation(async (text: string) => {
+    const vec = new Array(1024).fill(0);
+    for (const ch of text) {
+      vec[ch.charCodeAt(0) % 1024] = 1;
+    }
+    return vec;
+  }),
+  hashContent: vi.fn().mockImplementation((text: string) => {
+    return createHash("sha256").update(text).digest("hex");
+  }),
+}));
+
 import { embedText, hashContent } from "@/lib/embed";
 import { POST } from "@/app/api/search/route";
 
@@ -89,5 +107,54 @@ describe("POST /api/search — ページ検索", () => {
     expect(hit.title).toBe("Search Test Page");
     expect(hit.similarity).toBeGreaterThan(0.3);
     expect(hit.pageId).toBeTruthy();
+  }, 60_000);
+});
+
+describe("POST /api/search — 記憶検索", () => {
+  const createdThreadIds: string[] = [];
+  const createdMemoryIds: string[] = [];
+
+  beforeAll(async () => {
+    const [thread] = await db.insert(threads).values({ title: "Memory Search Test" }).returning();
+    createdThreadIds.push(thread.id);
+
+    const content = "ユーザーは FPGA と低レイヤー開発を得意としている";
+    const vector = await embedText(content, "document");
+    if (vector.length > 0) {
+      const [mem] = await db
+        .insert(memories)
+        .values({
+          threadId: thread.id,
+          kind: "fact",
+          content,
+          contentHash: hashContent(content),
+          embedding: vector,
+          model: "test-model",
+        })
+        .returning();
+      createdMemoryIds.push(mem.id);
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of createdMemoryIds) {
+      await db.delete(memories).where(eq(memories.id, id));
+    }
+    for (const id of createdThreadIds) {
+      await db.delete(threads).where(eq(threads.id, id));
+    }
+  });
+
+  it("関連クエリで記憶がヒットする", async () => {
+    const res = await searchReq("FPGA 低レイヤー");
+    const data = await res.json();
+    expect(data.results.length).toBeGreaterThan(0);
+    const hit = data.results.find(
+      (r: { threadId: string }) => r.threadId === createdThreadIds[0],
+    );
+    expect(hit).toBeTruthy();
+    expect(hit.kind).toBe("fact");
+    expect(hit.memoryId).toBeTruthy();
+    expect(hit.similarity).toBeGreaterThan(0.3);
   }, 60_000);
 });

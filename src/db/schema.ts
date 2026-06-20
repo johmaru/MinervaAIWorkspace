@@ -6,6 +6,8 @@ import {
   integer,
   index,
   vector,
+  jsonb,
+  real,
 } from "drizzle-orm/pg-core";
 
 // 埋め込み次元数: env EMBED_DIM（デフォルト 384）。
@@ -21,7 +23,12 @@ export const threads = pgTable("threads", {
   id: uuid("id").primaryKey().defaultRandom(),
   title: text("title").notNull().default("New chat"),
   systemPrompt: text("system_prompt"),
-  model: text("model").notNull().default("gpt-4o-mini"),
+  model: text("model").notNull().default("umans-glm-5.2"),
+  responseMode: text("response_mode", { enum: ["single", "dual"] }).notNull().default("single"),
+  dualModelA: text("dual_model_a"),
+  dualModelB: text("dual_model_b"),
+  dualStrategy: text("dual_strategy", { enum: ["cross_review", "debate"] }).notNull().default("cross_review"),
+  dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
   folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
   currentLeafId: uuid("current_leaf_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -61,6 +68,19 @@ export const messages = pgTable(
     role: text("role", { enum: ["user", "assistant", "system"] }).notNull(),
     content: text("content").notNull(),
     reasoning: text("reasoning"), // assistant の思考プロセス（折りたたみ表示用）
+    metadata: jsonb("metadata").$type<{
+      dualTrace?: {
+        strategy: "cross_review" | "debate";
+        modelA: string;
+        modelB: string;
+        finalModel: string;
+        answerA: string;
+        answerB: string;
+        reviewA?: string;
+        reviewB?: string;
+        debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
+      };
+    }>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -70,24 +90,41 @@ export const messages = pgTable(
 );
 
 /**
- * embeddings — メッセージの埋め込みベクトル
- * セマンティック検索 + 長期記憶 RAG 用。
- * pgvector の vector 型。次元数は env EMBED_DIM (default 384)。
+ * memories — 会話記憶（fact / working）。
+ *
+ * アシスタント応答完了後に LLM で会話を要約・分類し、embedding 付きで保存。
+ * 次回送信時に pgvector 検索 → LLM rerank → recency スコアで並べ替え →
+ * top-5 を system context に注入（RAG）。
+ *
+ * - kind: "fact" = 不変のユーザー情報・環境・設定。"working" = 現在のタスク・一時文脈。
+ * - suppressedAt: 論理削除。replace/merge で古い記憶を無効化。
+ * - folderId: folders.memoryScope が "folder" の場合、検索を同一フォルダに限定。
+ *   "global" の場合は全スレッド横断（デフォルト）。
  */
-export const embeddings = pgTable(
-  "embeddings",
+export const memories = pgTable(
+  "memories",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    messageId: uuid("message_id")
+    threadId: uuid("thread_id")
       .notNull()
-      .references(() => messages.id, { onDelete: "cascade" }),
-    contentHash: text("content_hash").notNull(), // 再 embed 回避用
+      .references(() => threads.id, { onDelete: "cascade" }),
+    folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    kind: text("kind", { enum: ["fact", "working"] }).notNull(),
+    content: text("content").notNull(),
+    sourceMessageIds: jsonb("source_message_ids").$type<string[]>(),
     embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
+    contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
+    importance: real("importance").notNull().default(0.5),
+    suppressedAt: timestamp("suppressed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    messageIdx: index("embeddings_message_idx").on(t.messageId),
+    threadIdx: index("memories_thread_idx").on(t.threadId),
+    folderIdx: index("memories_folder_idx").on(t.folderId),
+    kindIdx: index("memories_kind_idx").on(t.kind),
+    suppressedIdx: index("memories_suppressed_idx").on(t.suppressedAt),
   }),
 );
 
@@ -144,7 +181,7 @@ export const pages = pgTable(
 
 /**
  * page_embeddings — ページ本文の埋め込みベクトル。
- * embeddings テーブルと同構造。EMBED_DIM 次元（env で変更可能）。
+ * memories テーブルの embedding 列と同次元。EMBED_DIM（env で変更可能）。
  */
 export const pageEmbeddings = pgTable(
   "page_embeddings",

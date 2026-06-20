@@ -29,6 +29,20 @@
       "when": 1781766016914,
       "tag": "0003_curved_namora",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781990000000,
+      "tag": "0004_dual_model_trace",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781970925593,
+      "tag": "0005_memories",
+      "breakpoints": true
     }
   ]
 }

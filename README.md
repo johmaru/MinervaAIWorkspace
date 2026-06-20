@@ -10,7 +10,10 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
 - **Semantic search** across all threads (pgvector cosine similarity)
+- **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context
 - **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers
+- **App-level search pipeline** — a separate LLM call decides whether to search, shows a short notice, fetches results via SearXNG, then injects them as context for the final answer
+- **Dual-model conclusions** — run two models in cross-review or debate mode, then stream a synthesized final answer with the model work kept in collapsible details
 - **Tor proxy** support for anonymous scraping
 - **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control
 - **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service
@@ -117,26 +120,50 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 
 | Variable                | Description                                                        | Default                                              |
 |-------------------------|--------------------------------------------------------------------|------------------------------------------------------|
-| `LLM_BASE_URL`          | Base URL of the OpenAI-compatible API                              | `https://api.openai.com/v1`                          |
+| `LLM_BASE_URL`          | Base URL of the OpenAI-compatible API (Umans mode auto-fetches models when `api.code.umans.ai`) | `https://api.code.umans.ai/v1`                       |
 | `LLM_API_KEY`           | API key (required)                                                 | —                                                    |
-| `LLM_MODEL`             | Default model                                                      | `gpt-4o-mini`                                        |
-| `LLM_MODELS`            | Comma-separated model list for the model selector                  | —                                                    |
+| `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
+| `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
 | `EMBED_MODEL`           | Embedding model name                                               | `Xenova/all-MiniLM-L6-v2`                            |
 | `EMBED_DIM`             | Embedding dimension                                                | `384`                                                |
-| `EMBED_PROVIDER`        | `local` (transformers.js) or `http` (Python embedder service)      | `local`                                              |
 | `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
+| `WEB_SEARCH_MAX_ROUNDS` | Deprecated — search round count is now determined by the search decision LLM (1-3 queries per response) | `2`                                                  |
 | `SCRAPER_URL`           | Scraper microservice URL                                           | `http://localhost:8000`                              |
 | `SEARXNG_URL`           | SearXNG URL                                                        | `http://localhost:8080`                              |
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |
 | `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
 | `DATABASE_URL`          | PostgreSQL connection URL (used for local `bun run dev`)           | `postgres://umans:umans@localhost:5432/umanschat`    |
 
+## LLM Provider Modes
+
+UmansChat supports two modes, switched automatically by `LLM_BASE_URL`:
+
+### Umans mode (default)
+
+When `LLM_BASE_URL` points to `api.code.umans.ai` (e.g. `https://api.code.umans.ai/v1`):
+
+- The model list and reasoning levels are **auto-fetched** from `/v1/models/info` at startup (cached in-process).
+- Models appear in the selector with their **display names** (e.g. `Umans Qwen3.6 35B A3B`).
+- `LLM_MODELS` is **ignored** — the API is the source of truth.
+- On API failure, falls back to the built-in `MODEL_REASONING` table.
+
+### OpenAI-compatible mode
+
+When `LLM_BASE_URL` points elsewhere (OpenAI, vLLM, Ollama, etc.):
+
+- The model list is taken from `LLM_MODELS` (comma-separated, e.g. `gpt-4o,gpt-4o-mini`).
+- Display names are not available — model IDs are shown as-is.
+- Reasoning levels fall back to `MODEL_REASONING` for known Umans models, or empty for others.
+
+Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart is needed when using the Settings GUI.
+
 ## Usage
 
 - **Create a thread** — start typing in the composer; the thread is created on first send and an auto title is generated from your first message.
 - **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token.
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
+- **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
 - **Attachments** — attach images (sent to vision-capable models), PDFs (text extracted), or text/code files (up to 10MB each).
 - **Semantic search** — search across all threads; results are ranked by pgvector cosine similarity.
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.

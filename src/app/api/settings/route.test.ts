@@ -43,21 +43,21 @@ describe("EMBED_MODEL_OPTIONS", () => {
 /**
  * getVectorDim の空テーブル検出検証。
  *
- * embeddings テーブルが空でも、列の宣言型 vector(N) から次元を取得できること。
+ * memories テーブルが空でも、列の宣言型 vector(N) から次元を取得できること。
  * これにより初回モデル切替時（行がまだない状態）でもマイグレーションが
  * 提示される。vector_dims() は行がないと NULL を返すため、format_type への
  * フォールバックが必須。
  */
-describe("embeddings vector column dimension detection", () => {
+describe("memories vector column dimension detection", () => {
   const testContentHash = "dimdetection-test-hash";
 
   beforeAll(async () => {
     // テスト用の残存行を確実に除去
-    await db.execute(sql`DELETE FROM embeddings WHERE content_hash = ${testContentHash}`);
+    await db.execute(sql`DELETE FROM memories WHERE content_hash = ${testContentHash}`);
   });
 
   afterAll(async () => {
-    await db.execute(sql`DELETE FROM embeddings WHERE content_hash = ${testContentHash}`);
+    await db.execute(sql`DELETE FROM memories WHERE content_hash = ${testContentHash}`);
   });
 
   it("行が存在する場合は vector_dims() で次元を取得", async () => {
@@ -65,30 +65,30 @@ describe("embeddings vector column dimension detection", () => {
     const colResult = await db.execute(sql`
       SELECT format_type(atttypid, atttypmod) as ty
       FROM pg_attribute
-      WHERE attrelid = 'embeddings'::regclass AND attname = 'embedding'
+      WHERE attrelid = 'memories'::regclass AND attname = 'embedding'
     `);
     const colRows = (colResult as { rows?: Array<{ ty: string }> }).rows ?? [];
     const declared = colRows[0]?.ty?.match(/vector\((\d+)\)/)?.[1];
     expect(declared).toBeDefined();
     const declaredDim = Number(declared);
 
-    // テスト用のゼロベクトルを挿入
+    // テスト用のゼロベクトルを挿入（thread_id は既存スレッドを借用）
     const zeroVec = "[" + new Array(declaredDim).fill(0).join(",") + "]";
-    await db.execute(sql`DELETE FROM embeddings WHERE content_hash = ${testContentHash}`);
+    await db.execute(sql`DELETE FROM memories WHERE content_hash = ${testContentHash}`);
     await db.execute(sql`
-      INSERT INTO embeddings (message_id, content_hash, model, embedding)
-      SELECT m.id, ${testContentHash}, 'test-model', ${zeroVec}::vector
-      FROM messages m LIMIT 1
+      INSERT INTO memories (thread_id, kind, content, content_hash, model, embedding)
+      SELECT t.id, 'fact', 'dim detection test', ${testContentHash}, 'test-model', ${zeroVec}::vector
+      FROM threads t LIMIT 1
     `);
 
     // 行が存在するので vector_dims() で取得できる
-    const result = await db.execute(sql`SELECT vector_dims(embedding) as dim FROM embeddings WHERE content_hash = ${testContentHash}`);
+    const result = await db.execute(sql`SELECT vector_dims(embedding) as dim FROM memories WHERE content_hash = ${testContentHash}`);
     const rows = (result as { rows?: Array<{ dim: number }> }).rows ?? [];
     expect(rows.length).toBe(1);
     expect(rows[0].dim).toBe(declaredDim);
 
     // クリーンアップ: 行を削除して空に戻す
-    await db.execute(sql`DELETE FROM embeddings WHERE content_hash = ${testContentHash}`);
+    await db.execute(sql`DELETE FROM memories WHERE content_hash = ${testContentHash}`);
   });
 
   it("行が空でも列の宣言型 vector(N) から次元を取得できる", async () => {
@@ -97,7 +97,7 @@ describe("embeddings vector column dimension detection", () => {
     const colResult = await db.execute(sql`
       SELECT format_type(atttypid, atttypmod) as ty
       FROM pg_attribute
-      WHERE attrelid = 'embeddings'::regclass AND attname = 'embedding'
+      WHERE attrelid = 'memories'::regclass AND attname = 'embedding'
     `);
     const colRows = (colResult as { rows?: Array<{ ty: string }> }).rows ?? [];
     expect(colRows.length).toBe(1);

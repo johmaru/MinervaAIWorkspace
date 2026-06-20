@@ -4,10 +4,10 @@ import { useCallback, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
 
 export type SearchResult = {
-  messageId: string;
+  memoryId: string;
   threadId: string;
   threadTitle: string;
-  role: string;
+  kind: "fact" | "working";
   content: string;
   similarity: number;
 };
@@ -132,7 +132,7 @@ export function SearchBar({ onSelectThread }: Props) {
                 </li>
               ))}
               {results.map((r) => (
-                <li key={r.messageId}>
+                <li key={r.memoryId}>
                   <button
                     type="button"
                     onClick={() => handleSelect(r.threadId)}
