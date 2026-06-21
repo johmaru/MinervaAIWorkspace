@@ -321,10 +321,11 @@ async function buildSearchContext({
   send("status", { label: decision.userNotice ?? "最新情報を確認するね。" });
 
   const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
+  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2));
   const allSources: SourceInfo[] = [];
   const allResults: { url: string; title: string; snippet: string; content: string }[] = [];
 
-  for (const query of decision.queries.slice(0, 3)) {
+  for (const query of decision.queries.slice(0, maxRounds)) {
     try {
       const response = await searchWeb(query, maxResults);
       for (const r of response.results) {

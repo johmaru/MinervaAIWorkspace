@@ -25,6 +25,7 @@ type SettingsResponse = {
   dbVectorDim: number;
   // Web 検索
   webSearchMaxResults: number;
+  webSearchMaxRounds: number;
   scraperUrl: string;
   searxngUrl: string;
   // Tor プロキシ
@@ -374,6 +375,20 @@ export function SettingsModal({ open, onClose }: Props) {
                 onChange={(e) => update("webSearchMaxResults", Number(e.target.value) || 3)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchMaxRounds")}</label>
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={form.webSearchMaxRounds ?? 2}
+                onChange={(e) => update("webSearchMaxRounds", Number(e.target.value) || 2)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("settings.webSearchMaxRoundsDesc")}
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">SCRAPER_URL</label>

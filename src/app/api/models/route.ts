@@ -1,14 +1,17 @@
-import { availableModels, defaultModel } from "@/lib/llm";
+import { availableModels, defaultModel, getModelDisplayNames } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/models — 利用可能なモデル一覧を返す。
- * LLM_MODELS env（カンマ区切り）から構築。未設定時は defaultModel() のみ。
+ *
+ * - Umansモード: `/v1/models/info` 由来のモデル一覧と displayNames を返す。
+ * - OAI互換モード: LLM_MODELS env（カンマ区切り）から構築。displayNames は空。
  */
 export async function GET() {
-  const models = availableModels();
+  const models = await availableModels();
   const current = defaultModel();
-  return Response.json({ models, default: current });
+  const displayNames = await getModelDisplayNames();
+  return Response.json({ models, default: current, displayNames });
 }

@@ -128,7 +128,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `EMBED_MODEL`           | Embedding model name                                               | `Xenova/all-MiniLM-L6-v2`                            |
 | `EMBED_DIM`             | Embedding dimension                                                | `384`                                                |
 | `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
-| `WEB_SEARCH_MAX_ROUNDS` | Deprecated — search round count is now determined by the search decision LLM (1-3 queries per response) | `2`                                                  |
+| `WEB_SEARCH_MAX_ROUNDS` | Maximum search rounds per response (1-5); caps how many of the search-decision LLM's queries are executed | `2`                                                  |
 | `SCRAPER_URL`           | Scraper microservice URL                                           | `http://localhost:8000`                              |
 | `SEARXNG_URL`           | SearXNG URL                                                        | `http://localhost:8080`                              |
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |

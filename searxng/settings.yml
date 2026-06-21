@@ -1,4 +1,17 @@
-use_default_settings: true
+use_default_settings:
+  engines:
+    # Brave はレート制限 (suspended_time=180) で無期限停止するため除外。
+    # brave.images / brave.videos / brave.news は network: brave を参照するため
+    # 本体ごと remove すると KeyError になる。全variantをまとめて除外する。
+    remove:
+      - brave
+      - brave.images
+      - brave.videos
+      - brave.news
+      # Startpage は JSONDecodeError で常に失敗するため除外。
+      - startpage
+      - startpage news
+      - startpage images
 
 search:
   formats:
@@ -9,6 +22,9 @@ server:
   bind_address: "0.0.0.0"
   port: 8080
   secret_key: "umanschat-searxng-dev-secret"
+  # リバースプロキシ無しの Docker 内部通信のため IP ヘッダーが来ない。
+  # limiter を無効化して X-Forwarded-For エラーを解消。
+  limiter: false
 
 outgoing:
   using_tor_proxy: false

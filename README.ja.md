@@ -129,7 +129,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `EMBED_MODEL`           | 埋め込みモデル名                                                  | `Xenova/all-MiniLM-L6-v2`                            |
 | `EMBED_DIM`             | 埋め込み次元数                                                    | `384`                                                |
 | `WEB_SEARCH_MAX_RESULTS`| チャット送信時に取得・スクレイピングする件数                       | `3`                                                  |
-| `WEB_SEARCH_MAX_ROUNDS` | 廃止 — 検索ラウンド数は検索判定 LLM が決定（1回答あたり1-3クエリ） | `2`                                                  |
+| `WEB_SEARCH_MAX_ROUNDS` | 1回の回答で検索を繰り返す最大回数（1-5）。検索判定 LLM が決定したクエリのうち実行する数を制限 | `2`                                                  |
 | `SCRAPER_URL`           | Scraper マイクロサービスの URL                                    | `http://localhost:8000`                              |
 | `SEARXNG_URL`           | SearXNG の URL                                                    | `http://localhost:8080`                              |
 | `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |

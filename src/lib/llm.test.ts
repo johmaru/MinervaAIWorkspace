@@ -37,12 +37,12 @@ describe("llm client", () => {
     expect(createLLM().apiKey).toBe("missing");
   });
 
-  it("defaultModel は LLM_MODEL を優先、未設定なら gpt-4o-mini", () => {
-    process.env.LLM_MODEL = "umans-glm-5.2";
-    expect(defaultModel()).toBe("umans-glm-5.2");
-    delete process.env.LLM_MODEL;
-    expect(defaultModel()).toBe("gpt-4o-mini");
-  });
+    it("defaultModel は LLM_MODEL を優先、未設定なら umans-glm-5.2", () => {
+      process.env.LLM_MODEL = "umans-glm-5.2";
+      expect(defaultModel()).toBe("umans-glm-5.2");
+      delete process.env.LLM_MODEL;
+      expect(defaultModel()).toBe("umans-glm-5.2");
+    });
 
   it("embedModel は EMBED_MODEL を優先、未設定なら text-embedding-3-small", () => {
     process.env.EMBED_MODEL = "custom-embed";
