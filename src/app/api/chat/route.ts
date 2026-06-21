@@ -194,18 +194,24 @@ export async function POST(req: Request) {
           .set({ updatedAt: new Date() })
           .where(eq(threads.id, body.threadId));
 
-        // 記憶生成（fire-and-forget）: ストリーム完了を待たせない。
-        // assistantContent がある = 応答が生成された（成功 or 部分成功）。
+        // 記憶生成: ストリーム完了後に同期的に保存する。
+        // done イベントは既に送信済み（クライアント受信済み）なので、
+        // ここで await してもクライアント UX に影響しない。
+        // エラーは握りつぶす（ストリーム既に完了済み、ログのみ）。
         if (assistantContent) {
-          void generateMemories(
-            body.threadId,
-            [
-              { role: "user", content: prepared.content },
-              { role: "assistant", content: assistantContent },
-            ],
-            llm,
-            finalModel,
-          ).catch((err) => console.error("[memory] generation failed:", err));
+          try {
+            await generateMemories(
+              body.threadId,
+              [
+                { role: "user", content: prepared.content },
+                { role: "assistant", content: assistantContent },
+              ],
+              llm,
+              finalModel,
+            );
+          } catch (err) {
+            console.error("[memory] generation failed:", err);
+          }
         }
 
         controller.close();

@@ -10,6 +10,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Before debugging SSE streaming, Docker build, transformers.js, pgvector, or
 Next.js 16 issues in this project, read `skill://umanschat-debug`
 for known pitfalls and solutions discovered during development.
+
+Key pitfall: `generateMemories` in `src/app/api/chat/route.ts` MUST be `await`ed
+inside the `finally` block, never fire-and-forget. The Next.js production runtime
+cancels un-awaited promises after `controller.close()` ends the SSE stream,
+silently dropping memory persistence with no error log.
 <!-- END:umanschat-debug-skill -->
 
 <!-- BEGIN:frontend-quality-rules -->
@@ -54,6 +59,40 @@ Design direction:
 - Prefer restrained polish over decorative UI.
 <!-- END:frontend-quality-rules -->
 
+Implementation Review Loop
+
+For every non-trivial feature, bug fix, or UI change, follow this loop:
+
+Plan before editing
+Briefly identify the files likely to change.
+Explain the intended component/data/API boundaries.
+Check whether the change fits the existing app structure.
+Check whether the change requires reading local Next.js docs from node_modules/next/dist/docs/.
+Avoid broad refactors unless explicitly requested.
+Implement in small, reversible steps
+Prefer focused changes over sweeping rewrites.
+Preserve existing product behaviour unless the task explicitly asks to change it.
+Reuse existing components, utilities, naming, spacing, and data flow where possible.
+Do not introduce one-off patterns unless there is a clear reason.
+Review after editing
+After implementation, review the diff from these perspectives:
+Architecture: Did this make the overall design simpler or more tangled?
+Next.js correctness: Are App Router, Server/Client Component boundaries, route handlers, redirects, params/searchParams, caching, and async APIs used correctly for this installed Next.js version?
+UI/UX consistency: Does the result match the existing product style, spacing, states, and interaction patterns?
+Future extensibility: Will likely next features be easier or harder after this change?
+AGENTS.md rules: Did this task reveal a repeated pitfall or project rule that should be added here?
+Report clearly
+When finishing, include:
+What changed.
+How it was verified.
+Any risks or follow-up tasks.
+Whether AGENTS.md or README files were updated, and why.
+
+If issues are found during review, separate them into:
+
+Fix now: correctness, build, runtime, data loss, accessibility, or obvious UX breakage.
+Follow up later: polish, optional refactors, or larger design improvements.
+
 ## Chat Interaction Details
 
 - Enter should send the message.
@@ -74,18 +113,17 @@ Design direction:
   （共同作業者がいる場合は履歴書き換えの同意を確認してから）
 - コミットメッセージは英語で、変更内容・検証結果を簡潔に記載する。
 
-## Memory Directives
-
-- ユーザーが「今度覚えといて」「これ覚えといて」等の指示を出した場合、
-  その内容を `AGENTS.md` に追記する（適切な既存セクションがあればそこへ、
-  なければ新規セクションを作成）。
-- 追記後、整理して重複や矛盾がないか確認し、必要があれば既存内容を統合・整理する。
-- 追記・整理が終わったら Git Workflow に従って commit + push する。
+## Project Rule Memory
+When the user says 「今度覚えといて」「これ覚えといて」 or similar, decide whether the content is a durable project rule, workflow rule, known pitfall, or implementation convention.
+Add it to AGENTS.md only when it should affect future work in this repository.
+Do not add personal preferences, temporary notes, random reminders, or unrelated facts to AGENTS.md.
+When adding a rule, place it in the most relevant existing section when possible.
+After editing, check for duplication, contradiction, or overly specific rules that should be generalized.
+If the instruction is ambiguous, ask whether it should be stored as a project rule before editing AGENTS.md.
 
 ## Documentation Sync
+Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.
+Do not update README files for purely internal refactors, small visual polish, typo fixes, or implementation details that users do not need to know.
+Keep both README files aligned. The English and Japanese versions should not drift in meaning.
+When README updates are needed, include them in the same commit as the related implementation unless explicitly asked to split them.
 
-- 機能を追加・変更・削除した場合は、`README.md`（EN）と `README.ja.md`（JA）の
-  両方に反映する。Features リスト、Configuration の env 変数表、Usage、
-  Architecture など該当セクションを更新する。
-- 両ファイルで同一情報を保ち、EN と JA で内容が乖離しないこと。
-- README 更新も実装の一部として扱い、1コミットに含める（別コミットに分けない）。
