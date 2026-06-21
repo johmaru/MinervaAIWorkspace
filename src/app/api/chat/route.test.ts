@@ -274,7 +274,7 @@ describe("POST /api/chat — 記憶注入", () => {
     // 記憶注入をモック: 記憶あり
     vi.mocked(buildMemoryContext).mockResolvedValueOnce({
       role: "system",
-      content: "Past memories from previous conversations (use when relevant, ignore if not):\n- [fact] User uses FPGA",
+      content: "Past memories from previous conversations. Use these to provide context for the user's question. If the user asks what you discussed before, summarize the relevant memories.\n- [fact] User uses FPGA",
     });
 
     const res = await POST(chatReq(id, "私の得意分野は？"));

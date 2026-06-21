@@ -101,8 +101,6 @@ export async function POST(req: Request) {
         const memoryMessage = await buildMemoryContext({
           content: prepared.content,
           thread,
-          llm,
-          model: finalModel,
         });
 
         const finalMessages = buildFinalMessages({

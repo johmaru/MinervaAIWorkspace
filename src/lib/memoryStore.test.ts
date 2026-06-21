@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { db } from "@/db";
 import { memories, threads, folders } from "@/db/schema";
@@ -28,32 +27,7 @@ import { embedText, hashContent } from "@/lib/embed";
 import { findRelevantMemories } from "@/lib/memoryStore";
 
 // findRelevantMemories の統合テスト。実 DB に記憶を INSERT し、
-// pgvector 検索 → LLM rerank → recency top-5 が返ることを検証。
-
-function mockRerankLLM(indices: number[]): OpenAI {
-  return {
-    chat: {
-      completions: {
-        create: vi.fn().mockResolvedValue({
-          choices: [{ message: { content: JSON.stringify({ indices }) } }],
-        }),
-      },
-    },
-  } as unknown as OpenAI;
-}
-
-function noRerankLLM(): OpenAI {
-  // rerank 失敗をシミュレート（null 返却 → similarity フォールバック）
-  return {
-    chat: {
-      completions: {
-        create: vi.fn().mockResolvedValue({
-          choices: [{ message: { content: null } }],
-        }),
-      },
-    },
-  } as unknown as OpenAI;
-}
+// pgvector 検索 → similarity + recency top-5 が返ることを検証。
 
 const createdThreadIds: string[] = [];
 const createdFolderIds: string[] = [];
@@ -65,21 +39,24 @@ async function insertMemory(
   content: string,
   kind: "fact" | "working" = "fact",
 ): Promise<string> {
-  const vector = await embedText(content, "document");
-  const [mem] = await db
+  // モック embedText でベクトルを生成し、hashContent で contentHash を生成
+  const embedding = await embedText(content);
+  const contentHash = hashContent(content);
+  const [memory] = await db
     .insert(memories)
     .values({
       threadId,
       folderId,
       kind,
       content,
-      contentHash: hashContent(content),
-      embedding: vector,
+      importance: 0.5,
+      contentHash,
+      embedding,
       model: "test-model",
     })
     .returning();
-  createdMemoryIds.push(mem.id);
-  return mem.id;
+  createdMemoryIds.push(memory.id);
+  return memory.id;
 }
 
 beforeAll(async () => {
@@ -124,12 +101,7 @@ describe("findRelevantMemories", () => {
     const threadId = createdThreadIds[0];
     await insertMemory(threadId, null, "ユーザーは FPGA と低レイヤー開発を得意としている");
 
-    const results = await findRelevantMemories(
-      "FPGA 低レイヤー 開発",
-      null,
-      noRerankLLM(),
-      "test-model",
-    );
+    const results = await findRelevantMemories("FPGA 低レイヤー 開発", null);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((r) => r.similarity > 0.3)).toBe(true);
@@ -142,12 +114,7 @@ describe("findRelevantMemories", () => {
     const memId = await insertMemory(threadId, null, "一時的な作業メモ： suppressed test");
     await db.update(memories).set({ suppressedAt: new Date() }).where(eq(memories.id, memId));
 
-    const results = await findRelevantMemories(
-      "suppressed test",
-      null,
-      noRerankLLM(),
-      "test-model",
-    );
+    const results = await findRelevantMemories("suppressed test", null);
 
     const hit = results.find((r) => r.id === memId);
     expect(hit).toBeUndefined();
@@ -161,45 +128,27 @@ describe("findRelevantMemories", () => {
     await insertMemory(threadBId, folderBId, "フォルダB固有の記憶： Rust で組み込み開発");
 
     // フォルダBのスレッドから検索 → フォルダBの記憶はヒットする
-    const resultsB = await findRelevantMemories(
-      "Rust 組み込み開発",
-      folderBId,
-      noRerankLLM(),
-      "test-model",
-    );
+    const resultsB = await findRelevantMemories("Rust 組み込み開発", folderBId);
     expect(resultsB.some((r) => r.content.includes("フォルダB固有"))).toBe(true);
 
     // フォルダCのスレッドから検索 → フォルダBの記憶はヒットしない
     const folderCId = createdFolderIds[1];
-    const resultsC = await findRelevantMemories(
-      "Rust 組み込み開発",
-      folderCId,
-      noRerankLLM(),
-      "test-model",
-    );
+    const resultsC = await findRelevantMemories("Rust 組み込み開発", folderCId);
     expect(resultsC.some((r) => r.content.includes("フォルダB固有"))).toBe(false);
   }, 60_000);
 
-  it("LLM rerank モックで top-5 が返る", async () => {
+  it("similarity + recency で top-5 が返る", async () => {
     const threadId = createdThreadIds[0];
     // 複数の記憶を挿入
     await insertMemory(threadId, null, "ユーザーは Python が好き", "fact");
     await insertMemory(threadId, null, "ユーザーは TypeScript も使う", "fact");
     await insertMemory(threadId, null, "現在のタスク： API設計中", "working");
 
-    // rerank で最初の2件を選択
-    const llm = mockRerankLLM([0, 1]);
-
-    const results = await findRelevantMemories(
-      "Python TypeScript",
-      null,
-      llm,
-      "test-model",
-    );
+    const results = await findRelevantMemories("Python TypeScript", null);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.length).toBeLessThanOrEqual(5);
-    // rerank LLM が呼ばれた
-    expect(llm.chat.completions.create).toHaveBeenCalled();
+    // 類似記憶が結果に含まれる
+    expect(results.some((r) => r.content.includes("Python") || r.content.includes("TypeScript"))).toBe(true);
   }, 60_000);
 });

@@ -9,7 +9,7 @@ import { embedText, hashContent } from "@/lib/embed";
  *
  * フロー:
  * 1. generateMemories: 直近ターンを LLM に渡し fact/working で分類 + new/replace/merge を判定。
- * 2. findRelevantMemories (memoryStore.ts): 次回送信時に pgvector 検索 → LLM rerank → recency top-5。
+ * 2. findRelevantMemories (memoryStore.ts): 次回送信時に pgvector 検索 → similarity + recency top-5。
  * 3. chat route が system context に注入。
  *
  * replace/merge で古い記憶は suppressedAt で論理削除（物理削除しない）。
@@ -29,8 +29,8 @@ export type ExtractedMemory = {
 const SYSTEM_PROMPT = `You are a memory extractor. Analyze the conversation and extract durable memories.
 
 Classify each memory as:
-- "fact": unchanging user info, environment, preferences, identity, goals
-- "working": current task, temporary context, recent decisions that may change
+- "fact": user info, environment, preferences, identity, goals, topics discussed, subjects explored, decisions made
+- "working": current task, temporary context, recent decisions, ongoing discussion topic
 
 For each memory, decide an action:
 - "new": no similar existing memory exists
@@ -39,9 +39,9 @@ For each memory, decide an action:
 
 When action is "replace" or "merge", set targetContent to the EXACT content string of the existing memory you are replacing or merging with.
 
-Write each memory's content as a concise, search-friendly sentence (not a full transcript). Prefer facts over chatter. Skip trivial pleasantries.
+Write each memory's content as a concise, search-friendly sentence. Capture the topic and key facts, not just the user's identity.
 
-If there is nothing worth remembering, return an empty array.
+Skip pure greetings and acknowledgments (e.g. 'hello', 'thanks', 'got it'), BUT always save what was discussed or decided. If the conversation only contains greetings with no substance, return an empty array. Otherwise, extract at least one memory about what was discussed.
 
 Return ONLY valid JSON (no markdown fences):
 [{"kind": "fact"|"working", "content": "...", "importance": 0.0-1.0, "action": "new"|"replace"|"merge", "targetContent": "... (only for replace/merge)"}]`;
