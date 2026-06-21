@@ -28,6 +28,11 @@ type CreateBody = {
   systemPrompt?: string;
   model?: string;
   folderId?: string | null;
+  responseMode?: "single" | "dual";
+  dualModelA?: string | null;
+  dualModelB?: string | null;
+  dualStrategy?: "cross_review" | "debate";
+  dualDebateRounds?: number;
 };
 
 /**
@@ -49,6 +54,11 @@ export async function POST(req: Request) {
       systemPrompt: body.systemPrompt,
       model: body.model ?? defaultModel(),
       folderId: body.folderId ?? null,
+      responseMode: body.responseMode === "dual" ? "dual" : "single",
+      dualModelA: body.dualModelA ?? null,
+      dualModelB: body.dualModelB ?? null,
+      dualStrategy: body.dualStrategy === "debate" ? "debate" : "cross_review",
+      dualDebateRounds: clampDebateRounds(body.dualDebateRounds),
     })
     .returning();
   return Response.json(row, { status: 201 });
@@ -59,6 +69,11 @@ type PatchBody = {
   systemPrompt?: string | null;
   model?: string;
   folderId?: string | null;
+  responseMode?: "single" | "dual";
+  dualModelA?: string | null;
+  dualModelB?: string | null;
+  dualStrategy?: "cross_review" | "debate";
+  dualDebateRounds?: number;
 };
 
 /**
@@ -82,6 +97,11 @@ export async function PATCH(req: Request) {
   if (body.systemPrompt !== undefined) values.systemPrompt = body.systemPrompt;
   if (typeof body.model === "string") values.model = body.model;
   if (body.folderId !== undefined) values.folderId = body.folderId;
+  if (body.responseMode === "single" || body.responseMode === "dual") values.responseMode = body.responseMode;
+  if (body.dualModelA !== undefined) values.dualModelA = body.dualModelA || null;
+  if (body.dualModelB !== undefined) values.dualModelB = body.dualModelB || null;
+  if (body.dualStrategy === "cross_review" || body.dualStrategy === "debate") values.dualStrategy = body.dualStrategy;
+  if (body.dualDebateRounds !== undefined) values.dualDebateRounds = clampDebateRounds(body.dualDebateRounds);
 
   const [row] = await db
     .update(threads)
@@ -90,4 +110,9 @@ export async function PATCH(req: Request) {
     .returning();
   if (!row) return new Response("Not found", { status: 404 });
   return Response.json(row);
+}
+
+function clampDebateRounds(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 2;
+  return Math.min(5, Math.max(1, Math.trunc(value)));
 }

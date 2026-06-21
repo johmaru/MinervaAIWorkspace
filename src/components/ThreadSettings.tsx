@@ -8,11 +8,24 @@ type Thread = {
   title: string;
   systemPrompt: string | null;
   model: string;
+  responseMode: "single" | "dual";
+  dualModelA: string | null;
+  dualModelB: string | null;
+  dualStrategy: "cross_review" | "debate";
+  dualDebateRounds: number;
 };
 
 type Props = {
   thread: Thread;
-  onUpdate: (patch: { systemPrompt?: string | null; model?: string }) => Promise<void>;
+  onUpdate: (patch: {
+    systemPrompt?: string | null;
+    model?: string;
+    responseMode?: "single" | "dual";
+    dualModelA?: string | null;
+    dualModelB?: string | null;
+    dualStrategy?: "cross_review" | "debate";
+    dualDebateRounds?: number;
+  }) => Promise<void>;
 };
 
 /**
@@ -25,8 +38,14 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<string[]>([]);
+  const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
   const [systemPrompt, setSystemPrompt] = useState(thread.systemPrompt ?? "");
   const [model, setModel] = useState(thread.model);
+  const [responseMode, setResponseMode] = useState<"single" | "dual">(thread.responseMode);
+  const [dualModelA, setDualModelA] = useState(thread.dualModelA ?? thread.model);
+  const [dualModelB, setDualModelB] = useState(thread.dualModelB ?? thread.model);
+  const [dualStrategy, setDualStrategy] = useState<"cross_review" | "debate">(thread.dualStrategy);
+  const [dualDebateRounds, setDualDebateRounds] = useState(thread.dualDebateRounds);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -37,8 +56,14 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
       try {
         const res = await fetch("/api/models");
         if (!res.ok) return;
-        const data = (await res.json()) as { models: string[] };
-        if (!cancelled) setModels(data.models);
+        const data = (await res.json()) as {
+          models: string[];
+          displayNames?: Record<string, string>;
+        };
+        if (!cancelled) {
+          setModels(data.models);
+          setDisplayNames(data.displayNames ?? {});
+        }
       } catch {
         // サイレント失敗: デフォルトで現在のモデルのみ
       }
@@ -50,28 +75,50 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
 
   // スレッド切替時にローカル state を同期
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSystemPrompt(thread.systemPrompt ?? "");
     setModel(thread.model);
+    setResponseMode(thread.responseMode);
+    setDualModelA(thread.dualModelA ?? thread.model);
+    setDualModelB(thread.dualModelB ?? thread.model);
+    setDualStrategy(thread.dualStrategy);
+    setDualDebateRounds(thread.dualDebateRounds);
     setSaved(false);
-  }, [thread.id, thread.systemPrompt, thread.model]);
+  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds]);
 
   const handleSave = useCallback(async () => {
+    const resolvedDualModelA = dualModelA || model;
+    const resolvedDualModelB =
+      thread.dualModelB === null && dualModelB === thread.model
+        ? models.find((m) => m !== resolvedDualModelA) ?? resolvedDualModelA
+        : dualModelB || resolvedDualModelA;
     setSaving(true);
     setSaved(false);
     try {
       await onUpdate({
         systemPrompt: systemPrompt.trim() || null,
         model,
+        responseMode,
+        dualModelA: responseMode === "dual" ? resolvedDualModelA : null,
+        dualModelB: responseMode === "dual" ? resolvedDualModelB : null,
+        dualStrategy,
+        dualDebateRounds,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
       setSaving(false);
     }
-  }, [systemPrompt, model, onUpdate]);
+  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, onUpdate]);
 
   const dirty =
-    systemPrompt !== (thread.systemPrompt ?? "") || model !== thread.model;
+    systemPrompt !== (thread.systemPrompt ?? "") ||
+    model !== thread.model ||
+    responseMode !== thread.responseMode ||
+    dualModelA !== (thread.dualModelA ?? thread.model) ||
+    dualModelB !== (thread.dualModelB ?? thread.model) ||
+    dualStrategy !== thread.dualStrategy ||
+    dualDebateRounds !== thread.dualDebateRounds;
 
   return (
     <div className="border-b border-border/50">
@@ -104,6 +151,75 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
 
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
+              {t("threadSettings.responseMode")}
+            </span>
+            <select
+              value={responseMode}
+              onChange={(e) => setResponseMode(e.target.value === "dual" ? "dual" : "single")}
+              className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+            >
+              <option value="single">{t("threadSettings.responseModeSingle")}</option>
+              <option value="dual">{t("threadSettings.responseModeDual")}</option>
+            </select>
+          </label>
+
+          {responseMode === "dual" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("threadSettings.dualModelA")}
+                </span>
+                <ModelSelect
+                  value={dualModelA}
+                  models={models}
+                  displayNames={displayNames}
+                  onChange={setDualModelA}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("threadSettings.dualModelB")}
+                </span>
+                <ModelSelect
+                  value={dualModelB}
+                  models={models}
+                  displayNames={displayNames}
+                  onChange={setDualModelB}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("threadSettings.dualStrategy")}
+                </span>
+                <select
+                  value={dualStrategy}
+                  onChange={(e) => setDualStrategy(e.target.value === "debate" ? "debate" : "cross_review")}
+                  className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                >
+                  <option value="cross_review">{t("threadSettings.dualStrategyCrossReview")}</option>
+                  <option value="debate">{t("threadSettings.dualStrategyDebate")}</option>
+                </select>
+              </label>
+              {dualStrategy === "debate" && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t("threadSettings.dualDebateRounds")}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={dualDebateRounds}
+                    onChange={(e) => setDualDebateRounds(Math.min(5, Math.max(1, Number(e.target.value) || 1)))}
+                    className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                  />
+                </label>
+              )}
+            </div>
+          )}
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
               {t("threadSettings.model")}
             </span>
             <select
@@ -113,12 +229,12 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
             >
               {models.map((m) => (
                 <option key={m} value={m}>
-                  {m}
+                  {displayNames[m] ?? m}
                 </option>
               ))}
               {/* 現在のモデルがリストに無くても表示 */}
               {!models.includes(model) && (
-                <option value={model}>{model}</option>
+                <option value={model}>{displayNames[model] ?? model}</option>
               )}
             </select>
           </label>
@@ -139,5 +255,34 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+function ModelSelect({
+  value,
+  models,
+  displayNames,
+  onChange,
+}: {
+  value: string;
+  models: string[];
+  displayNames: Record<string, string>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+    >
+      {models.map((m) => (
+        <option key={m} value={m}>
+          {displayNames[m] ?? m}
+        </option>
+      ))}
+      {!models.includes(value) && (
+        <option value={value}>{displayNames[value] ?? value}</option>
+      )}
+    </select>
   );
 }

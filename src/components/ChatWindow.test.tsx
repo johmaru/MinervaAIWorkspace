@@ -9,7 +9,18 @@ import { I18nProvider } from "@/components/I18nProvider";
 
 type UseChatReturn = {
   messages: ChatMessage[];
-  thread: { id: string; title: string; systemPrompt: string | null; model: string; currentLeafId: string | null } | null;
+  thread: {
+    id: string;
+    title: string;
+    systemPrompt: string | null;
+    model: string;
+    currentLeafId: string | null;
+    responseMode: "single" | "dual";
+    dualModelA: string | null;
+    dualModelB: string | null;
+    dualStrategy: "cross_review" | "debate";
+    dualDebateRounds: number;
+  } | null;
   isStreaming: boolean;
   isLoading: boolean;
   error: string | null;
@@ -17,7 +28,15 @@ type UseChatReturn = {
   send: (input: string, opts?: { systemPrompt?: string; model?: string; attachmentIds?: string[] }) => Promise<void>;
   stop: () => void;
   clear: () => void;
-  updateThread: (patch: { systemPrompt?: string | null; model?: string }) => Promise<void>;
+  updateThread: (patch: {
+    systemPrompt?: string | null;
+    model?: string;
+    responseMode?: "single" | "dual";
+    dualModelA?: string | null;
+    dualModelB?: string | null;
+    dualStrategy?: "cross_review" | "debate";
+    dualDebateRounds?: number;
+  }) => Promise<void>;
   regenerate: (userMessageId: string) => Promise<void>;
   editMessage: (userMessageId: string, newContent: string) => Promise<void>;
   switchBranch: (messageId: string) => void;
@@ -28,6 +47,22 @@ type UseChatReturn = {
 };
 
 let mockState: UseChatReturn;
+
+function mockThread(overrides: Partial<NonNullable<UseChatReturn["thread"]>> = {}): NonNullable<UseChatReturn["thread"]> {
+  return {
+    id: "t1",
+    title: "x",
+    systemPrompt: null,
+    model: "gpt-4o-mini",
+    currentLeafId: null,
+    responseMode: "single",
+    dualModelA: null,
+    dualModelB: null,
+    dualStrategy: "cross_review",
+    dualDebateRounds: 2,
+    ...overrides,
+  };
+}
 
 vi.mock("@/hooks/useChat", () => ({
   useChat: (_threadId: string | null) => {
@@ -41,6 +76,7 @@ vi.mock("@/components/ThreadSettings", () => ({
 }));
 
 beforeEach(() => {
+  localStorage.setItem("umanschat-locale", "ja");
   mockState = {
     messages: [],
     thread: null,
@@ -112,7 +148,7 @@ describe("ChatWindow — threadId がない状態", () => {
 
 describe("ChatWindow — 空状態（threadId あり）", () => {
   it("メッセージ0件のとき EmptyState を表示", () => {
-    mockState.thread = { id: "t1", title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: null };
+    mockState.thread = mockThread();
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(
       screen.getByText("メッセージを送って会話を始めてください。"),
@@ -120,7 +156,7 @@ describe("ChatWindow — 空状態（threadId あり）", () => {
   });
 
   it("プレースホルダと送信ボタンを表示", () => {
-    mockState.thread = { id: "t1", title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: null };
+    mockState.thread = mockThread();
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByPlaceholderText(/Enter で送信/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "メッセージを送信" })).toBeDisabled();
@@ -135,7 +171,7 @@ describe("ChatWindow — 空状態（threadId あり）", () => {
 
 describe("ChatWindow — 送信操作", () => {
   beforeEach(() => {
-    mockState.thread = { id: "t1", title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: null };
+    mockState.thread = mockThread();
   });
 
   it("入力すると送信ボタンが有効化", () => {
@@ -187,7 +223,7 @@ describe("ChatWindow — 送信操作", () => {
 
 describe("ChatWindow — ストリーミング状態", () => {
   beforeEach(() => {
-    mockState.thread = { id: "t1", title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: null };
+    mockState.thread = mockThread();
   });
 
   it("isStreaming 時は停止ボタンに切替", () => {
@@ -228,7 +264,7 @@ describe("ChatWindow — ストリーミング状態", () => {
 
 describe("ChatWindow — メッセージ描画", () => {
   beforeEach(() => {
-    mockState.thread = { id: "t1", title: "x", systemPrompt: null, model: "gpt-4o-mini", currentLeafId: null };
+    mockState.thread = mockThread();
   });
 
   it("user / assistant の内容を描画", () => {
@@ -269,6 +305,34 @@ describe("ChatWindow — メッセージ描画", () => {
     const thinking = screen.getByText("User said こんにちは. Respond friendly in Japanese.").closest("details");
     expect(thinking).toBeInTheDocument();
     expect(thinking).not.toHaveAttribute("open");
+  });
+
+  it("デュアルモデル詳細を折りたたみで表示", () => {
+    mockState.messages = [
+      {
+        id: "a-dual",
+        role: "assistant",
+        content: "統合結論です。",
+        parentId: null,
+        metadata: {
+          dualTrace: {
+            strategy: "cross_review",
+            modelA: "model-a",
+            modelB: "model-b",
+            finalModel: "final-model",
+            answerA: "Aの回答",
+            answerB: "Bの回答",
+            reviewA: "Aのレビュー",
+            reviewB: "Bのレビュー",
+          },
+        },
+      },
+    ];
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    expect(screen.getByText("統合結論です。")).toBeInTheDocument();
+    expect(screen.getByText("デュアルモデル詳細")).toBeInTheDocument();
+    expect(screen.getByText("Aの回答")).toBeInTheDocument();
+    expect(screen.getByText("Bのレビュー")).toBeInTheDocument();
   });
 
   it("error があるときエラー文を表示", () => {

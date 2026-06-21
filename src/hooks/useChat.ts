@@ -5,6 +5,17 @@ import type { SourceInfo } from "@/lib/scraper";
 import { useI18n } from "@/components/I18nProvider";
 
 export type ChatRole = "user" | "assistant" | "system";
+export type DualTrace = {
+  strategy: "cross_review" | "debate";
+  modelA: string;
+  modelB: string;
+  finalModel: string;
+  answerA: string;
+  answerB: string;
+  reviewA?: string;
+  reviewB?: string;
+  debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
+};
 export type MessageAttachment = {
   id: string;
   messageId: string | null;
@@ -20,6 +31,9 @@ export type ChatMessage = {
   parentId: string | null;
   attachments?: MessageAttachment[];
   statusLabel?: string;
+  metadata?: {
+    dualTrace?: DualTrace;
+  } | null;
 };
 
 type Thread = {
@@ -28,6 +42,11 @@ type Thread = {
   systemPrompt: string | null;
   model: string;
   currentLeafId: string | null;
+  responseMode: "single" | "dual";
+  dualModelA: string | null;
+  dualModelB: string | null;
+  dualStrategy: "cross_review" | "debate";
+  dualDebateRounds: number;
 };
 
 type RawMessage = {
@@ -37,6 +56,9 @@ type RawMessage = {
   content: string;
   reasoning?: string | null;
   statusLabel?: string;
+  metadata?: {
+    dualTrace?: DualTrace;
+  } | null;
 };
 
 type RawAttachment = {
@@ -55,6 +77,7 @@ type SseData = {
   sources?: SourceInfo[];
   phase?: string;
   label?: string;
+  dualTrace?: DualTrace;
 };
 
 /**
@@ -98,6 +121,7 @@ export function useChat(threadId: string | null) {
         parentId: msg.parentId,
         attachments: attachmentsByMsgIdRef.current.get(msg.id),
         statusLabel: msg.statusLabel,
+        metadata: msg.metadata,
       });
       currentId = msg.parentId;
     }
@@ -109,6 +133,7 @@ export function useChat(threadId: string | null) {
     if (!threadId) {
       byIdRef.current = new Map();
       attachmentsByMsgIdRef.current = new Map();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessages([]);
       setThread(null);
       setError(null);
@@ -182,15 +207,7 @@ export function useChat(threadId: string | null) {
     body: Record<string, unknown>,
     optimisticUser: ChatMessage | null,
     assistantId: string,
-    locale: string,
   ) {
-    const assistantMsg: ChatMessage = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      parentId: optimisticUser?.id ?? null,
-    };
-
     if (optimisticUser) {
       // byId に楽観 user を追加
       byIdRef.current.set(optimisticUser.id, {
@@ -282,6 +299,15 @@ export function useChat(threadId: string | null) {
               });
               setMessages(buildChain(assistantId));
             }
+          } else if (event.event === "dual_trace" && event.data?.dualTrace) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: { ...(existing.metadata ?? {}), dualTrace: event.data.dualTrace },
+              });
+              setMessages(buildChain(assistantId));
+            }
           } else if (event.event === "delta" && event.data?.delta) {
             const existing = byIdRef.current.get(assistantId);
             if (existing) {
@@ -349,7 +375,6 @@ export function useChat(threadId: string | null) {
         },
         userMsg,
         assistantId,
-        threadId,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,7 +394,6 @@ export function useChat(threadId: string | null) {
         },
         null,
         assistantId,
-        threadId,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -400,7 +424,6 @@ export function useChat(threadId: string | null) {
         },
         userMsg,
         assistantId,
-        threadId,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -438,7 +461,15 @@ export function useChat(threadId: string | null) {
   );
 
   const updateThread = useCallback(
-    async (patch: { systemPrompt?: string | null; model?: string }) => {
+    async (patch: {
+      systemPrompt?: string | null;
+      model?: string;
+      responseMode?: "single" | "dual";
+      dualModelA?: string | null;
+      dualModelB?: string | null;
+      dualStrategy?: "cross_review" | "debate";
+      dualDebateRounds?: number;
+    }) => {
       if (!threadId) return;
       try {
         const res = await fetch(`/api/threads?id=${encodeURIComponent(threadId)}`, {

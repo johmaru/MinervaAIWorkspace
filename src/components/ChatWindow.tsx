@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useChat, type ChatMessage } from "@/hooks/useChat";
+import { useChat, type ChatMessage, type DualTrace } from "@/hooks/useChat";
 import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
@@ -294,6 +294,9 @@ function MessageBubble({
           {answer ? (
             <Markdown content={answer} />
           ) : null}
+          {m.metadata?.dualTrace && (
+            <DualTraceDetails trace={m.metadata.dualTrace} />
+          )}
           {/* 回答未生成中はスピナー + 進捗ラベルを表示。thinking 受信中も表示し続ける。 */}
           {isStreamingThis && !m.thinking ? (
             <span aria-label={t("chat.waitingResponse")} className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -413,6 +416,52 @@ function MessageBubble({
         </button>
       )}
     </div>
+  );
+}
+
+function DualTraceDetails({ trace }: { trace: DualTrace }) {
+  const { t } = useI18n();
+  return (
+    <details className="mt-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2">
+      <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground">
+        {t("chat.dualDetails")}
+      </summary>
+      <div className="mt-3 space-y-3">
+        <p className="text-[11px] text-muted-foreground">
+          {t("chat.dualFinalModel", { model: trace.finalModel })}
+        </p>
+        <TraceSection title={`${t("chat.dualAnswerA")} (${trace.modelA})`} content={trace.answerA} />
+        <TraceSection title={`${t("chat.dualAnswerB")} (${trace.modelB})`} content={trace.answerB} />
+        {trace.strategy === "cross_review" ? (
+          <>
+            {trace.reviewA && <TraceSection title={t("chat.dualReviewA")} content={trace.reviewA} />}
+            {trace.reviewB && <TraceSection title={t("chat.dualReviewB")} content={trace.reviewB} />}
+          </>
+        ) : (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-muted-foreground">{t("chat.dualDebate")}</h4>
+            {trace.debateTurns?.map((turn, index) => (
+              <TraceSection
+                key={`${turn.speaker}-${index}`}
+                title={`Model ${turn.speaker} (${turn.model})`}
+                content={turn.content}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function TraceSection({ title, content }: { title: string; content: string }) {
+  return (
+    <section className="space-y-1">
+      <h4 className="text-xs font-semibold text-muted-foreground">{title}</h4>
+      <div className="rounded-lg border border-border/60 bg-background/70 px-3 py-2">
+        <Markdown content={content || "_No content_"} />
+      </div>
+    </section>
   );
 }
 

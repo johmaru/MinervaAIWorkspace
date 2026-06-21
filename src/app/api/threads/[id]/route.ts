@@ -24,6 +24,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       role: messages.role,
       content: messages.content,
       reasoning: messages.reasoning,
+      metadata: messages.metadata,
       createdAt: messages.createdAt,
     })
     .from(messages)
