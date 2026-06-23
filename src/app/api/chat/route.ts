@@ -142,6 +142,7 @@ export async function POST(req: Request) {
               send("thinking", { delta });
             },
             webSearchProvider: umansSearchProvider,
+            send,
           });
         } else {
           await streamCompletion({
@@ -157,6 +158,7 @@ export async function POST(req: Request) {
               send("thinking", { delta });
             },
             webSearchProvider: umansSearchProvider,
+            send,
           });
         }
         const [assistantMsg] = await db
@@ -560,6 +562,7 @@ async function streamCompletion({
   onDelta,
   onReasoning,
   webSearchProvider,
+  send,
 }: {
   llm: OpenAI;
   model: string;
@@ -567,6 +570,7 @@ async function streamCompletion({
   onDelta: (delta: string) => void;
   onReasoning: (delta: string) => void;
   webSearchProvider?: string | null;
+  send?: StreamSend;
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -598,25 +602,114 @@ async function streamCompletion({
     ? { headers: { "X-Umans-Websearch-Provider": webSearchProvider } }
     : undefined;
 
-  const completion = await llm.chat.completions.create(
-    {
-      model,
-      messages: messagesForModel,
-      stream: true,
-      ...(tools ? { tools } : {}),
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
-    requestOptions,
-  );
+  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2));
+  const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
 
-  for await (const chunk of completion) {
-    const choice = chunk.choices?.[0];
-    if (!choice) continue;
-    const reasoningDelta = (
-      choice.delta as Record<string, unknown> as { reasoning_content?: string }
-    ).reasoning_content;
-    if (reasoningDelta) onReasoning(reasoningDelta);
-    const contentDelta = choice.delta?.content;
-    if (contentDelta) onDelta(contentDelta);
+  // Tool-call ループ: LLM が web_search ツールを呼んだら検索を実行し、
+  // 結果を role:"tool" で返して回答を再生成させる。
+  // native/exa どちらも Umans エンドポイントは tool_calls を返すだけで
+  // 自動実行しないため、アプリ側でこのループが必要。
+  for (let round = 0; round < maxRounds; round++) {
+    const completion = await llm.chat.completions.create(
+      {
+        model,
+        messages: messagesForModel,
+        stream: true,
+        ...(tools ? { tools } : {}),
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+      requestOptions,
+    );
+
+    // ストリーミングチャンクを蓄積しつつクライアントへ転送
+    const toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall[] = [];
+    let finishReason: string | null = null;
+
+    for await (const chunk of completion) {
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      const reasoningDelta = (
+        choice.delta as Record<string, unknown> as { reasoning_content?: string }
+      ).reasoning_content;
+      if (reasoningDelta) onReasoning(reasoningDelta);
+      const contentDelta = choice.delta?.content;
+      if (contentDelta) onDelta(contentDelta);
+
+      // tool_calls デルタを蓄積（ストリーミング分割対応）
+      const deltaToolCalls = choice.delta?.tool_calls;
+      if (deltaToolCalls) {
+        for (const dtc of deltaToolCalls) {
+          const idx = dtc.index ?? 0;
+          if (!toolCalls[idx]) {
+            toolCalls[idx] = {
+              id: dtc.id ?? "",
+              type: "function",
+              function: { name: "", arguments: "" },
+            };
+          }
+          if (dtc.id) toolCalls[idx].id = dtc.id;
+          if (dtc.function?.name) toolCalls[idx].function.name += dtc.function.name;
+          if (dtc.function?.arguments) toolCalls[idx].function.arguments += dtc.function.arguments;
+        }
+      }
+
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+    }
+
+    // tool_calls で終了しなければ完了（stop / length 等）
+    if (finishReason !== "tool_calls") break;
+
+    // 有効な tool_call がなければ終了（無限ループ防止）
+    const validToolCalls = toolCalls.filter((tc) => tc && tc.function.name === "web_search");
+    if (validToolCalls.length === 0) break;
+
+    // assistant メッセージ（tool_calls 含む）を会話に追加
+    messagesForModel.push({
+      role: "assistant",
+      content: null,
+      tool_calls: validToolCalls,
+    } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
+
+    // 各 tool_call に対して検索を実行し、結果を role:"tool" で返す
+    for (const tc of validToolCalls) {
+      let query = "";
+      try {
+        query = (JSON.parse(tc.function.arguments) as { query?: string }).query ?? "";
+      } catch {
+        // 引数パース失敗は空クエリとして扱う
+      }
+
+      if (send) send("status", { label: `「${query}」を検索中…` });
+
+      let toolContent: string;
+      try {
+        const response = await searchWeb(query, maxResults);
+        const sources: SourceInfo[] = response.results.map((r) => ({
+          url: r.url,
+          title: r.scrapeTitle || r.title,
+          snippet: r.snippet,
+        }));
+        if (send && sources.length > 0) send("sources", { sources });
+
+        const results = response.results.map((r) => ({
+          url: r.url,
+          title: r.scrapeTitle || r.title,
+          snippet: r.snippet,
+          content: r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : "",
+        }));
+        toolContent = JSON.stringify(results);
+      } catch {
+        // 検索失敗は空結果として LLM に返す
+        toolContent = "[]";
+      }
+
+      messagesForModel.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: toolContent,
+      } as OpenAI.Chat.Completions.ChatCompletionToolMessageParam);
+    }
+
+    // 次ラウンドで LLM が検索結果を受け取り回答を生成する
   }
 }
