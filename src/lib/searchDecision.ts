@@ -23,12 +23,15 @@ Use web search when:
 - prices, schedules, reviews, ratings, patches, release dates, laws, sports, news, products, or online population may have changed
 - the user explicitly asks to look up/search/check/verify
 - the answer depends on a specific website's current state
+- the user mentions a specific product name, tool name, library, framework, or proper noun that may be unfamiliar or recently emerged (e.g. "omp", "Paseo", "Bun", "tRPC")
+- the user asks "what is X", "Xって何", "Xとは", "tell me about X" about a named entity
 
 Do not use web search when:
 - the user asks for explanation, translation, coding help, general advice, brainstorming, or opinions
 - the answer can be given from stable knowledge
 - the user is asking about provided text/code/logs
 - the user asks about past conversations, memories, or what was previously discussed
+- the entity is a well-known general concept that the model confidently knows (e.g. "what is Python", "what is HTTP") — only search when uncertain
 
 If search is needed, create 1 to 3 precise search queries in the user's language.
 The userNotice should be a SHORT status-style sentence in the user's language (e.g. "最新の情報をWebで確認します。"). If no search needed, set userNotice to null.
@@ -40,9 +43,10 @@ const FALLBACK_USER_NOTICE = "検索判定を定型ルールで補完し、Web�
 const DEFAULT_USER_NOTICE = "最新の情報をWebで確認します。";
 const REVIEW_USER_NOTICE = "最新の評価やレビューをWebで確認します。";
 const STEAM_USER_NOTICE = "Steamの最新情報をWebで確認します。";
+const UNKNOWN_TERM_NOTICE = "未知の語についてWebで調べます。";
 
 const EXPLICIT_SEARCH_PATTERN =
-  /(web\s*search|search\s+the\s+web|look\s+up|verify|check\s+online|web検索|検索して|検索し|調べて|確認して|見て|最新|現在|直近|最近|いま|今日|latest|current|recent|today|up[- ]?to[- ]date)/i;
+  /(web\s*search|search\s+the\s+web|look\s+up|verify|check\s+online|web検索|検索して|検索し|調べて|確認して|見て|最新|現在|直近|最近|いま|今日|latest|current|recent|today|up[- ]?to[- ]?date)/i;
 
 const VOLATILE_INFO_PATTERN =
   /(steam|レビュー|評価|評判|口コミ|ratings?|reviews?|price|prices?|価格|値段|schedule|release|patch|update|version|人口|同接|ニュース|news|法律|law|sports?|score)/i;
@@ -50,12 +54,21 @@ const VOLATILE_INFO_PATTERN =
 const MEMORY_RECALL_PATTERN =
   /((何|なに).{0,6}(話|はなし))|((前|以前|さっき|昨日|きのう|前回|過去).{0,6}(話|はなし|会話|対話))|((覚|おぼ)えて)|(what (did|were) we (talk|discuss|chat))|(what we (talk|discuss))|((earlier|yesterday|before|just now|last time|previously|the other day|recently|last week|last night|earlier today).{0,10}(talk|conversation|discuss|chat))|(our (last|previous|recent|earlier) (talk|conversation|discuss|chat))|(remember (what|when|that|we|the|our))|(do you remember)|(previous (conversation|chat|discuss))/i;
 
+/**
+ * 未知概念・固有名詞への問い合わせパターン。
+ * 「Xって何」「Xとは」「what is X」「tell me about X」「Xって良い/どう」等。
+ * MEMORY_RECALL_PATTERN が優先される（記憶呼び出し質問は検索しない）。
+ */
+const UNKNOWN_TERM_PATTERN =
+  /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに))|(what (is|are) [A-Z])|(tell me about )|(って(良い|いい|どう|どうですか))/i;
+
 function buildUserNotice(userMessage: string, fallback: boolean): string {
   if (fallback) return FALLBACK_USER_NOTICE;
   if (/steam/i.test(userMessage)) return STEAM_USER_NOTICE;
   if (/(レビュー|評価|評判|口コミ|ratings?|reviews?)/i.test(userMessage)) {
     return REVIEW_USER_NOTICE;
   }
+  if (UNKNOWN_TERM_PATTERN.test(userMessage)) return UNKNOWN_TERM_NOTICE;
   return DEFAULT_USER_NOTICE;
 }
 
@@ -66,6 +79,17 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
   // 記憶呼び出し質問（「何話した」「前に話した」「覚えてる」等）は検索しない。
   // EXPLICIT_SEARCH_PATTERN の「最近」「今日」等にマッチしても強制検索しない。
   if (MEMORY_RECALL_PATTERN.test(normalized)) return null;
+
+  // 未知概念・固有名詞への問い合わせ（「Xって何」「Xとは」「what is X」等）は検索。
+  // 記憶呼び出し質問は上で除外済み。
+  if (UNKNOWN_TERM_PATTERN.test(normalized)) {
+    return {
+      needsSearch: true,
+      reason: "heuristic: user asks about an unfamiliar named entity or term",
+      userNotice: UNKNOWN_TERM_NOTICE,
+      queries: [normalized],
+    };
+  }
 
   if (!EXPLICIT_SEARCH_PATTERN.test(normalized) && !VOLATILE_INFO_PATTERN.test(normalized)) {
     return null;

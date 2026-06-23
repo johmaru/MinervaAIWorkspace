@@ -4,9 +4,12 @@ import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDef
 import { db } from "@/db";
 import { messages, threads } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
-import { searchWeb } from "@/lib/scraper";
+import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
+import { extractUrls } from "@/lib/urlExtract";
 import { decideSearch } from "@/lib/searchDecision";
+import { probeToolSupport } from "@/lib/toolProbe";
+import type { ToolSupport } from "@/lib/toolProbe";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { generateMemories } from "@/lib/memory";
 
@@ -97,6 +100,11 @@ export async function POST(req: Request) {
           send,
         });
 
+        const urlContextMessage = await buildUrlContext({
+          content: prepared.content,
+          send,
+        });
+
         const memoryMessage = await buildMemoryContext({
           content: prepared.content,
           thread,
@@ -107,6 +115,7 @@ export async function POST(req: Request) {
           history: prepared.history,
           content: prepared.content,
           searchContextMessage,
+          urlContextMessage,
           memoryMessage,
         });
 
@@ -135,6 +144,15 @@ export async function POST(req: Request) {
             },
           });
         } else {
+          // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
+          // サポート時はストリーミング中に自律的に検索/スクレイプを実行。
+          // 非サポート時は decideSearch ルーター方式（buildSearchContext）にフォールバック。
+          let toolSupport: ToolSupport | null = null;
+          try {
+            toolSupport = await probeToolSupport(llm, finalModel);
+          } catch {
+            toolSupport = null;
+          }
           await streamCompletion({
             llm,
             model: finalModel,
@@ -147,6 +165,8 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
+            toolSupport,
+            send,
           });
         }
         const [assistantMsg] = await db
@@ -295,6 +315,58 @@ function buildChain(allMessages: DbMessage[], leafId: string | null): DbMessage[
   return chain;
 }
 
+/**
+ * ユーザー発言に含まれる URL をスクレイプし、コンテキストとして注入する。
+ *
+ * - extractUrls で URL 抽出（上限10件、重複排除）
+ * - 各 URL を scrapeUrl で並列スクレイプ（1件失敗でも他は継続: Promise.allSettled）
+ * - 成功結果を system message として構築
+ * - 全件失敗/0件 → null（何もしない）
+ * - SSE 進捗: status → sources
+ */
+async function buildUrlContext({
+  content,
+  send,
+}: {
+  content: string;
+  send: StreamSend;
+}): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam | null> {
+  const urls = extractUrls(content);
+  if (urls.length === 0) return null;
+
+  if (urls.length >= 10) {
+    send("status", { label: "最初の10件のURLを取得します。" });
+  } else {
+    send("status", { label: "URLの内容を取得しています。" });
+  }
+
+  const settled = await Promise.allSettled(urls.map((u) => scrapeUrl(u)));
+
+  const sources: SourceInfo[] = [];
+  const blocks: string[] = [];
+  for (let i = 0; i < urls.length; i++) {
+    const r = settled[i];
+    if (r.status !== "fulfilled") continue;
+    const result = r.value;
+    sources.push({
+      url: result.url,
+      title: result.title,
+      snippet: result.content.slice(0, 200),
+    });
+    blocks.push(
+      `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`,
+    );
+  }
+
+  if (sources.length > 0) send("sources", { sources });
+  if (blocks.length === 0) return null;
+
+  return {
+    role: "system",
+    content: `URL content (use these to answer):\n${blocks.join("\n\n")}`,
+  };
+}
+
 async function buildSearchContext({
   content,
   llm,
@@ -377,12 +449,14 @@ function buildFinalMessages({
   history,
   content,
   searchContextMessage,
+  urlContextMessage,
   memoryMessage,
 }: {
   systemContent?: string | null;
   history: DbMessage[];
   content: string;
   searchContextMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam | null;
+  urlContextMessage?: OpenAI.Chat.Completions.ChatCompletionMessageParam | null;
   memoryMessage?: { role: "system"; content: string } | null;
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return [
@@ -393,6 +467,7 @@ function buildFinalMessages({
     ),
     { role: "user" as const, content },
     ...(searchContextMessage ? [searchContextMessage] : []),
+    ...(urlContextMessage ? [urlContextMessage] : []),
   ];
 }
 
@@ -566,18 +641,61 @@ async function completeText(
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
 
+/**
+ * ストリーミング完了用のツール定義。
+ * probeToolSupport で supported:true の場合のみ使用される。
+ */
+const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "scrape_webpage",
+      description:
+        "Fetch and read the content of a web page at the given URL. Use when the user shares a URL or when you need to read a specific web page.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The URL to scrape" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_web",
+      description:
+        "Search the web for current information or unfamiliar terms. Use when you need facts you are not confident about.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+];
+
+const MAX_TOOL_ROUNDS = 3;
+
 async function streamCompletion({
   llm,
   model,
   messages: messagesForModel,
   onDelta,
   onReasoning,
+  toolSupport,
+  send,
 }: {
   llm: OpenAI;
   model: string;
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   onDelta: (delta: string) => void;
   onReasoning: (delta: string) => void;
+  toolSupport?: ToolSupport | null;
+  send?: StreamSend;
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -586,21 +704,162 @@ async function streamCompletion({
       ? thinkingEffort
       : await getDefaultReasoningEffort(model);
 
-  const completion = await llm.chat.completions.create({
-    model,
-    messages: messagesForModel,
-    stream: true,
-    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+  const useTools = toolSupport?.supported === true && send !== undefined;
 
-  for await (const chunk of completion) {
-    const choice = chunk.choices?.[0];
-    if (!choice) continue;
-    const reasoningDelta = (
-      choice.delta as Record<string, unknown> as { reasoning_content?: string }
-    ).reasoning_content;
-    if (reasoningDelta) onReasoning(reasoningDelta);
-    const contentDelta = choice.delta?.content;
-    if (contentDelta) onDelta(contentDelta);
+  let currentMessages = messagesForModel;
+  let rounds = 0;
+
+  // ツール使用モード: ストリーミング中に tool_calls を検知したら
+ // ツールを実行し、結果を tool role メッセージとして追加して再ストリーミング。
+  // 最大 MAX_TOOL_ROUNDS 回まで。超えたら残りはツール無しで回答継続。
+  while (true) {
+    const useToolsThisRound = useTools && rounds < MAX_TOOL_ROUNDS;
+
+    const completion = await llm.chat.completions.create({
+      model,
+      messages: currentMessages,
+      stream: true,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      ...(useToolsThisRound
+        ? { tools: STREAM_TOOLS, tool_choice: "auto" }
+        : {}),
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+
+    // ストリーミング中に tool_calls の delta を蓄積する。
+    // OpenAI のストリーミング形式では tool_calls が分割されて届くため、
+    // index ごとに結合する。
+    const toolCallAccumulator: Record<
+      number,
+      { id: string; name: string; arguments: string }
+    > = {};
+    let hadToolCalls = false;
+
+    for await (const chunk of completion) {
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      const reasoningDelta = (
+        choice.delta as Record<string, unknown> as { reasoning_content?: string }
+      ).reasoning_content;
+      if (reasoningDelta) onReasoning(reasoningDelta);
+      const contentDelta = choice.delta?.content;
+      if (contentDelta) onDelta(contentDelta);
+
+      // tool_calls の delta を蓄積
+      const deltaToolCalls = (
+        choice.delta as Record<string, unknown> as {
+          tool_calls?: Array<{
+            index: number;
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          }>;
+        }
+      ).tool_calls;
+      if (deltaToolCalls) {
+        hadToolCalls = true;
+        for (const tc of deltaToolCalls) {
+          const existing = toolCallAccumulator[tc.index] ?? {
+            id: "",
+            name: "",
+            arguments: "",
+          };
+          if (tc.id) existing.id = tc.id;
+          if (tc.function?.name) existing.name += tc.function.name;
+          if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+          toolCallAccumulator[tc.index] = existing;
+        }
+      }
+    }
+
+    if (!hadToolCalls || !useToolsThisRound) {
+      // ツール呼び出しなし、または上限超過でツール無しラウンド → 完了
+      break;
+    }
+
+    rounds++;
+
+    // ツール呼び出しを実行
+    const toolCalls = Object.values(toolCallAccumulator).filter((tc) => tc.name);
+
+    // assistant メッセージ（tool_calls 含む）を履歴に追加
+    currentMessages = [
+      ...currentMessages,
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam,
+    ];
+
+    const sources: SourceInfo[] = [];
+
+    // 各ツール呼び出しを実行し、結果を tool role メッセージとして追加
+    for (const tc of toolCalls) {
+      let toolContent: string;
+      let parsedArgs: { url?: string; query?: string };
+      try {
+        parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string };
+      } catch {
+        parsedArgs = {};
+      }
+
+      if (tc.name === "scrape_webpage" && parsedArgs.url) {
+        send?.("status", { label: "URLの内容を取得しています。" });
+        try {
+          const result = await scrapeUrl(parsedArgs.url);
+          sources.push({
+            url: result.url,
+            title: result.title,
+            snippet: result.content.slice(0, 200),
+          });
+          toolContent = `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`;
+        } catch {
+          toolContent = `Failed to scrape ${parsedArgs.url}`;
+        }
+      } else if (tc.name === "search_web" && parsedArgs.query) {
+        send?.("status", { label: "Webで検索しています。" });
+        try {
+          const response = await searchWeb(parsedArgs.query, 3);
+          for (const r of response.results) {
+            sources.push({
+              url: r.url,
+              title: r.scrapeTitle || r.title,
+              snippet: r.snippet,
+            });
+          }
+          toolContent = response.results
+            .map(
+              (r) =>
+                `<${r.url}>\n${r.scrapeTitle || r.title}\n${r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : r.snippet}`,
+            )
+            .join("\n\n");
+          if (!toolContent) toolContent = "No results found.";
+        } catch {
+          toolContent = `Search failed for: ${parsedArgs.query}`;
+        }
+      } else {
+        toolContent = `Unknown tool: ${tc.name}`;
+      }
+
+      currentMessages = [
+        ...currentMessages,
+        {
+          role: "tool",
+          tool_call_id: tc.id,
+          content: toolContent,
+        } as OpenAI.Chat.Completions.ChatCompletionToolMessageParam,
+      ];
+    }
+
+    if (sources.length > 0) send?.("sources", { sources });
+
+    if (rounds >= MAX_TOOL_ROUNDS) {
+      send?.("status", { label: "検索回数上限に達しました。" });
+    }
+
+    // 再ストリーミング（次のラウンド）
   }
 }

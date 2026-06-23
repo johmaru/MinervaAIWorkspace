@@ -11,8 +11,8 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
 - **Semantic search** across all threads (pgvector cosine similarity)
 - **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context
-- **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers
-- **Web search** — app-level SearXNG pipeline with a dedicated search model for query generation and result summarization; configurable in settings
+- **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers; URLs pasted in chat are scraped automatically and injected as context
+- **Web search** — app-level SearXNG pipeline with a dedicated search model for query generation and result summarization; triggers on volatile info, explicit requests, and unfamiliar terms/proper nouns; configurable in settings
 - **Dual-model conclusions** — run two models in cross-review or debate mode, then stream a synthesized final answer with the model work kept in collapsible details
 - **Tor proxy** support for anonymous scraping
 - **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control

@@ -23,6 +23,9 @@ vi.mock("@/lib/memoryStore", () => ({
 vi.mock("@/lib/memory", () => ({
   generateMemories: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/toolProbe", () => ({
+  probeToolSupport: vi.fn().mockResolvedValue({ supported: false, checkedAt: new Date() }),
+}));
 
 import { searchWeb } from "@/lib/scraper";
 import { decideSearch } from "@/lib/searchDecision";
