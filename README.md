@@ -128,8 +128,10 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
-| `EMBED_MODEL`           | Embedding model name                                               | `Xenova/all-MiniLM-L6-v2`                            |
-| `EMBED_DIM`             | Embedding dimension                                                | `384`                                                |
+| `EMBED_MODEL`           | Embedding model name                                               | `LiquidAI/LFM2.5-Embedding-350M`                     |
+| `EMBED_DIM`             | Embedding dimension                                                | `1024`                                               |
+| `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `http`                                               |
+| `EMBEDDER_URL`          | Python embedder URL (required when `EMBED_PROVIDER=http`; Docker sets automatically) | `http://localhost:8001`     |
 | `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
 | `WEB_SEARCH_MAX_ROUNDS` | Maximum search rounds per response (1-5); caps how many of the search-decision LLM's queries are executed | `2`                                                  |
 | `SCRAPER_URL`           | Scraper microservice URL                                           | `http://localhost:8000`                              |

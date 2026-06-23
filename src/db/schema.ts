@@ -10,9 +10,9 @@ import {
   real,
 } from "drizzle-orm/pg-core";
 
-// 埋め込み次元数: env EMBED_DIM（デフォルト 384）。
+// 埋め込み次元数: env EMBED_DIM（デフォルト 1024 = LFM2.5-Embedding-350M）。
 // モデル切替時は env で指定 + DB マイグレーション（vector 列の再作成）が必要。
-const EMBED_DIM = Number(process.env.EMBED_DIM) || 384;
+const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
 
 /**

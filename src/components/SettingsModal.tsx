@@ -23,6 +23,7 @@ type SettingsResponse = {
   embedProvider: string;
   embedModelOptions: readonly EmbedModelOption[];
   dbVectorDim: number;
+  dbPageEmbeddingsDim: number;
   // Web 検索
   webSearchProvider: string;
   webSearchMaxResults: number;
@@ -115,8 +116,9 @@ export function SettingsModal({ open, onClose }: Props) {
   const needsMigration =
     settings !== null &&
     selectedOption !== undefined &&
-    selectedOption.dim !== settings.dbVectorDim &&
-    settings.dbVectorDim > 0;
+    settings.dbVectorDim > 0 &&
+    (selectedOption.dim !== settings.dbVectorDim ||
+     (settings.dbPageEmbeddingsDim > 0 && selectedOption.dim !== settings.dbPageEmbeddingsDim));
 
   const handleSave = useCallback(async () => {
     setSaving(true);

@@ -114,7 +114,7 @@ async function getVectorDim(): Promise<{ memories: number; pageEmbeddings: numbe
  */
 export async function GET(req: Request) {
   const locale = getRequestLocale(req);
-  const dbVectorDim = (await getVectorDim()).memories;
+  const dims = await getVectorDim();
 
   return Response.json({
     // LLM
@@ -124,11 +124,12 @@ export async function GET(req: Request) {
     llmModels: process.env.LLM_MODELS || "",
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
     // Embeddings
-    embedModel: process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2",
-    embedDim: Number(process.env.EMBED_DIM) || 384,
-    embedProvider: process.env.EMBED_PROVIDER || "local",
+    embedModel: process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M",
+    embedDim: Number(process.env.EMBED_DIM) || 1024,
+    embedProvider: process.env.EMBED_PROVIDER || "http",
     embedModelOptions: getEmbedModelOptions(locale),
-    dbVectorDim,
+    dbVectorDim: dims.memories,
+    dbPageEmbeddingsDim: dims.pageEmbeddings,
     // Web 検索
     webSearchProvider: process.env.WEB_SEARCH_PROVIDER || "searxng",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
@@ -204,7 +205,7 @@ export async function POST(req: Request) {
   const dbVectorDim = dims.memories;
 
   // 新しい次元を決定
-  const newDim = body.embedDim ?? Number(process.env.EMBED_DIM) ?? 384;
+  const newDim = body.embedDim ?? Number(process.env.EMBED_DIM) ?? 1024;
   // 両テーブルの次元が newDim と一致しない、または互いに不一致なら要マイグレーション。
   // 検索クエリは memories と page_embeddings を横断するため、片方だけずれても
   // "different vector dimensions" エラーになる。

@@ -19,8 +19,8 @@ import { createHash } from "crypto";
 //   Xenova/multilingual-e5-base            (768次元, 多言語, 高精度)
 // HTTP プロバイダ（Python embedder サービス）:
 //   LiquidAI/LFM2.5-Embedding-350M         (1024次元, 多言語, sentence-transformers)
-const MODEL_ID = process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2";
-const EMBED_DIM = Number(process.env.EMBED_DIM) || 384;
+const MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
+const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
 type EmbedKind = "query" | "document";
 

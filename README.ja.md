@@ -129,8 +129,10 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `LLM_MODEL`             | デフォルトモデル                                                  | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | モデルセレクタ用のカンマ区切りモデル一覧（OAI互換モード用。Umansモードでは無視） | —                                                    |
 | `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
-| `EMBED_MODEL`           | 埋め込みモデル名                                                  | `Xenova/all-MiniLM-L6-v2`                            |
-| `EMBED_DIM`             | 埋め込み次元数                                                    | `384`                                                |
+| `EMBED_MODEL`           | 埋め込みモデル名                                                  | `LiquidAI/LFM2.5-Embedding-350M`                     |
+| `EMBED_DIM`             | 埋め込み次元数                                                    | `1024`                                               |
+| `EMBED_PROVIDER`        | 埋め込みバックエンド: `local`（ONNX）または `http`（Python embedder） | `http`                                    |
+| `EMBEDDER_URL`          | Python embedder の URL（`EMBED_PROVIDER=http` 時に必要。Docker は自動設定） | `http://localhost:8001`                   |
 | `WEB_SEARCH_MAX_RESULTS`| チャット送信時に取得・スクレイピングする件数                       | `3`                                                  |
 | `WEB_SEARCH_MAX_ROUNDS` | 1回の回答で検索を繰り返す最大回数（1-5）。検索判定 LLM が決定したクエリのうち実行する数を制限 | `2`                                                  |
 | `SCRAPER_URL`           | Scraper マイクロサービスの URL                                    | `http://localhost:8000`                              |
