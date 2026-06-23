@@ -127,6 +127,7 @@ export async function GET(req: Request) {
     embedModel: process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2",
     embedDim: Number(process.env.EMBED_DIM) || 384,
     embedProvider: process.env.EMBED_PROVIDER || "local",
+    embedModelOptions: getEmbedModelOptions(locale),
     dbVectorDim,
     // Web 検索
     webSearchProvider: process.env.WEB_SEARCH_PROVIDER || "searxng",
