@@ -12,7 +12,7 @@
 - **セマンティック検索** — 全スレッド横断で pgvector のコサイン類似度により検索
 - **会話記憶** — 各ターン終了後に fact/working 記憶を抽出し、RAG コンテキストとして注入
 - **Web ページスクレイピング → 知識化** — スクレイプしたページを RAG ソースとして取り込み、以降の回答に活用
-- **アプリレベルの検索パイプライン** — 検索判定 LLM が検索要否を判断し、一言断りを表示 → SearXNG で検索 → 結果を context に注入して最終回答を生成
+- **Web 検索** — アプリレベルの SearXNG パイプラインまたはサーバーサイドの Umans native/exa 検索。設定で切替可能
 - **デュアルモデル結論** — 2つのモデルを相互レビュー方式または会話方式で走らせ、統合した最終回答をストリーミングし、A/Bの検討内容は折りたたみ詳細で確認可能
 - **Tor プロキシ** — 匿名スクレイピングのための Tor 対応
 - **Thinking Effort 制御** — モデル毎に対応レベルが異なる（GLM-5.2: `none`/`high`/`max`、Flash: `none`/`low`/`medium`/`high`）。制御非対応モデルでは無視される
@@ -134,6 +134,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `SEARXNG_URL`           | SearXNG の URL                                                    | `http://localhost:8080`                              |
 | `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |
 | `SCRAPE_PROXY`          | Scraper がスクレイピング時に使用するプロキシ                       | —                                                    |
+| `WEB_SEARCH_PROVIDER`  | 検索バックエンド: searxng（ローカル）、native（Umans Kimi）、exa（Umans Exa） | searxng                                             |
 | `DATABASE_URL`          | PostgreSQL 接続 URL（ローカル `bun run dev` 時に使用）            | `postgres://umans:umans@localhost:5432/umanschat`    |
 
 ## 使い方

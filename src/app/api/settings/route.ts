@@ -127,9 +127,9 @@ export async function GET(req: Request) {
     embedModel: process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2",
     embedDim: Number(process.env.EMBED_DIM) || 384,
     embedProvider: process.env.EMBED_PROVIDER || "local",
-    embedModelOptions: getEmbedModelOptions(locale),
     dbVectorDim,
     // Web 検索
+    webSearchProvider: process.env.WEB_SEARCH_PROVIDER || "searxng",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
     webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2,
     scraperUrl: process.env.SCRAPER_URL || "http://localhost:8000",
@@ -154,6 +154,7 @@ type SettingsBody = {
   embedDim?: number;
   embedProvider?: string;
   // Web 検索
+  webSearchProvider?: string;
   webSearchMaxResults?: number;
   webSearchMaxRounds?: number;
   scraperUrl?: string;
@@ -182,6 +183,10 @@ export async function POST(req: Request) {
   }
 
   // バリデーション
+  if (body.webSearchProvider !== undefined && !["searxng", "native", "exa"].includes(body.webSearchProvider)) {
+    return new Response("webSearchProvider must be searxng, native, or exa", { status: 400 });
+  }
+
   if (body.embedDim && (body.embedDim < 1 || body.embedDim > 4096)) {
     return new Response("embedDim must be 1-4096", { status: 400 });
   }
@@ -251,9 +256,7 @@ export async function POST(req: Request) {
     } catch {
       envContent = "";
     }
-
     const updates: Record<string, string> = {};
-
     // LLM
     if (body.llmBaseUrl !== undefined) updates.LLM_BASE_URL = body.llmBaseUrl;
     if (body.llmApiKey !== undefined) updates.LLM_API_KEY = body.llmApiKey;
@@ -268,6 +271,7 @@ export async function POST(req: Request) {
     if (body.webSearchMaxRounds !== undefined) updates.WEB_SEARCH_MAX_ROUNDS = String(body.webSearchMaxRounds);
     if (body.scraperUrl !== undefined) updates.SCRAPER_URL = body.scraperUrl;
     if (body.searxngUrl !== undefined) updates.SEARXNG_URL = body.searxngUrl;
+    if (body.webSearchProvider !== undefined) updates.WEB_SEARCH_PROVIDER = body.webSearchProvider;
     // Tor プロキシ
     if (body.torProxy !== undefined) updates.TOR_PROXY = body.torProxy;
     if (body.scrapeProxy !== undefined) updates.SCRAPE_PROXY = body.scrapeProxy;

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -264,6 +264,61 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
     // searchWeb は呼ばれない
     expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
+  }, 60_000);
+});
+
+describe("POST /api/chat — Web 検索プロバイダルーティング", () => {
+  const origBaseUrl = process.env.LLM_BASE_URL;
+  const origProvider = process.env.WEB_SEARCH_PROVIDER;
+
+  afterEach(() => {
+    process.env.LLM_BASE_URL = origBaseUrl;
+    process.env.WEB_SEARCH_PROVIDER = origProvider;
+  });
+
+  it("WEB_SEARCH_PROVIDER=exa + Umans プロバイダ → decideSearch を呼ばない", async () => {
+    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
+    process.env.WEB_SEARCH_PROVIDER = "exa";
+
+    const id = await createThread();
+    const res = await POST(chatReq(id, "最新のニュース教えて"));
+    expect(res.status).toBe(200);
+
+    // ストリームを消費してルーティングロジックを実行
+    await sseChunks(res);
+
+    // decideSearch は呼ばれない（サーバーサイド検索パス）
+    expect(vi.mocked(decideSearch)).not.toHaveBeenCalled();
+    // searchWeb も呼ばれない
+    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it("WEB_SEARCH_PROVIDER=searxng (デフォルト) → decideSearch を呼ぶ", async () => {
+    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
+    process.env.WEB_SEARCH_PROVIDER = "searxng";
+
+    const id = await createThread();
+    const res = await POST(chatReq(id, "最新のニュース教えて"));
+    expect(res.status).toBe(200);
+
+    await sseChunks(res);
+
+    // decideSearch は呼ばれる（SearXNG パイプライン）
+    expect(vi.mocked(decideSearch)).toHaveBeenCalled();
+  }, 60_000);
+
+  it("WEB_SEARCH_PROVIDER=exa + 非 Umans プロバイダ → decideSearch を呼ぶ (フォールバック)", async () => {
+    process.env.LLM_BASE_URL = "https://api.openai.com/v1";
+    process.env.WEB_SEARCH_PROVIDER = "exa";
+
+    const id = await createThread();
+    const res = await POST(chatReq(id, "最新のニュース教えて"));
+    expect(res.status).toBe(200);
+
+    await sseChunks(res);
+
+    // 非 Umans プロバイダ → SearXNG パイプラインにフォールバック
+    expect(vi.mocked(decideSearch)).toHaveBeenCalled();
   }, 60_000);
 });
 

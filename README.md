@@ -12,7 +12,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Semantic search** across all threads (pgvector cosine similarity)
 - **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context
 - **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers
-- **App-level search pipeline** — a separate LLM call decides whether to search, shows a short notice, fetches results via SearXNG, then injects them as context for the final answer
+- **Web search** — app-level SearXNG pipeline or server-side Umans native/exa search; selectable in settings
 - **Dual-model conclusions** — run two models in cross-review or debate mode, then stream a synthesized final answer with the model work kept in collapsible details
 - **Tor proxy** support for anonymous scraping
 - **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control
@@ -133,6 +133,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `SEARXNG_URL`           | SearXNG URL                                                        | `http://localhost:8080`                              |
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |
 | `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
+| `WEB_SEARCH_PROVIDER`   | Search backend: searxng (local), native (Umans Kimi), or exa (Umans Exa) | searxng                                             |
 | `DATABASE_URL`          | PostgreSQL connection URL (used for local `bun run dev`)           | `postgres://umans:umans@localhost:5432/umanschat`    |
 
 ## LLM Provider Modes

@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
+import { createLLM, defaultModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, isUmansProvider } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
@@ -76,6 +76,11 @@ export async function POST(req: Request) {
 
   const llm = createLLM();
   const finalModel = body.model ?? thread.model ?? defaultModel();
+  const webSearchProvider = process.env.WEB_SEARCH_PROVIDER || "searxng";
+  const umansSearchProvider =
+    (webSearchProvider === "native" || webSearchProvider === "exa") && isUmansProvider()
+      ? webSearchProvider
+      : null;
   const systemContent = thread.systemPrompt ?? body.systemPrompt;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -91,12 +96,14 @@ export async function POST(req: Request) {
       try {
         send("start", { userMessageId: prepared.userMessage.id });
 
-        const searchContextMessage = await buildSearchContext({
-          content: prepared.content,
-          model: finalModel,
-          history: prepared.history,
-          send,
-        });
+        const searchContextMessage = umansSearchProvider
+          ? null
+          : await buildSearchContext({
+              content: prepared.content,
+              model: finalModel,
+              history: prepared.history,
+              send,
+            });
 
         const memoryMessage = await buildMemoryContext({
           content: prepared.content,
@@ -134,6 +141,7 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
+            webSearchProvider: umansSearchProvider,
           });
         } else {
           await streamCompletion({
@@ -148,9 +156,9 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
+            webSearchProvider: umansSearchProvider,
           });
         }
-
         const [assistantMsg] = await db
           .insert(messages)
           .values({
@@ -551,12 +559,14 @@ async function streamCompletion({
   messages: messagesForModel,
   onDelta,
   onReasoning,
+  webSearchProvider,
 }: {
   llm: OpenAI;
   model: string;
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   onDelta: (delta: string) => void;
   onReasoning: (delta: string) => void;
+  webSearchProvider?: string | null;
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -565,12 +575,39 @@ async function streamCompletion({
       ? thinkingEffort
       : await getDefaultReasoningEffort(model);
 
-  const completion = await llm.chat.completions.create({
-    model,
-    messages: messagesForModel,
-    stream: true,
-    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+  const tools = webSearchProvider
+    ? [
+        {
+          type: "function" as const,
+          function: {
+            name: "web_search",
+            description: "Search the web for current information.",
+            parameters: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "The search query" },
+              },
+              required: ["query"],
+            },
+          },
+        },
+      ]
+    : undefined;
+
+  const requestOptions = webSearchProvider
+    ? { headers: { "X-Umans-Websearch-Provider": webSearchProvider } }
+    : undefined;
+
+  const completion = await llm.chat.completions.create(
+    {
+      model,
+      messages: messagesForModel,
+      stream: true,
+      ...(tools ? { tools } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+    requestOptions,
+  );
 
   for await (const chunk of completion) {
     const choice = chunk.choices?.[0];
