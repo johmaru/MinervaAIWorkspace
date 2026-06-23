@@ -351,9 +351,9 @@ export function useChat(threadId: string | null) {
 
   const send = useCallback(
     async (input: string, opts?: { systemPrompt?: string; model?: string; attachmentIds?: string[] }) => {
-      if (!threadId) return;
+      if (!threadId || !thread || isLoading || isStreaming) return;
       const trimmed = input.trim();
-      if (!trimmed || isStreaming) return;
+      if (!trimmed) return;
 
       const parentId = thread?.currentLeafId ?? null;
       const userMsg: ChatMessage = {
@@ -378,12 +378,12 @@ export function useChat(threadId: string | null) {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [threadId, isStreaming, thread, t],
+    [threadId, isStreaming, thread, isLoading, t],
   );
 
   const regenerate = useCallback(
     async (userMessageId: string) => {
-      if (!threadId || isStreaming) return;
+      if (!threadId || !thread || isLoading || isStreaming) return;
 
       const assistantId = `optimistic-regen-${Date.now()}`;
       await streamChat(
@@ -397,12 +397,12 @@ export function useChat(threadId: string | null) {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [threadId, isStreaming, thread, t],
+    [threadId, isStreaming, thread, isLoading, t],
   );
 
   const editMessage = useCallback(
     async (userMessageId: string, newContent: string) => {
-      if (!threadId || isStreaming) return;
+      if (!threadId || !thread || isLoading || isStreaming) return;
       const trimmed = newContent.trim();
       if (!trimmed) return;
 
@@ -427,7 +427,7 @@ export function useChat(threadId: string | null) {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [threadId, isStreaming, thread, t],
+    [threadId, isStreaming, thread, isLoading, t],
   );
 
   const switchBranch = useCallback(

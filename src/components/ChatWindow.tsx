@@ -84,12 +84,14 @@ export function ChatWindow({
   }
 
   // 新規スレッド作成が完了し threadId が切り替わったら、保留中の入力を自動送信する。
+  // スレッドのロード（isLoading）が完了し thread が解決してから送信しないと、
+  // ロード効果の setMessages([]) が楽観的メッセージを上書きしてしまう競合を防ぐ。
   useEffect(() => {
-    if (!threadId || pendingRef.current === null) return;
+    if (!threadId || pendingRef.current === null || isLoading || !thread) return;
     const content = pendingRef.current;
     pendingRef.current = null;
     void send(content).then(() => onConversationEnded?.());
-  }, [threadId, send, onConversationEnded]);
+  }, [threadId, isLoading, thread, send, onConversationEnded]);
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
