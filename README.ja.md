@@ -102,7 +102,10 @@ cp .env.example .env
 #    DATABASE_URL、LLM_API_KEY、および（スクレイピング/検索を使う場合）
 #    各サービスの URL を設定
 
-# 4. 開発サーバーを起動
+# 4. DBマイグレーションを適用（pgvector拡張 + スキーマ作成）
+bunx drizzle-kit migrate
+
+# 5. 開発サーバーを起動
 bun run dev
 #    http://localhost:3000
 ```
@@ -151,11 +154,9 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 
 ## データベースマイグレーション
 
-UmansChat は Drizzle ORM と pgvector を使用します。手動でマイグレーションを適用する場合（例: ローカルの新規データベース）:
+UmansChat は Drizzle ORM と pgvector を使用します。Docker 環境では初回起動時にマイグレーションが自動実行されます — アプリコンテナがサーバー起動前に `drizzle-kit migrate` を実行し、pgvector 拡張と全テーブルを作成します。
 
-```bash
-bunx drizzle-kit migrate
-```
+Docker を使わないローカル開発では、`bunx drizzle-kit migrate` で手動適用してください（[クイックスタート（ローカル開発）](#クイックスタートローカル開発) を参照）。
 
 埋め込みモデルを切り替えた場合（`EMBED_MODEL` / `EMBED_DIM` を変更）、既存の `embeddings` および `page_embeddings` のベクトル列を新しい次元数で再作成する必要があります。設定 GUI のマイグレーション機能（`applyMigration`）を使ってベクトル列を削除・再作成した上で、コンテンツを再埋め込みしてください。
 

@@ -101,7 +101,10 @@ docker compose up -d db
 cp .env.example .env
 #    Set DATABASE_URL, LLM_API_KEY, and (for scraping/search) the service URLs
 
-# 4. Run the dev server
+# 4. Apply database migrations (pgvector extension + schema)
+bunx drizzle-kit migrate
+
+# 5. Run the dev server
 bun run dev
 #    http://localhost:3000
 ```
@@ -173,11 +176,9 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 
 ## Database Migrations
 
-UmansChat uses Drizzle ORM with pgvector. To apply migrations manually (e.g. on a fresh local database):
+UmansChat uses Drizzle ORM with pgvector. In the Docker setup, migrations run automatically on first startup — the app container runs `drizzle-kit migrate` before starting the server, which creates the pgvector extension and all tables.
 
-```bash
-bunx drizzle-kit migrate
-```
+For local development outside Docker, apply migrations manually with `bunx drizzle-kit migrate` (see [Quick Start (Local Dev)](#quick-start-local-dev)).
 
 When you switch the embedding model (changing `EMBED_MODEL` / `EMBED_DIM`), the existing `embeddings` and `page_embeddings` vector columns must be recreated with the new dimension. Use the Settings GUI's migration action (`applyMigration`) to drop and recreate the vector columns, then re-embed your content.
 
