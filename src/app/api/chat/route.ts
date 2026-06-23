@@ -12,6 +12,7 @@ import { probeToolSupport } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { generateMemories } from "@/lib/memory";
+import { after } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,6 +81,14 @@ export async function POST(req: Request) {
   const llm = createLLM();
   const finalModel = body.model ?? thread.model ?? defaultModel();
   const systemContent = thread.systemPrompt ?? body.systemPrompt;
+
+  // ストリーム完了を待つ Promise。after() コールバックがリクエストコンテキスト内で
+  // generateMemories を実行するため、ストリーム完了後に内容を引き渡す。
+  let resolveStream!: () => void;
+  const streamDone = new Promise<void>((resolve) => {
+    resolveStream = resolve;
+  });
+  const streamResult: { assistantContent: string } = { assistantContent: "" };
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -212,29 +221,41 @@ export async function POST(req: Request) {
           .set({ updatedAt: new Date() })
           .where(eq(threads.id, body.threadId));
 
-        // 記憶生成: ストリーム完了後に同期的に保存する。
-        // done イベントは既に送信済み（クライアント受信済み）なので、
-        // ここで await してもクライアント UX に影響しない。
-        // エラーは握りつぶす（ストリーム既に完了済み、ログのみ）。
-        if (assistantContent) {
-          try {
-            await generateMemories(
-              body.threadId,
-              [
-                { role: "user", content: prepared.content },
-                { role: "assistant", content: assistantContent },
-              ],
-              llm,
-              finalModel,
-            );
-          } catch (err) {
-            console.error("[memory] generation failed:", err);
-          }
-        }
+        // ストリーム完了内容を after() コールバックへ引き渡す。
+        streamResult.assistantContent = assistantContent;
 
+        // ストリームを即座に閉じる（クライアントの isStreaming を下げる）。
         controller.close();
+
+        // after() コールバックに完了を通知。
+        resolveStream();
       }
     },
+  });
+
+  // 記憶生成: after() で HTTP レスポンス完遂後にバックグラウンド実行。
+  // after() はリクエストコンテキスト内（POST 本体）で呼ぶ必要がある。
+  // ReadableStream の start() 内で呼ぶとリクエストコンテキストが失われ、
+  // waitUntil が機能せずコールバックが実行されない。
+  // done 送信後に close しているため、クライアント UX はブロックしない。
+  // after() が Next.js の waitUntil を使うため、close 後もプロセスは維持される。
+  // エラーは握りつぶす（ストリーム既に完了済み、ログのみ）。
+  after(async () => {
+    await streamDone;
+    if (!streamResult.assistantContent) return;
+    try {
+      await generateMemories(
+        body.threadId,
+        [
+          { role: "user", content: prepared.content },
+          { role: "assistant", content: streamResult.assistantContent },
+        ],
+        llm,
+        finalModel,
+      );
+    } catch (err) {
+      console.error("[memory] generation failed:", err);
+    }
   });
 
   return new Response(stream, {

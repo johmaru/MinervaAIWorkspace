@@ -11,10 +11,16 @@ Before debugging SSE streaming, Docker build, transformers.js, pgvector, or
 Next.js 16 issues in this project, read `skill://umanschat-debug`
 for known pitfalls and solutions discovered during development.
 
-Key pitfall: `generateMemories` in `src/app/api/chat/route.ts` MUST be `await`ed
-inside the `finally` block, never fire-and-forget. The Next.js production runtime
-cancels un-awaited promises after `controller.close()` ends the SSE stream,
-silently dropping memory persistence with no error log.
+Key pitfall: `generateMemories` in `src/app/api/chat/route.ts` must run via
+`after()` (not bare fire-and-forget, not blocking `await`), and `after()`
+must be called in the POST handler body (request scope), NOT inside the
+`ReadableStream` `start()` callback. A blocking `await` before
+`controller.close()` keeps the client's `isStreaming` high and freezes the
+UI after the answer. A bare `void` after `close()` is cancelled by the
+Next.js runtime. Calling `after()` inside `start()` silently fails because
+the request context (waitUntil) is already gone — the callback never runs.
+Use a Promise bridge (`streamDone`) so the `after()` callback in the POST
+body can await stream completion and read the final `assistantContent`.
 <!-- END:umanschat-debug-skill -->
 
 <!-- BEGIN:frontend-quality-rules -->

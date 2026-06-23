@@ -26,6 +26,15 @@ vi.mock("@/lib/memory", () => ({
 vi.mock("@/lib/toolProbe", () => ({
   probeToolSupport: vi.fn().mockResolvedValue({ supported: false, checkedAt: new Date() }),
 }));
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    // after() はリクエストスコープ外で呼ばれるとエラーになるため、
+    // テストでは no-op にする（generateMemories は別途モック済み）。
+    after: () => {},
+  };
+});
 
 import { searchWeb } from "@/lib/scraper";
 import { decideSearch } from "@/lib/searchDecision";
