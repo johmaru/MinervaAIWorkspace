@@ -131,7 +131,7 @@ export async function GET(req: Request) {
     dbVectorDim: dims.memories,
     dbPageEmbeddingsDim: dims.pageEmbeddings,
     // Web 検索
-    webSearchProvider: process.env.WEB_SEARCH_PROVIDER || "searxng",
+    webSearchModel: process.env.WEB_SEARCH_MODEL || "umans-coder",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
     webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2,
     scraperUrl: process.env.SCRAPER_URL || "http://localhost:8000",
@@ -156,7 +156,7 @@ type SettingsBody = {
   embedDim?: number;
   embedProvider?: string;
   // Web 検索
-  webSearchProvider?: string;
+  webSearchModel?: string;
   webSearchMaxResults?: number;
   webSearchMaxRounds?: number;
   scraperUrl?: string;
@@ -185,8 +185,8 @@ export async function POST(req: Request) {
   }
 
   // バリデーション
-  if (body.webSearchProvider !== undefined && !["searxng", "native", "exa"].includes(body.webSearchProvider)) {
-    return new Response("webSearchProvider must be searxng, native, or exa", { status: 400 });
+  if (body.webSearchModel !== undefined && !/^[a-zA-Z0-9._-]+$/.test(body.webSearchModel)) {
+    return new Response("webSearchModel must be alphanumeric (e.g. umans-coder, umans-glm-5.2)", { status: 400 });
   }
 
   if (body.embedDim && (body.embedDim < 1 || body.embedDim > 4096)) {
@@ -273,7 +273,7 @@ export async function POST(req: Request) {
     if (body.webSearchMaxRounds !== undefined) updates.WEB_SEARCH_MAX_ROUNDS = String(body.webSearchMaxRounds);
     if (body.scraperUrl !== undefined) updates.SCRAPER_URL = body.scraperUrl;
     if (body.searxngUrl !== undefined) updates.SEARXNG_URL = body.searxngUrl;
-    if (body.webSearchProvider !== undefined) updates.WEB_SEARCH_PROVIDER = body.webSearchProvider;
+    if (body.webSearchModel !== undefined) updates.WEB_SEARCH_MODEL = body.webSearchModel;
     // Tor プロキシ
     if (body.torProxy !== undefined) updates.TOR_PROXY = body.torProxy;
     if (body.scrapeProxy !== undefined) updates.SCRAPE_PROXY = body.scrapeProxy;

@@ -267,58 +267,49 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
   }, 60_000);
 });
 
-describe("POST /api/chat — Web 検索プロバイダルーティング", () => {
-  const origBaseUrl = process.env.LLM_BASE_URL;
-  const origProvider = process.env.WEB_SEARCH_PROVIDER;
+describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () => {
+  const origSearchModel = process.env.WEB_SEARCH_MODEL;
 
   afterEach(() => {
-    process.env.LLM_BASE_URL = origBaseUrl;
-    process.env.WEB_SEARCH_PROVIDER = origProvider;
+    if (origSearchModel === undefined) delete process.env.WEB_SEARCH_MODEL;
+    else process.env.WEB_SEARCH_MODEL = origSearchModel;
   });
 
-  it("WEB_SEARCH_PROVIDER=exa + Umans プロバイダ → decideSearch を呼ばない", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
-    process.env.WEB_SEARCH_PROVIDER = "exa";
+  itReal("検索必要時 → WEB_SEARCH_MODEL で decideSearch を呼ぶ", async () => {
+    process.env.WEB_SEARCH_MODEL = "umans-test-search";
+
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      needsSearch: true,
+      reason: "latest info",
+      userNotice: "最新情報を確認するね。",
+      queries: ["test query"],
+    });
+    vi.mocked(searchWeb).mockResolvedValueOnce({
+      query: "test query",
+      results: [
+        {
+          url: "https://example.com/test",
+          title: "Test",
+          snippet: "Test snippet",
+          scraped: false,
+          content: "",
+          scrapeTitle: "Test",
+        },
+      ],
+    });
 
     const id = await createThread();
     const res = await POST(chatReq(id, "最新のニュース教えて"));
     expect(res.status).toBe(200);
 
-    // ストリームを消費してルーティングロジックを実行
     await sseChunks(res);
 
-    // decideSearch は呼ばれない（サーバーサイド検索パス）
-    expect(vi.mocked(decideSearch)).not.toHaveBeenCalled();
-    // searchWeb も呼ばれない
-    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
-  }, 60_000);
-
-  it("WEB_SEARCH_PROVIDER=searxng (デフォルト) → decideSearch を呼ぶ", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
-    process.env.WEB_SEARCH_PROVIDER = "searxng";
-
-    const id = await createThread();
-    const res = await POST(chatReq(id, "最新のニュース教えて"));
-    expect(res.status).toBe(200);
-
-    await sseChunks(res);
-
-    // decideSearch は呼ばれる（SearXNG パイプライン）
+    // decideSearch の第2引数（model）が WEB_SEARCH_MODEL の値であること
     expect(vi.mocked(decideSearch)).toHaveBeenCalled();
-  }, 60_000);
-
-  it("WEB_SEARCH_PROVIDER=exa + 非 Umans プロバイダ → decideSearch を呼ぶ (フォールバック)", async () => {
-    process.env.LLM_BASE_URL = "https://api.openai.com/v1";
-    process.env.WEB_SEARCH_PROVIDER = "exa";
-
-    const id = await createThread();
-    const res = await POST(chatReq(id, "最新のニュース教えて"));
-    expect(res.status).toBe(200);
-
-    await sseChunks(res);
-
-    // 非 Umans プロバイダ → SearXNG パイプラインにフォールバック
-    expect(vi.mocked(decideSearch)).toHaveBeenCalled();
+    const callArgs = vi.mocked(decideSearch).mock.calls[0];
+    expect(callArgs[1]).toBe("umans-test-search");
+    // searchWeb も呼ばれる（SearXNG パス経由）
+    expect(vi.mocked(searchWeb)).toHaveBeenCalled();
   }, 60_000);
 });
 

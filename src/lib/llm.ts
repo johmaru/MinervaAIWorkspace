@@ -19,6 +19,11 @@ export function defaultModel(): string {
   return process.env.LLM_MODEL ?? "umans-glm-5.2";
 }
 
+/** 検索クエリ生成・要約に使うモデル。未設定時は umans-coder。 */
+export function defaultSearchModel(): string {
+  return process.env.WEB_SEARCH_MODEL || "umans-coder";
+}
+
 export function embedModel(): string {
   return process.env.EMBED_MODEL ?? "text-embedding-3-small";
 }

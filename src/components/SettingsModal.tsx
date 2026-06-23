@@ -25,7 +25,7 @@ type SettingsResponse = {
   dbVectorDim: number;
   dbPageEmbeddingsDim: number;
   // Web 検索
-  webSearchProvider: string;
+  webSearchModel: string;
   webSearchMaxResults: number;
   webSearchMaxRounds: number;
   scraperUrl: string;
@@ -369,17 +369,15 @@ export function SettingsModal({ open, onClose }: Props) {
           <summary className="cursor-pointer rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70">{t("settings.webSearch")}</summary>
           <div className="mt-2 space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchProvider")}</label>
-              <select
-                value={form.webSearchProvider ?? "searxng"}
-                onChange={(e) => update("webSearchProvider", e.target.value)}
+              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchModel")}</label>
+              <input
+                type="text"
+                value={form.webSearchModel ?? "umans-coder"}
+                onChange={(e) => update("webSearchModel", e.target.value)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              >
-                <option value="searxng">SearXNG ({t("settings.webSearchProviderLocal")})</option>
-                <option value="native">Umans native ({t("settings.webSearchProviderKimi")})</option>
-                <option value="exa">Umans exa ({t("settings.webSearchProviderExa")})</option>
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchProviderDesc")}</p>
+                placeholder="umans-coder"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
             </div>
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchMaxResults")}</label>

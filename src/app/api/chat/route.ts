@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, isUmansProvider } from "@/lib/llm";
+import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
@@ -76,11 +76,6 @@ export async function POST(req: Request) {
 
   const llm = createLLM();
   const finalModel = body.model ?? thread.model ?? defaultModel();
-  const webSearchProvider = process.env.WEB_SEARCH_PROVIDER || "searxng";
-  const umansSearchProvider =
-    (webSearchProvider === "native" || webSearchProvider === "exa") && isUmansProvider()
-      ? webSearchProvider
-      : null;
   const systemContent = thread.systemPrompt ?? body.systemPrompt;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -95,15 +90,12 @@ export async function POST(req: Request) {
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
-
-        const searchContextMessage = umansSearchProvider
-          ? null
-          : await buildSearchContext({
-              content: prepared.content,
-              model: finalModel,
-              history: prepared.history,
-              send,
-            });
+        const searchContextMessage = await buildSearchContext({
+          content: prepared.content,
+          llm,
+          history: prepared.history,
+          send,
+        });
 
         const memoryMessage = await buildMemoryContext({
           content: prepared.content,
@@ -141,8 +133,6 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
-            webSearchProvider: umansSearchProvider,
-            send,
           });
         } else {
           await streamCompletion({
@@ -157,8 +147,6 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
-            webSearchProvider: umansSearchProvider,
-            send,
           });
         }
         const [assistantMsg] = await db
@@ -309,18 +297,19 @@ function buildChain(allMessages: DbMessage[], leafId: string | null): DbMessage[
 
 async function buildSearchContext({
   content,
-  model,
+  llm,
   history,
   send,
 }: {
   content: string;
-  model: string;
+  llm: OpenAI;
   history: DbMessage[];
   send: StreamSend;
 }): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam | null> {
+  const searchModel = defaultSearchModel();
   const decision = await decideSearch(
     content,
-    model,
+    searchModel,
     history
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content })),
@@ -355,9 +344,31 @@ async function buildSearchContext({
   if (allSources.length > 0) send("sources", { sources: allSources });
   if (allResults.length === 0) return null;
 
+  // 検索結果を検索専用モデルで要約してから system メッセージにする。
+  // 要約失敗時は生 JSON にフォールバック。
+  const summarizeMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    {
+      role: "system",
+      content:
+        "Summarize the following web search results into a concise, factual briefing. Preserve key facts, numbers, dates, and source URLs. Do not add speculation. Answer in the user's language.",
+    },
+    {
+      role: "user",
+      content: `User question: ${content}\n\nSearch results:\n${JSON.stringify(allResults, null, 2)}`,
+    },
+  ];
+
+  let summary = "";
+  try {
+    summary = await completeText(llm, searchModel, summarizeMessages);
+  } catch {
+    // 要約失敗時は生 JSON を使う
+  }
+  const contextContent = summary || JSON.stringify(allResults, null, 2);
+
   return {
     role: "system",
-    content: `Web search results (use these to answer):\n${JSON.stringify(allResults, null, 2)}`,
+    content: `Web search results (use these to answer):\n${contextContent}`,
   };
 }
 
@@ -561,16 +572,12 @@ async function streamCompletion({
   messages: messagesForModel,
   onDelta,
   onReasoning,
-  webSearchProvider,
-  send,
 }: {
   llm: OpenAI;
   model: string;
   messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   onDelta: (delta: string) => void;
   onReasoning: (delta: string) => void;
-  webSearchProvider?: string | null;
-  send?: StreamSend;
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -579,137 +586,21 @@ async function streamCompletion({
       ? thinkingEffort
       : await getDefaultReasoningEffort(model);
 
-  const tools = webSearchProvider
-    ? [
-        {
-          type: "function" as const,
-          function: {
-            name: "web_search",
-            description: "Search the web for current information.",
-            parameters: {
-              type: "object",
-              properties: {
-                query: { type: "string", description: "The search query" },
-              },
-              required: ["query"],
-            },
-          },
-        },
-      ]
-    : undefined;
+  const completion = await llm.chat.completions.create({
+    model,
+    messages: messagesForModel,
+    stream: true,
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
-  const requestOptions = webSearchProvider
-    ? { headers: { "X-Umans-Websearch-Provider": webSearchProvider } }
-    : undefined;
-
-  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2));
-  const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
-
-  // Tool-call ループ: LLM が web_search ツールを呼んだら検索を実行し、
-  // 結果を role:"tool" で返して回答を再生成させる。
-  // native/exa どちらも Umans エンドポイントは tool_calls を返すだけで
-  // 自動実行しないため、アプリ側でこのループが必要。
-  for (let round = 0; round < maxRounds; round++) {
-    const completion = await llm.chat.completions.create(
-      {
-        model,
-        messages: messagesForModel,
-        stream: true,
-        ...(tools ? { tools } : {}),
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
-      requestOptions,
-    );
-
-    // ストリーミングチャンクを蓄積しつつクライアントへ転送
-    const toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall[] = [];
-    let finishReason: string | null = null;
-
-    for await (const chunk of completion) {
-      const choice = chunk.choices?.[0];
-      if (!choice) continue;
-      const reasoningDelta = (
-        choice.delta as Record<string, unknown> as { reasoning_content?: string }
-      ).reasoning_content;
-      if (reasoningDelta) onReasoning(reasoningDelta);
-      const contentDelta = choice.delta?.content;
-      if (contentDelta) onDelta(contentDelta);
-
-      // tool_calls デルタを蓄積（ストリーミング分割対応）
-      const deltaToolCalls = choice.delta?.tool_calls;
-      if (deltaToolCalls) {
-        for (const dtc of deltaToolCalls) {
-          const idx = dtc.index ?? 0;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = {
-              id: dtc.id ?? "",
-              type: "function",
-              function: { name: "", arguments: "" },
-            };
-          }
-          if (dtc.id) toolCalls[idx].id = dtc.id;
-          if (dtc.function?.name) toolCalls[idx].function.name += dtc.function.name;
-          if (dtc.function?.arguments) toolCalls[idx].function.arguments += dtc.function.arguments;
-        }
-      }
-
-      if (choice.finish_reason) finishReason = choice.finish_reason;
-    }
-
-    // tool_calls で終了しなければ完了（stop / length 等）
-    if (finishReason !== "tool_calls") break;
-
-    // 有効な tool_call がなければ終了（無限ループ防止）
-    const validToolCalls = toolCalls.filter((tc) => tc && tc.function.name === "web_search");
-    if (validToolCalls.length === 0) break;
-
-    // assistant メッセージ（tool_calls 含む）を会話に追加
-    messagesForModel.push({
-      role: "assistant",
-      content: null,
-      tool_calls: validToolCalls,
-    } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
-
-    // 各 tool_call に対して検索を実行し、結果を role:"tool" で返す
-    for (const tc of validToolCalls) {
-      let query = "";
-      try {
-        query = (JSON.parse(tc.function.arguments) as { query?: string }).query ?? "";
-      } catch {
-        // 引数パース失敗は空クエリとして扱う
-      }
-
-      if (send) send("status", { label: `「${query}」を検索中…` });
-
-      let toolContent: string;
-      try {
-        const response = await searchWeb(query, maxResults);
-        const sources: SourceInfo[] = response.results.map((r) => ({
-          url: r.url,
-          title: r.scrapeTitle || r.title,
-          snippet: r.snippet,
-        }));
-        if (send && sources.length > 0) send("sources", { sources });
-
-        const results = response.results.map((r) => ({
-          url: r.url,
-          title: r.scrapeTitle || r.title,
-          snippet: r.snippet,
-          content: r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : "",
-        }));
-        toolContent = JSON.stringify(results);
-      } catch {
-        // 検索失敗は空結果として LLM に返す
-        toolContent = "[]";
-      }
-
-      messagesForModel.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        content: toolContent,
-      } as OpenAI.Chat.Completions.ChatCompletionToolMessageParam);
-    }
-
-    // 次ラウンドで LLM が検索結果を受け取り回答を生成する
+  for await (const chunk of completion) {
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+    const reasoningDelta = (
+      choice.delta as Record<string, unknown> as { reasoning_content?: string }
+    ).reasoning_content;
+    if (reasoningDelta) onReasoning(reasoningDelta);
+    const contentDelta = choice.delta?.content;
+    if (contentDelta) onDelta(contentDelta);
   }
 }
