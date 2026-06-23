@@ -219,7 +219,7 @@ export function useChat(threadId: string | null) {
     }
     byIdRef.current.set(assistantId, {
       id: assistantId,
-      parentId: optimisticUser?.id ?? null,
+      parentId: optimisticUser?.id ?? (body.parentMessageId as string | undefined) ?? null,
       role: "assistant",
       content: "",
     });
