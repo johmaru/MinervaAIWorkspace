@@ -12,6 +12,18 @@ use_default_settings:
       - startpage
       - startpage news
       - startpage images
+      # aol は 404 で常に失敗するため除外。
+      - aol
+      # karmasearch は 403 (access denied) で常に失敗するため除外。
+      - karmasearch
+      - karmasearch videos
+      # DuckDuckGo は CAPTCHA で常に失敗するため除外。
+      - duckduckgo
+      # wikidata は 403 で初期化失敗するため除外。
+      - wikidata
+      # ahmia / torch は Tor onion サービス用で通常検索では不要。
+      - ahmia
+      - torch
 
 search:
   formats:

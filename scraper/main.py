@@ -133,7 +133,7 @@ async def search(req: SearchRequest):
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 f"{searxng_url}/search",
-                params={"q": req.query, "format": "json", "categories": "general"},
+                params={"q": req.query, "format": "json", "engines": "bing,google,yahoo,wikipedia"},
             )
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"search failed: {str(e)}"})
