@@ -31,8 +31,12 @@ export type ChatMessage = {
   parentId: string | null;
   attachments?: MessageAttachment[];
   statusLabel?: string;
+  model?: string;
+  elapsedMs?: number;
   metadata?: {
     dualTrace?: DualTrace;
+    model?: string;
+    elapsedMs?: number;
   } | null;
 };
 
@@ -56,8 +60,12 @@ type RawMessage = {
   content: string;
   reasoning?: string | null;
   statusLabel?: string;
+  model?: string;
+  elapsedMs?: number;
   metadata?: {
     dualTrace?: DualTrace;
+    model?: string;
+    elapsedMs?: number;
   } | null;
 };
 
@@ -78,6 +86,8 @@ type SseData = {
   phase?: string;
   label?: string;
   dualTrace?: DualTrace;
+  model?: string;
+  elapsedMs?: number;
 };
 
 /**
@@ -121,6 +131,8 @@ export function useChat(threadId: string | null) {
         parentId: msg.parentId,
         attachments: attachmentsByMsgIdRef.current.get(msg.id),
         statusLabel: msg.statusLabel,
+        model: msg.metadata?.model,
+        elapsedMs: msg.metadata?.elapsedMs,
         metadata: msg.metadata,
       });
       currentId = msg.parentId;
@@ -325,7 +337,12 @@ export function useChat(threadId: string | null) {
             const oldMsg = byIdRef.current.get(assistantId);
             if (oldMsg) {
               byIdRef.current.delete(assistantId);
-              byIdRef.current.set(realId, { ...oldMsg, id: realId });
+              byIdRef.current.set(realId, {
+                ...oldMsg,
+                id: realId,
+                model: event.data.model,
+                elapsedMs: event.data.elapsedMs,
+              });
             }
             // thread の currentLeafId を更新
             if (thread) {

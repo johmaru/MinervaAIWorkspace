@@ -238,6 +238,15 @@ function splitThinking(content: string): { thinking: string; answer: string } {
   return { thinking: parts.join("\n---\n"), answer };
 }
 
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s % 60);
+  return `${m}m${rem}s`;
+}
+
 type MessageBubbleProps = {
   m: ChatMessage;
   streaming: boolean;
@@ -325,15 +334,21 @@ function MessageBubble({
             onNext={() => onSwitchBranch(siblings[Math.min(siblings.length - 1, currentIndex + 1)])}
           />
         )}
-        {!streaming && answer && isLast && (
-          <button
-            type="button"
-            onClick={handleRegenerate}
-            className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
-            aria-label={t("chat.regenerate")}
-          >
-            {t("chat.regenerateLabel")}
-          </button>
+        {!streaming && answer && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {m.model && <span className="font-mono">{m.model}</span>}
+            {m.elapsedMs != null && <span>· {formatElapsed(m.elapsedMs)}</span>}
+            {isLast && (
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                className="rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
+                aria-label={t("chat.regenerate")}
+              >
+                {t("chat.regenerateLabel")}
+              </button>
+            )}
+          </div>
         )}
         {sources.length > 0 && (
           <div className="mt-2 rounded-xl bg-muted/50 px-3 py-2" aria-label={t("chat.references")}>

@@ -183,6 +183,8 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
     expect(deltas.length).toBeGreaterThan(0);
     expect(done).toHaveLength(1);
     expect(typeof done[0].data.assistantMessageId).toBe("string");
+    expect(typeof done[0].data.model).toBe("string");
+    expect(typeof done[0].data.elapsedMs).toBe("number");
     expect(events.some((e) => e.event === "error")).toBe(false);
 
     const text = deltas.map((e) => e.data.delta as string).join("");

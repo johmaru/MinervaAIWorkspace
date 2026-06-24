@@ -80,6 +80,8 @@ export const messages = pgTable(
         reviewB?: string;
         debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
       };
+      model?: string;
+      elapsedMs?: number;
     }>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

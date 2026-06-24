@@ -93,6 +93,7 @@ export async function POST(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
+      const streamStartedAt = Date.now();
       const send: StreamSend = (event, data) =>
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
 
@@ -178,6 +179,7 @@ export async function POST(req: Request) {
             send,
           });
         }
+        const elapsedMs = Date.now() - streamStartedAt;
         const [assistantMsg] = await db
           .insert(messages)
           .values({
@@ -186,7 +188,9 @@ export async function POST(req: Request) {
             role: "assistant",
             content: assistantContent,
             reasoning: assistantReasoning || null,
-            metadata: dualTrace ? { dualTrace } : null,
+            metadata: dualTrace
+              ? { dualTrace, model: finalModel, elapsedMs }
+              : { model: finalModel, elapsedMs },
           })
           .returning();
 
@@ -195,7 +199,7 @@ export async function POST(req: Request) {
           .set({ currentLeafId: assistantMsg.id, updatedAt: new Date() })
           .where(eq(threads.id, body.threadId));
 
-        send("done", { assistantMessageId: assistantMsg.id });
+        send("done", { assistantMessageId: assistantMsg.id, model: finalModel, elapsedMs });
       } catch (err) {
         if (assistantContent) {
           const [partial] = await db
