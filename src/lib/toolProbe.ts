@@ -15,8 +15,8 @@ export type ToolSupport = {
 let cached: ToolSupport | null = null;
 let probePromise: Promise<ToolSupport> | null = null;
 
-/** キャッシュを破棄（テスト用）。実稼働では呼ばない。 */
-export function __resetToolProbeCacheForTests(): void {
+/** 設定変更時に呼んでキャッシュを破棄する（LLM 関連設定変更時）。 */
+export function resetToolProbeCache(): void {
   cached = null;
   probePromise = null;
 }

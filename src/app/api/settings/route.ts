@@ -2,6 +2,8 @@ import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
+import { resetUmansModelsCache } from "@/lib/llm";
+import { resetToolProbeCache } from "@/lib/toolProbe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -294,6 +296,14 @@ export async function POST(req: Request) {
     // process.env にも反映
     for (const [key, value] of Object.entries(updates)) {
       process.env[key] = value;
+    }
+    // LLM 関連設定が変更された場合はプロセス内キャッシュを無効化（再起動不要で反映）
+    const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS"].some(
+      (k) => k in updates,
+    );
+    if (llmChanged) {
+      resetUmansModelsCache();
+      resetToolProbeCache();
     }
   } catch (err) {
     return Response.json(

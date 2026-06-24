@@ -92,8 +92,8 @@ export type UmansModelInfo = {
 let modelsInfoCache: UmansModelInfo[] | null = null;
 let modelsInfoFetchPromise: Promise<UmansModelInfo[]> | null = null;
 
-/** キャッシュを破棄（テスト用）。実稼働では呼ばない。 */
-export function __resetUmansModelsCacheForTests(): void {
+/** 設定変更時に呼んでキャッシュを破棄する（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_MODELS 変更時）。 */
+export function resetUmansModelsCache(): void {
   modelsInfoCache = null;
   modelsInfoFetchPromise = null;
 }

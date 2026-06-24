@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  __resetUmansModelsCacheForTests,
+  resetUmansModelsCache,
   getUmansModels,
   getModelDisplayNames,
   isUmansProvider,
@@ -15,7 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  __resetUmansModelsCacheForTests();
+  resetUmansModelsCache();
 });
 
 const ORIGINAL_BASE_URL = process.env.LLM_BASE_URL;
@@ -64,7 +64,7 @@ describe("isUmansProvider", () => {
 
 describe("getUmansModels", () => {
   beforeEach(() => {
-    __resetUmansModelsCacheForTests();
+    resetUmansModelsCache();
   });
 
   it("Umansモードで /v1/models/info からモデル情報を取得", async () => {
@@ -167,7 +167,7 @@ describe("getUmansModels", () => {
 
 describe("getModelDisplayNames", () => {
   beforeEach(() => {
-    __resetUmansModelsCacheForTests();
+    resetUmansModelsCache();
   });
 
   it("Umansモード時は id → display_name マッピングを返す", async () => {
