@@ -143,6 +143,8 @@ export async function GET(req: Request) {
     scrapeProxy: process.env.SCRAPE_PROXY || "",
     // Database
     databaseUrl: process.env.DATABASE_URL || "",
+    hostOs: process.env.HOST_OS || "",
+    tz: process.env.TZ || "",
   });
 }
 
@@ -168,6 +170,9 @@ type SettingsBody = {
   scrapeProxy?: string;
   // Database
   databaseUrl?: string;
+  // 実行環境
+  hostOs?: string;
+  tz?: string;
   // マイグレーション確認
   applyMigration?: boolean;
 };
@@ -281,6 +286,9 @@ export async function POST(req: Request) {
     if (body.scrapeProxy !== undefined) updates.SCRAPE_PROXY = body.scrapeProxy;
     // Database
     if (body.databaseUrl !== undefined) updates.DATABASE_URL = body.databaseUrl;
+    // 実行環境
+    if (body.hostOs !== undefined) updates.HOST_OS = body.hostOs;
+    if (body.tz !== undefined) updates.TZ = body.tz;
 
     for (const [key, value] of Object.entries(updates)) {
       const regex = new RegExp(`^${key}=.*$`, "m");

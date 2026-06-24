@@ -140,6 +140,8 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
 | `WEB_SEARCH_MODEL`     | Model for search query generation and result summarization        | `umans-coder`                                        |
 | `DATABASE_URL`          | PostgreSQL connection URL (used for local `bun run dev`)           | `postgres://umans:umans@localhost:5432/umanschat`    |
+| `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
+| `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
 
 ## LLM Provider Modes
 

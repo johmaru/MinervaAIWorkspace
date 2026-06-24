@@ -141,6 +141,8 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `SCRAPE_PROXY`          | Scraper がスクレイピング時に使用するプロキシ                       | —                                                    |
 | `WEB_SEARCH_MODEL`    | 検索クエリ生成と結果要約に使うモデル                              | `umans-coder`                                        |
 | `DATABASE_URL`          | PostgreSQL 接続 URL（ローカル `bun run dev` 時に使用）            | `postgres://umans:umans@localhost:5432/umanschat`    |
+| `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
+| `TZ`                   | プロンプト日時表示のタイムゾーン（空 = `Asia/Tokyo`）              | —                                                    |
 
 ## 使い方
 

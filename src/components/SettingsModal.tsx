@@ -35,6 +35,9 @@ type SettingsResponse = {
   scrapeProxy: string;
   // Database
   databaseUrl: string;
+  // 実行環境
+  hostOs: string;
+  tz: string;
 };
 
 type TorConnection = {
@@ -566,6 +569,38 @@ export function SettingsModal({ open, onClose }: Props) {
           </div>
         </details>
 
+        {/* 実行環境 */}
+        <details className="mb-4">
+          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🖥️</span>{t("settings.environment")}</summary>
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.hostOsLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.hostOsEnv")}</span>
+              </label>
+              <input
+                type="text"
+                value={form.hostOs ?? ""}
+                onChange={(e) => update("hostOs", e.target.value)}
+                placeholder={t("settings.hostOsPlaceholder")}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.tzLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.tzEnv")}</span>
+              </label>
+              <input
+                type="text"
+                value={form.tz ?? ""}
+                onChange={(e) => update("tz", e.target.value)}
+                placeholder={t("settings.tzPlaceholder")}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
+          </div>
+        </details>
         {/* Database */}
         <details className="mb-4">
           <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🗄️</span>{t("settings.database")}</summary>

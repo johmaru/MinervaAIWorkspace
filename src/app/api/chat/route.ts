@@ -12,6 +12,7 @@ import { probeToolSupport } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { generateMemories } from "@/lib/memory";
+import { readFileSync } from "node:fs";
 import { after } from "next/server";
 
 export const runtime = "nodejs";
@@ -468,6 +469,40 @@ async function buildSearchContext({
     content: `Web search results (use these to answer):\n${contextContent}`,
   };
 }
+/**
+ * プロンプト先頭に注入する環境コンテキスト（現在日時 + 実行環境）を構築。
+ *
+ * - HOST_OS env があればそれを使用（GUI で上書き可能）
+ * - 未設定時は /proc/version からホストOS を自動検出:
+ *   - "microsoft" or "WSL" を含む → "Windows"（WSL2 上の Docker Desktop）
+ *   - "Darwin" を含む → "macOS"
+ *   - それ以外 → "Linux"
+ * - アーキテクチャは process.arch（x64 / arm64 等）
+ * - タイムゾーンは TZ env（未設定時は Asia/Tokyo）
+ */
+function getEnvContext(): string {
+  const os = process.env.HOST_OS || detectHostOs();
+  const arch = process.arch;
+  const tz = process.env.TZ || "Asia/Tokyo";
+  const now = new Date().toLocaleString("sv-SE", { timeZone: tz });
+  return `Current date: ${now}\nEnvironment: ${os} (${arch})`;
+}
+
+let detectedHostOs: string | null = null;
+
+function detectHostOs(): string {
+  if (detectedHostOs !== null) return detectedHostOs;
+  let result = "Linux";
+  try {
+    const version = readFileSync("/proc/version", "utf8");
+    if (/microsoft|WSL/i.test(version)) result = "Windows";
+    else if (/Darwin/i.test(version)) result = "macOS";
+  } catch {
+    result = "Linux";
+  }
+  detectedHostOs = result;
+  return result;
+}
 
 function buildFinalMessages({
   systemContent,
@@ -485,6 +520,7 @@ function buildFinalMessages({
   memoryMessage?: { role: "system"; content: string } | null;
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return [
+    { role: "system" as const, content: getEnvContext() },
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...history.map(
