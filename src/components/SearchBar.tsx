@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useI18n } from "@/components/I18nProvider";
 
 export type SearchResult = {
@@ -94,8 +95,15 @@ export function SearchBar({ onSelectThread }: Props) {
         aria-label={t("search.label")}
         className="w-full rounded-2xl bg-muted px-3 py-2 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
       />
-      {showResults && (
-        <div className="absolute left-2 right-2 top-full z-10 mt-1 max-h-80 overflow-y-auto rounded-2xl bg-popover p-1 shadow-xl ring-1 ring-border">
+      <AnimatePresence>
+        {showResults && (
+          <motion.div
+            className="absolute left-2 right-2 top-full z-10 mt-1 max-h-80 overflow-y-auto rounded-2xl bg-popover p-1 shadow-xl ring-1 ring-border"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15 }}
+          >
           {isSearching ? (
             <p className="px-2 py-3 text-xs text-muted-foreground">{t("search.searching")}</p>
           ) : !hasAny ? (
@@ -154,8 +162,9 @@ export function SearchBar({ onSelectThread }: Props) {
               ))}
             </ul>
           )}
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

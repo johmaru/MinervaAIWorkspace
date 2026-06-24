@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { AnimatePresence, motion } from "motion/react";
 
 type Thread = {
   id: string;
@@ -134,8 +135,16 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
         <span className={`text-[10px] transition-transform duration-150 ${open ? "rotate-90" : ""}`} aria-hidden="true">▶</span>
       </button>
 
-      {open && (
-        <div id="thread-settings-panel" className="flex flex-col gap-3 px-4 py-3">
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            style={{ overflow: "hidden" }}
+          >
+            <div id="thread-settings-panel" className="flex flex-col gap-3 px-4 py-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">
               {t("threadSettings.systemPrompt")}
@@ -252,8 +261,10 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
               <span className="text-xs text-muted-foreground">{t("threadSettings.saved")}</span>
             )}
           </div>
-        </div>
-      )}
+          </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

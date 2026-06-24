@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
-import "./globals.css";
+import { MotionConfig } from "motion/react";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { I18nProvider } from "@/components/I18nProvider";
 const geistSans = Geist({
@@ -38,9 +38,11 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <I18nProvider>
-          {children}
-          </I18nProvider>
+          <MotionConfig reducedMotion="user">
+            <I18nProvider>
+              {children}
+            </I18nProvider>
+          </MotionConfig>
         </ThemeProvider>
       </body>
     </html>

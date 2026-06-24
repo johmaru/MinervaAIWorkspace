@@ -1,7 +1,7 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import type { FolderSummary } from "@/hooks/useFolders";
 
 type Props = {
@@ -47,8 +47,6 @@ export function MoveToFolderModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open || !threadId) return null;
-
   async function handleMove() {
     if (!threadId) return;
     setMoving(true);
@@ -61,29 +59,19 @@ export function MoveToFolderModal({
       setError(t("moveModal.moveFailed"));
     }
   }
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-      aria-label={t("moveModal.title")}
-    >
-      <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-3xl bg-popover p-6 ring-1 ring-border animate-[modal-in_0.2s_ease-out]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t("moveModal.title")}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
-            aria-label={t("common.close")}
-          >
-            ✕
-          </button>
-        </div>
+    <AnimateModal open={open} onClose={onClose} ariaLabel={t("moveModal.title")} panelClassName="max-w-md">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{t("moveModal.title")}</h2>
+        <MotionButton
+          type="button"
+          onClick={onClose}
+          className="rounded-xl p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+          aria-label={t("common.close")}
+        >
+          ✕
+        </MotionButton>
+      </div>
 
         <div className="space-y-1">
           <label className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 transition-colors duration-150 hover:bg-muted">
@@ -125,24 +113,23 @@ export function MoveToFolderModal({
         <div className="mt-6 flex flex-col gap-2">
           {error && <p className="text-xs text-red-500">{error}</p>}
           <div className="flex justify-end gap-2">
-            <button
+            <MotionButton
               type="button"
               onClick={onClose}
               className="rounded-xl bg-muted px-3 py-1.5 text-sm transition-all duration-200 hover:bg-muted/80"
             >
               {t("common.cancel")}
-            </button>
-            <button
+            </MotionButton>
+            <MotionButton
               type="button"
               onClick={handleMove}
               disabled={moving || selected === currentFolderId}
               className="rounded-xl bg-foreground px-4 py-2 text-sm text-background transition-all duration-200 hover:opacity-90 disabled:opacity-40"
             >
               {moving ? t("moveModal.moving") : t("moveModal.move")}
-            </button>
+            </MotionButton>
           </div>
         </div>
-      </div>
-    </div>
+    </AnimateModal>
   );
 }

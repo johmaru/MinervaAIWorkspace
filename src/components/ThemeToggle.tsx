@@ -1,8 +1,8 @@
 "use client";
-
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { motion } from "motion/react";
 
 /**
  * ダークモード切替ボタン。
@@ -19,15 +19,16 @@ export function ThemeToggle() {
   const isDark = resolvedTheme === "dark";
 
   return (
-    <button
+    <motion.button
       type="button"
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground hover:shadow-md"
       aria-label={isDark ? t("theme.switchToLight") : t("theme.switchToDark")}
       title={isDark ? t("theme.lightMode") : t("theme.darkMode")}
+      whileTap={{ scale: 0.9 }}
     >
       {mounted ? (isDark ? <SunIcon /> : <MoonIcon />) : <span className="block h-4 w-4 animate-pulse rounded bg-muted" />}
-    </button>
+    </motion.button>
   );
 }
 

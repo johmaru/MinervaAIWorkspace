@@ -1,7 +1,7 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import type { FolderSummary } from "@/hooks/useFolders";
 
 type Props = {
@@ -51,8 +51,6 @@ export function FolderSettingsModal({ folder, open, onClose, onSave }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
-
   async function handleSave() {
     const trimmedName = name.trim() || "New folder";
     setSaving(true);
@@ -67,29 +65,19 @@ export function FolderSettingsModal({ folder, open, onClose, onSave }: Props) {
       setSaving(false);
     }
   }
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-      aria-label={t("folderModal.title")}
-    >
-      <div
-      className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-popover p-6 ring-1 ring-border animate-[modal-in_0.2s_ease-out]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t("folderModal.title")}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
-            aria-label={t("common.close")}
-          >
-            ✕
-          </button>
-        </div>
+    <AnimateModal open={open} onClose={onClose} ariaLabel={t("folderModal.title")} panelClassName="max-w-lg">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{t("folderModal.title")}</h2>
+        <MotionButton
+          type="button"
+          onClick={onClose}
+          className="rounded-xl p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+          aria-label={t("common.close")}
+        >
+          ✕
+        </MotionButton>
+      </div>
 
         <div className="space-y-4">
           {/* 名前 */}
@@ -157,23 +145,22 @@ export function FolderSettingsModal({ folder, open, onClose, onSave }: Props) {
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
-          <button
+          <MotionButton
             type="button"
             onClick={onClose}
             className="rounded-xl bg-muted px-3 py-1.5 text-sm transition-all duration-200 hover:bg-muted/80"
           >
             {t("common.cancel")}
-          </button>
-          <button
+          </MotionButton>
+          <MotionButton
             type="button"
             onClick={handleSave}
             disabled={!dirty || saving}
             className="rounded-xl bg-foreground px-4 py-2 text-sm text-background transition-all duration-200 hover:opacity-90 disabled:opacity-40"
           >
             {saving ? t("common.saving") : t("common.save")}
-          </button>
+          </MotionButton>
         </div>
-      </div>
-    </div>
+    </AnimateModal>
   );
 }

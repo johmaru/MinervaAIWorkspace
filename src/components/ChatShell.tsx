@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatWindow } from "@/components/ChatWindow";
+import { AnimatePresence, motion } from "motion/react";
 import { FolderSettingsModal } from "@/components/FolderSettingsModal";
 import { useThreads } from "@/hooks/useThreads";
 import { useFolders, type FolderSummary } from "@/hooks/useFolders";
@@ -128,14 +129,19 @@ export function ChatShell() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden">
-      {/* モバイルオーバーレイ */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm md:hidden"
-          onClick={() => setSidebarOpen(false)}
-          aria-hidden="true"
-        />
-      )}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm md:hidden"
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* サイドバー: md 以上は常時表示、未満はオーバーレイ */}
       <div

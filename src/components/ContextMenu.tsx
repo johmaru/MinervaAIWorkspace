@@ -1,7 +1,7 @@
 "use client";
-
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { motion } from "motion/react";
 
 export type MenuItem =
   | { type: "item"; label: string; onClick: () => void; danger?: boolean; disabled?: boolean }
@@ -56,11 +56,15 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div
+    <motion.div
       ref={ref}
       role="menu"
       style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 50 }}
-      className="min-w-40 rounded-2xl bg-[var(--glass-bg)] py-1.5 text-sm ring-1 ring-border backdrop-blur-xl animate-[modal-in_0.15s_ease-out]"
+      className="min-w-40 rounded-2xl bg-[var(--glass-bg)] py-1.5 text-sm ring-1 ring-border backdrop-blur-xl"
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
     >
       {items.map((it, i) =>
         it.type === "separator" ? (
@@ -83,7 +87,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
           </button>
         ),
       )}
-    </div>,
+    </motion.div>,
     document.body,
   );
 }

@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 :root {
@@ -186,10 +185,6 @@ body::before {
   50% { opacity: 0.2; }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
 
 /* 低速ドリフトオーロラ: background-position を二次元的に緩やかに移動 */
 @keyframes aurora-drift {

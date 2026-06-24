@@ -6,6 +6,8 @@ import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
 import { useI18n } from "@/components/I18nProvider";
+import { MotionButton, Accordion } from "@/components/ui/motion";
+import { AnimatePresence, motion } from "motion/react";
 
 export function ChatWindow({
   threadId,
@@ -25,10 +27,16 @@ export function ChatWindow({
   const [isCreating, setIsCreating] = useState(false);
   const pendingRef = useRef<string | null>(null);
 
-  // 自動スクロール
+  // 自動スクロール: ユーザーが下部付近にいる場合のみスムーズスクロール。
+  // 上にスクロール中はジャンプしない（ユーザーの閲覧を妨げない）。
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distFromBottom < 150;
+    if (nearBottom) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, [messages]);
 
   // 入力欄の自動高さ
@@ -129,7 +137,14 @@ export function ChatWindow({
             );
           })}
           {error && (
-            <p className="text-sm text-red-500">{t("common.errorPrefix", { error })}</p>
+            <motion.p
+              className="text-sm text-red-500"
+              initial={{ x: -8 }}
+              animate={{ x: 0 }}
+              transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            >
+              {t("common.errorPrefix", { error })}
+            </motion.p>
           )}
         </div>
       </div>
@@ -149,16 +164,18 @@ export function ChatWindow({
             onChange={handleFileSelect}
             className="hidden"
           />
-          <button
+          <MotionButton
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isCreating || !threadId}
             className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted text-sm transition-all duration-200 hover:bg-muted/80 disabled:opacity-40"
             aria-label={t("chat.attachFile")}
             title={t("chat.attachFile")}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
           >
             📎
-          </button>
+          </MotionButton>
           <textarea
             ref={taRef}
             value={input}
@@ -170,26 +187,42 @@ export function ChatWindow({
             aria-label={t("chat.messageInput")}
             className="min-h-[40px] flex-1 resize-none rounded-2xl bg-muted px-4 py-3 text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20 disabled:opacity-50"
           />
-          {isStreaming ? (
-            <button
-              type="button"
-              onClick={stop}
-              className="h-10 rounded-2xl bg-muted px-3 text-sm transition-all duration-200 hover:bg-muted/80"
-              aria-label={t("chat.stopGeneration")}
-            >
-              {t("chat.stop")}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!input.trim() || isCreating}
-              aria-label={t("chat.sendMessage")}
-              className="rounded-2xl bg-foreground px-4 py-2.5 text-sm font-medium text-background transition-all duration-200 hover:opacity-90 disabled:opacity-40"
-            >
-              {isCreating ? t("chat.creating") : t("chat.send")}
-            </button>
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            {isStreaming ? (
+              <motion.button
+                key="stop"
+                type="button"
+                onClick={stop}
+                className="h-10 rounded-2xl bg-muted px-3 text-sm transition-all duration-200 hover:bg-muted/80"
+                aria-label={t("chat.stopGeneration")}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.15 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                {t("chat.stop")}
+              </motion.button>
+            ) : (
+              <motion.button
+                key="send"
+                type="button"
+                onClick={submit}
+                disabled={!input.trim() || isCreating}
+                aria-label={t("chat.sendMessage")}
+                className="rounded-2xl bg-foreground px-4 py-2.5 text-sm font-medium text-background transition-all duration-200 hover:opacity-90 disabled:opacity-40"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ duration: 0.15 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                {isCreating ? t("chat.creating") : t("chat.send")}
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>
@@ -219,10 +252,13 @@ function NoThreadState() {
 function ThinkingBlock({ content }: { content: string }) {
   const { t } = useI18n();
   return (
-    <details className="mb-2 rounded-xl bg-muted/50 px-3 py-2" aria-label={t("chat.thinkingProcess")}>
-      <summary className="cursor-pointer select-none text-xs text-muted-foreground" role="button" aria-expanded="false">{t("chat.thinking")}</summary>
+    <Accordion
+      className="mb-2 rounded-xl bg-muted/50 px-3 py-2"
+      summaryClassName="cursor-pointer select-none text-xs text-muted-foreground"
+      summary={t("chat.thinking")}
+    >
       <div className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground" role="region" aria-label={t("chat.thinkingContent")}>{content}</div>
-    </details>
+    </Accordion>
   );
 }
 
@@ -435,14 +471,14 @@ function MessageBubble({
     </div>
   );
 }
-
 function DualTraceDetails({ trace }: { trace: DualTrace }) {
   const { t } = useI18n();
   return (
-    <details className="mt-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2">
-      <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground">
-        {t("chat.dualDetails")}
-      </summary>
+    <Accordion
+      className="mt-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2"
+      summaryClassName="cursor-pointer select-none text-xs font-medium text-muted-foreground"
+      summary={t("chat.dualDetails")}
+    >
       <div className="mt-3 space-y-3">
         <p className="text-[11px] text-muted-foreground">
           {t("chat.dualFinalModel", { model: trace.finalModel })}
@@ -467,7 +503,7 @@ function DualTraceDetails({ trace }: { trace: DualTrace }) {
           </div>
         )}
       </div>
-    </details>
+    </Accordion>
   );
 }
 

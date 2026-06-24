@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useI18n } from "@/components/I18nProvider";
 
 type Props = {
@@ -70,14 +71,20 @@ export function UrlInput({ onScraped }: Props) {
         <span className="animate-pulse text-xs text-muted-foreground" aria-hidden="true">…</span>
         )}
       </div>
-      {message && (
-        <p
-          role="status"
-          className={`mt-1 text-[10px] ${status === "error" ? "text-red-500" : "text-muted-foreground"}`}
-        >
-          {message}
-        </p>
-      )}
+      <AnimatePresence>
+        {message && (
+          <motion.p
+            role="status"
+            className={`mt-1 text-[10px] ${status === "error" ? "text-red-500" : "text-muted-foreground"}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+          >
+            {message}
+          </motion.p>
+        )}
+      </AnimatePresence>
     </form>
   );
 }

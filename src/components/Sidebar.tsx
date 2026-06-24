@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { MotionButton } from "@/components/ui/motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { SearchBar } from "@/components/SearchBar";
@@ -161,29 +163,31 @@ export function Sidebar({
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <LanguageToggle />
-          <button
+          <MotionButton
             type="button"
             onClick={() => setSettingsOpen(true)}
             className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
             aria-label={t("sidebar.appSettings")}
+            whileTap={{ scale: 0.9 }}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-          </button>
+          </MotionButton>
           {onClose && (
-            <button
+            <MotionButton
               type="button"
               onClick={onClose}
               className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground md:hidden"
               aria-label={t("sidebar.closeSidebar")}
+              whileTap={{ scale: 0.9 }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
-            </button>
+            </MotionButton>
           )}
         </div>
       </div>
@@ -194,13 +198,14 @@ export function Sidebar({
       </div>
 
       <div className="px-2">
-        <button
+        <MotionButton
           type="button"
           onClick={onNewChat}
           className="w-full rounded-2xl bg-muted px-3 py-2 text-left text-sm font-medium text-foreground/90 transition-all duration-200 hover:bg-muted/80 hover:text-foreground ring-1 ring-border"
+          whileTap={{ scale: 0.9 }}
         >
           {t("sidebar.newChat")}
-        </button>
+        </MotionButton>
       </div>
 
       <nav
@@ -217,71 +222,85 @@ export function Sidebar({
             {t("sidebar.noThreads")}
           </p>
         ) : (
-          <ul className="flex flex-col gap-0.5">
-            {/* フォルダセクション */}
-            {folders.map((f) => {
-              const collapsed = collapsedFolders.has(f.id);
-              const folderThreads = threads.filter((t) => t.folderId === f.id);
-              return (
-                <li key={f.id}>
-                  <FolderRow
-                    folder={f}
-                    collapsed={collapsed}
-                    count={folderThreads.length}
-                    onToggle={() => toggleFolder(f.id)}
-                    onContextMenu={(e) => handleFolderContextMenu(e, f)}
-                  />
-                  {!collapsed && (
-                    <ul className="ml-3 flex flex-col gap-0.5 border-l border-border pl-1">
-                      {folderThreads.length === 0 ? (
-                        <li className="px-2 py-1 text-xs text-muted-foreground">
-                          {t("sidebar.noThreadsInFolder")}
-                        </li>
-                      ) : (
-                        folderThreads.map((t) => (
-                          <ThreadRow
-                            key={t.id}
-                            thread={t}
-                            active={t.id === activeThreadId}
-                            onSelect={() => onSelect(t.id)}
-                            onDelete={() => onDelete(t.id)}
-                            onRename={onRename}
-                            onRenamed={onRenamed}
-                            onContextMenu={(e) => handleThreadContextMenu(e, t)}
-                          />
-                        ))
-                      )}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-
-            {/* 未割当セクション */}
-            {unassignedThreads.length > 0 && (
-              <li className="mt-1">
-                {folders.length > 0 && (
-                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
-                    {t("sidebar.unassigned")}
-                  </div>
-                )}
-                <ul className="flex flex-col gap-0.5">
-                  {unassignedThreads.map((t) => (
-                    <ThreadRow
-                      key={t.id}
-                      thread={t}
-                      active={t.id === activeThreadId}
-                      onSelect={() => onSelect(t.id)}
-                      onDelete={() => onDelete(t.id)}
-                      onRename={onRename}
-                      onRenamed={onRenamed}
-                      onContextMenu={(e) => handleThreadContextMenu(e, t)}
+          <AnimatePresence>
+            <ul className="flex flex-col gap-0.5">
+              {/* フォルダセクション */}
+              {folders.map((f) => {
+                const collapsed = collapsedFolders.has(f.id);
+                const folderThreads = threads.filter((t) => t.folderId === f.id);
+                return (
+                  <motion.li
+                    key={f.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <FolderRow
+                      folder={f}
+                      collapsed={collapsed}
+                      count={folderThreads.length}
+                      onToggle={() => toggleFolder(f.id)}
+                      onContextMenu={(e) => handleFolderContextMenu(e, f)}
                     />
-                  ))}
-                </ul>
-              </li>
-            )}
-          </ul>
+                    {!collapsed && (
+                      <ul className="ml-3 flex flex-col gap-0.5 border-l border-border pl-1">
+                        {folderThreads.length === 0 ? (
+                          <li className="px-2 py-1 text-xs text-muted-foreground">
+                            {t("sidebar.noThreadsInFolder")}
+                          </li>
+                        ) : (
+                          folderThreads.map((t) => (
+                            <ThreadRow
+                              key={t.id}
+                              thread={t}
+                              active={t.id === activeThreadId}
+                              onSelect={() => onSelect(t.id)}
+                              onDelete={() => onDelete(t.id)}
+                              onRename={onRename}
+                              onRenamed={onRenamed}
+                              onContextMenu={(e) => handleThreadContextMenu(e, t)}
+                            />
+                          ))
+                        )}
+                      </ul>
+                    )}
+                  </motion.li>
+                );
+              })}
+
+              {/* 未割当セクション */}
+              {unassignedThreads.length > 0 && (
+                <motion.li
+                  className="mt-1"
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {folders.length > 0 && (
+                    <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                      {t("sidebar.unassigned")}
+                    </div>
+                  )}
+                  <ul className="flex flex-col gap-0.5">
+                    {unassignedThreads.map((t) => (
+                      <ThreadRow
+                        key={t.id}
+                        thread={t}
+                        active={t.id === activeThreadId}
+                        onSelect={() => onSelect(t.id)}
+                        onDelete={() => onDelete(t.id)}
+                        onRename={onRename}
+                        onRenamed={onRenamed}
+                        onContextMenu={(e) => handleThreadContextMenu(e, t)}
+                      />
+                    ))}
+                  </ul>
+                </motion.li>
+              )}
+            </ul>
+          </AnimatePresence>
         )}
       </nav>
 
@@ -292,14 +311,17 @@ export function Sidebar({
       )}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={menu.items}
-          onClose={() => setMenu(null)}
-        />
-      )}
+      <AnimatePresence>
+        {menu && (
+          <ContextMenu
+            key="context-menu"
+            x={menu.x}
+            y={menu.y}
+            items={menu.items}
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </AnimatePresence>
 
       <MoveToFolderModal
         open={!!moveTarget}

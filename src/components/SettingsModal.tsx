@@ -1,7 +1,8 @@
 "use client";
-
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { AnimateModal, MotionButton, Accordion } from "@/components/ui/motion";
+
 
 type EmbedModelOption = {
   model: string;
@@ -234,34 +235,22 @@ export function SettingsModal({ open, onClose }: Props) {
     }
   }, [fetchTorStatus, torConnection, t]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-      aria-label={t("settings.title")}
-    >
-      <div
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-popover p-6 ring-1 ring-border animate-[modal-in_0.2s_ease-out]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
-            aria-label={t("common.close")}
-          >
-            ✕
-          </button>
-        </div>
+    <AnimateModal open={open} onClose={onClose} ariaLabel={t("settings.title")} panelClassName="max-w-2xl">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
+        <MotionButton
+          type="button"
+          onClick={onClose}
+          className="rounded-xl p-1.5 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+          aria-label={t("common.close")}
+        >
+          ✕
+        </MotionButton>
+      </div>
 
         {/* LLM 設定 */}
-        <details className="mb-4" open>
-          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🤖</span>{t("settings.llmSettings")}</summary>
+        <Accordion className="mb-4" defaultOpen={true} summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🤖</span>{t("settings.llmSettings")}</>}>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block">
@@ -327,11 +316,10 @@ export function SettingsModal({ open, onClose }: Props) {
               </p>
             </div>
           </div>
-        </details>
+        </Accordion>
 
         {/* 埋め込みモデル */}
-        <details className="mb-4">
-          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">📐</span>{t("settings.embedModelLabel")}</summary>
+        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">📐</span>{t("settings.embedModelLabel")}</>}>
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -380,11 +368,10 @@ export function SettingsModal({ open, onClose }: Props) {
               </div>
             )}
           </div>
-        </details>
+        </Accordion>
 
         {/* Web 検索 */}
-        <details className="mb-4">
-          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🔍</span>{t("settings.webSearch")}</summary>
+        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🔍</span>{t("settings.webSearch")}</>}>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="mb-1 block">
@@ -453,11 +440,10 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
           </div>
-        </details>
+        </Accordion>
 
         {/* Tor プロキシ */}
-        <details className="mb-4">
-          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🧅</span>{t("settings.torProxy")}</summary>
+        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🧅</span>{t("settings.torProxy")}</>}>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Tor 起動/停止トグル */}
             <div className="flex items-center justify-between rounded-2xl bg-muted/40 p-3 sm:col-span-2">
@@ -567,11 +553,10 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
           </div>
-        </details>
+        </Accordion>
 
         {/* 実行環境 */}
-        <details className="mb-4">
-          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🖥️</span>{t("settings.environment")}</summary>
+        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🖥️</span>{t("settings.environment")}</>}>
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -600,10 +585,9 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
           </div>
-        </details>
+        </Accordion>
         {/* Database */}
-        <details className="mb-4">
-          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🗄️</span>{t("settings.database")}</summary>
+        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🗄️</span>{t("settings.database")}</>}>
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -618,7 +602,7 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
           </div>
-        </details>
+        </Accordion>
 
         {/* メッセージ */}
         {message && (
@@ -637,23 +621,22 @@ export function SettingsModal({ open, onClose }: Props) {
 
         {/* ボタン */}
         <div className="flex justify-end gap-2">
-          <button
+          <MotionButton
             type="button"
             onClick={onClose}
             className="rounded-xl bg-muted px-3 py-1.5 text-sm transition-all duration-200 hover:bg-muted/80"
           >
             {t("common.cancel")}
-          </button>
-          <button
+          </MotionButton>
+          <MotionButton
             type="button"
             onClick={handleSave}
             disabled={saving || (needsMigration && !migrationConfirmed)}
             className="rounded-xl bg-foreground px-4 py-2 text-sm text-background transition-all duration-200 hover:opacity-90 disabled:opacity-50"
           >
             {saving ? t("common.saving") : t("common.save")}
-          </button>
+          </MotionButton>
         </div>
-      </div>
-    </div>
+    </AnimateModal>
   );
 }
