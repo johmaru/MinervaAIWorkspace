@@ -22,6 +22,9 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **EN / JA i18n toggle** (English is the default)
 - **OpenAI-compatible LLM backend** — UmansAI, OpenAI, vLLM, Ollama, etc.
 - **Auto title generation** from the first user message
+- **Date/time + execution environment** — current date/time (timezone-aware) and detected OS/arch are prepended to every prompt so the model gives environment-appropriate answers
+- **Model + elapsed time display** — each assistant message shows which model produced it and how long the response took
+- **Motion-based UI animations** — modal transitions, button press feedback, animated accordions, and smooth scroll
 - **Per-thread system prompt and model selection**
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
 
@@ -169,7 +172,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 ## Usage
 
 - **Create a thread** — start typing in the composer; the thread is created on first send and an auto title is generated from your first message.
-- **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token.
+- **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token. Each completed assistant message shows the model name and elapsed response time below the answer.
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
 - **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
 - **Attachments** — attach images (sent to vision-capable models), PDFs (text extracted), or text/code files (up to 10MB each).
