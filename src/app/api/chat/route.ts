@@ -14,6 +14,7 @@ import { buildMemoryContext } from "@/lib/memoryStore";
 import { generateMemories } from "@/lib/memory";
 import { readFileSync } from "node:fs";
 import { after } from "next/server";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,8 @@ type DualTrace = {
 type StreamSend = (event: string, data: unknown) => void;
 
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
   let body: Body;
   try {
@@ -63,6 +66,7 @@ export async function POST(req: Request) {
 
   const [thread] = await db.select().from(threads).where(eq(threads.id, body.threadId));
   if (!thread) return new Response("thread not found", { status: 404 });
+  if (thread.userId !== user.id) return new Response("Not found", { status: 404 });
 
   const allMessages = await db
     .select({

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ type Body = {
  * レスポンス: { results: [{ memoryId, threadId, threadTitle, kind, content, similarity }], pages: [...] }
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   let body: Body;
   try {
     body = (await req.json()) as Body;
@@ -42,7 +45,7 @@ export async function POST(req: Request) {
            1 - (m.embedding <=> ${JSON.stringify(queryVector)}::vector) as similarity
     FROM memories m
     JOIN threads t ON m.thread_id = t.id
-    WHERE m.suppressed_at IS NULL
+    WHERE m.suppressed_at IS NULL AND t.user_id = ${user.id}
       ${excludeClause}
     ORDER BY m.embedding <=> ${JSON.stringify(queryVector)}::vector
     LIMIT 10

@@ -26,6 +26,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Model + elapsed time display** — each assistant message shows which model produced it and how long the response took
 - **Motion-based UI animations** — modal transitions, button press feedback, animated accordions, and smooth scroll
 - **Per-thread system prompt and model selection**
+- **Account authentication** — Auth.js v5 with Credentials provider; first Docker launch requires account creation, then login; each user's data is isolated
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
 
 ## Architecture
@@ -80,14 +81,17 @@ cp .env.example .env
 #    Edit .env and fill in LLM_API_KEY
 #    Optionally set LLM_BASE_URL and LLM_MODEL for your provider
 
+# 2b. Generate an AUTH_SECRET and add it to .env
+bunx auth secret
 # 3. Start all services
 docker compose up -d
 
 # 4. Open the app
 #    http://localhost:3001
+#    On first launch, you'll be prompted to create an admin account.
 ```
 
-On first run, database migrations are applied automatically by the app. If you change the embedding model after initial setup, see [Database Migrations](#database-migrations).
+On first run, database migrations are applied automatically by the app, and you'll be prompted to create the first admin account (nickname + email + password). Subsequent visits require login. Each user's threads, folders, and memories are isolated. If you change the embedding model after initial setup, see [Database Migrations](#database-migrations).
 
 ## Quick Start (Local Dev)
 
@@ -145,6 +149,9 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `DATABASE_URL`          | PostgreSQL connection URL (used for local `bun run dev`)           | `postgres://umans:umans@localhost:5432/umanschat`    |
 | `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
+| `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
+| `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
+
 
 ## LLM Provider Modes
 

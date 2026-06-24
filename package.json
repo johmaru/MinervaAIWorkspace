@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@auth/drizzle-adapter": "^1.11.2",
     "@google/design.md": "^0.3.0",
     "@types/pg": "^8.20.0",
     "@xenova/transformers": "^2.0.1",
+    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
@@ -22,6 +24,7 @@
     "lucide-react": "^1.21.0",
     "motion": "^12.41.0",
     "next": "^16.2.9",
+    "next-auth": "^5.0.0-beta.31",
     "next-themes": "^0.4.6",
     "openai": "^6.43.0",
     "pdf-parse": "^2.4.5",
@@ -44,6 +47,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/bcryptjs": "^3.0.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^20",
     "@types/pdf-parse": "^1.1.5",

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { hashContent } from "@/lib/embed";
 import { scrapeUrl, normalizeUrl } from "@/lib/scraper";
 import { upsertPage } from "@/lib/pageStore";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,8 @@ type Body = { url: string };
  * レスポンス: { id, url, title, contentPreview, cached } | { error }
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   let body: Body;
   try {
     body = (await req.json()) as Body;

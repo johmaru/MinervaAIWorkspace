@@ -1,7 +1,8 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { defaultModel } from "@/lib/llm";
 import { db } from "@/db";
 import { threads } from "@/db/schema";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
  * GET /api/threads — スレッド一覧（新着順）。本文は含まずメタのみ。
  */
 export async function GET() {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const rows = await db
     .select({
       id: threads.id,
@@ -19,6 +22,7 @@ export async function GET() {
       updatedAt: threads.updatedAt,
     })
     .from(threads)
+    .where(eq(threads.userId, user.id))
     .orderBy(desc(threads.updatedAt));
   return Response.json(rows);
 }
@@ -39,6 +43,8 @@ type CreateBody = {
  * POST /api/threads — 新規スレッド作成。
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   let body: CreateBody = {};
   if (req.headers.get("content-type")?.includes("application/json")) {
     try {
@@ -51,6 +57,7 @@ export async function POST(req: Request) {
     .insert(threads)
     .values({
       title: body.title?.trim() || "New chat",
+      userId: user.id,
       systemPrompt: body.systemPrompt,
       model: body.model ?? defaultModel(),
       folderId: body.folderId ?? null,
@@ -81,6 +88,8 @@ type PatchBody = {
  * クエリ文字列 ?id=... で指定（一覧ページと同居するルートのため）。
  */
 export async function PATCH(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return new Response("id is required", { status: 400 });
@@ -106,7 +115,7 @@ export async function PATCH(req: Request) {
   const [row] = await db
     .update(threads)
     .set(values)
-    .where(eq(threads.id, id))
+    .where(and(eq(threads.id, id), eq(threads.userId, user.id)))
     .returning();
   if (!row) return new Response("Not found", { status: 404 });
   return Response.json(row);

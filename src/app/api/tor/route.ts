@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { getRequestLocale, t } from "@/lib/i18n";
+import { getSessionUser } from "@/lib/auth-guards";
 
 const execAsync = promisify(exec);
 
@@ -17,6 +18,8 @@ const SOCKS_PROXY = "socks5://tor:9050";
  *   { running: boolean, scraPeProxy: string, torProxy: string }
  */
 export async function GET() {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   let running = false;
   try {
     const { stdout } = await execAsync(
@@ -75,6 +78,8 @@ type TorBody = {
  *   2. .env の SCRAPE_PROXY を空に設定
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
   let body: TorBody;
   try {

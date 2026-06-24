@@ -44,6 +44,8 @@ services:
       EMBEDDER_URL: http://embedder:8001
       # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY は
       # .env ファイルから読み込む（GUI 書き換え対応）
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TRUST_HOST: "true"
     ports:
       - "3001:3000"
 

@@ -1,4 +1,5 @@
 import { availableModels, defaultModel, getModelDisplayNames } from "@/lib/llm";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
  * - OAI互換モード: LLM_MODELS env（カンマ区切り）から構築。displayNames は空。
  */
 export async function GET() {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const models = await availableModels();
   const current = defaultModel();
   const displayNames = await getModelDisplayNames();

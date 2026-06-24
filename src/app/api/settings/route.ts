@@ -4,6 +4,7 @@ import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
 import { resetToolProbeCache } from "@/lib/toolProbe";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,6 +116,8 @@ async function getVectorDim(): Promise<{ memories: number; pageEmbeddings: numbe
  * GET /api/settings — 現在の全設定 + 候補リストを返す。
  */
 export async function GET(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
   const dims = await getVectorDim();
 
@@ -183,6 +186,8 @@ type SettingsBody = {
  * embedModel の次元が変わる場合は applyMigration=true で vector 列を再作成。
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
   let body: SettingsBody;
   try {

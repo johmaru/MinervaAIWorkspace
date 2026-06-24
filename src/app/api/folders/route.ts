@@ -1,6 +1,7 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { folders } from "@/db/schema";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,9 @@ function isValidScope(v: unknown): v is MemoryScope {
  * GET /api/folders — フォルダ一覧（新着順）。
  */
 export async function GET() {
-  const rows = await db.select().from(folders).orderBy(desc(folders.updatedAt));
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
+  const rows = await db.select().from(folders).where(eq(folders.userId, user.id)).orderBy(desc(folders.updatedAt));
   return Response.json(rows);
 }
 
@@ -30,6 +33,8 @@ type FolderBody = {
  * 不正な memoryScope は "global" にフォールバック。
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   let body: FolderBody = {};
   if (req.headers.get("content-type")?.includes("application/json")) {
     try {
@@ -48,6 +53,7 @@ export async function POST(req: Request) {
           ? body.instruction.trim() || null
           : null,
       memoryScope: isValidScope(body.memoryScope) ? body.memoryScope : "global",
+      userId: user.id,
     })
     .returning();
   return Response.json(row, { status: 201 });
@@ -65,6 +71,8 @@ type PatchBody = {
  * 不正な memoryScope は 400。空白 name は "New folder" に正規化。
  */
 export async function PATCH(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return new Response("id is required", { status: 400 });
@@ -97,7 +105,7 @@ export async function PATCH(req: Request) {
   const [row] = await db
     .update(folders)
     .set(values)
-    .where(eq(folders.id, id))
+    .where(and(eq(folders.id, id), eq(folders.userId, user.id)))
     .returning();
   if (!row) return new Response("Not found", { status: 404 });
   return Response.json(row);

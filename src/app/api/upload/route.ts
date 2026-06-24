@@ -1,5 +1,7 @@
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { attachments } from "@/db/schema";
+import { attachments, threads } from "@/db/schema";
+import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +23,8 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
  * レスポンス: { id, filename, mimeType, dataUrl?, extractedText? }
  */
 export async function POST(req: Request) {
+  const user = await getSessionUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
   let formData: FormData;
   try {
     formData = await req.formData();
@@ -32,6 +36,8 @@ export async function POST(req: Request) {
   const file = formData.get("file") as File | null;
 
   if (!threadId) return new Response("threadId is required", { status: 400 });
+  const [thread] = await db.select({ id: threads.id, userId: threads.userId }).from(threads).where(eq(threads.id, threadId));
+  if (!thread || thread.userId !== user.id) return new Response("Not found", { status: 404 });
   if (!file) return new Response("file is required", { status: 400 });
   if (file.size > MAX_FILE_SIZE) return new Response("File too large (max 10MB)", { status: 413 });
 

@@ -9,6 +9,45 @@ import {
   jsonb,
   real,
 } from "drizzle-orm/pg-core";
+// ── Auth.js tables ──
+// users: アプリユーザー。emailUnique でログイン。passwordHash で Credentials 認証。
+// nickname は UI に表示される表示名。
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nickname: text("nickname").notNull(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// accounts/sessions/verificationTokens: DrizzleAdapter が期待するスキーマ形状。
+// JWT セッション戦略（Credentials で必須）のため sessions は実行時に未使用だが、
+// アダプター互換のためにテーブルを定義しておく。
+export const accounts = pgTable("accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  tokenType: text("token_type"),
+  scope: text("scope"),
+  idToken: text("id_token"),
+});
+
+export const sessions = pgTable("sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { withTimezone: true }).notNull(),
+  sessionToken: text("session_token").notNull().unique(),
+});
+
+export const verificationTokens = pgTable("verification_tokens", {
+  identifier: text("identifier").notNull(),
+  token: text("token").notNull(),
+  expires: timestamp("expires", { withTimezone: true }).notNull(),
+});
 
 // 埋め込み次元数: env EMBED_DIM（デフォルト 1024 = LFM2.5-Embedding-350M）。
 // モデル切替時は env で指定 + DB マイグレーション（vector 列の再作成）が必要。
@@ -31,6 +70,7 @@ export const threads = pgTable("threads", {
   dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
   folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
   currentLeafId: uuid("current_leaf_id"),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -47,6 +87,7 @@ export const folders = pgTable("folders", {
   name: text("name").notNull().default("New folder"),
   instruction: text("instruction"),
   memoryScope: text("memory_scope", { enum: ["folder", "global"] }).notNull().default("global"),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
