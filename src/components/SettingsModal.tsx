@@ -241,7 +241,7 @@ export function SettingsModal({ open, onClose }: Props) {
       aria-label={t("settings.title")}
     >
       <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-popover p-6 ring-1 ring-border animate-[modal-in_0.2s_ease-out]"
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-popover p-6 ring-1 ring-border animate-[modal-in_0.2s_ease-out]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -258,10 +258,13 @@ export function SettingsModal({ open, onClose }: Props) {
 
         {/* LLM 設定 */}
         <details className="mb-4" open>
-          <summary className="cursor-pointer rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70">{t("settings.llmSettings")}</summary>
-          <div className="mt-2 space-y-3">
+          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🤖</span>{t("settings.llmSettings")}</summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">LLM_BASE_URL</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmBaseUrlLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmBaseUrlEnv")}</span>
+              </label>
               <input
                 type="text"
                 value={form.llmBaseUrl ?? ""}
@@ -270,7 +273,10 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">LLM_API_KEY</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmApiKeyLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmApiKeyEnv")}</span>
+              </label>
               <input
                 type="password"
                 value={form.llmApiKey ?? ""}
@@ -279,7 +285,10 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.llmModel")}</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmModelLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelEnv")}</span>
+              </label>
               <input
                 type="text"
                 value={form.llmModel ?? ""}
@@ -288,7 +297,10 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.llmModels")}</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmModelsLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelsEnv")}</span>
+              </label>
               <input
                 type="text"
                 value={form.llmModels ?? ""}
@@ -296,9 +308,9 @@ export function SettingsModal({ open, onClose }: Props) {
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">
-                {t("settings.thinkingEffort")}
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.thinkingEffort")}</span>
               </label>
               <input
                 type="text"
@@ -315,11 +327,14 @@ export function SettingsModal({ open, onClose }: Props) {
         </details>
 
         {/* 埋め込みモデル */}
-        <details className="mb-4" open>
-          <summary className="cursor-pointer rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70">{t("settings.embedModel")}</summary>
-          <div className="mt-2 space-y-3">
+        <details className="mb-4">
+          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">📐</span>{t("settings.embedModelLabel")}</summary>
+          <div className="mt-3 space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">EMBED_MODEL</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.embedModelLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.embedModelEnv")}</span>
+              </label>
               <select
                 value={form.embedModel ?? ""}
                 onChange={(e) => {
@@ -366,10 +381,12 @@ export function SettingsModal({ open, onClose }: Props) {
 
         {/* Web 検索 */}
         <details className="mb-4">
-          <summary className="cursor-pointer rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70">{t("settings.webSearch")}</summary>
-          <div className="mt-2 space-y-3">
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchModel")}</label>
+          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🔍</span>{t("settings.webSearch")}</summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.webSearchModel")}</span>
+              </label>
               <input
                 type="text"
                 value={form.webSearchModel ?? "umans-coder"}
@@ -380,7 +397,9 @@ export function SettingsModal({ open, onClose }: Props) {
               <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchMaxResults")}</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.webSearchMaxResults")}</span>
+              </label>
               <input
                 type="number"
                 min={1}
@@ -390,8 +409,10 @@ export function SettingsModal({ open, onClose }: Props) {
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">{t("settings.webSearchMaxRounds")}</label>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.webSearchMaxRounds")}</span>
+              </label>
               <input
                 type="number"
                 min={1}
@@ -405,7 +426,10 @@ export function SettingsModal({ open, onClose }: Props) {
               </p>
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">SCRAPER_URL</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.webSearchScraperUrlLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.webSearchScraperUrlEnv")}</span>
+              </label>
               <input
                 type="text"
                 value={form.scraperUrl ?? ""}
@@ -414,7 +438,10 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">SEARXNG_URL</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.webSearchSearxngUrlLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.webSearchSearxngUrlEnv")}</span>
+              </label>
               <input
                 type="text"
                 value={form.searxngUrl ?? ""}
@@ -427,10 +454,10 @@ export function SettingsModal({ open, onClose }: Props) {
 
         {/* Tor プロキシ */}
         <details className="mb-4">
-          <summary className="cursor-pointer rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70">{t("settings.torProxy")}</summary>
-          <div className="mt-2 space-y-3">
+          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🧅</span>{t("settings.torProxy")}</summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Tor 起動/停止トグル */}
-            <div className="flex items-center justify-between rounded-2xl bg-muted/40 p-3">
+            <div className="flex items-center justify-between rounded-2xl bg-muted/40 p-3 sm:col-span-2">
               <div>
                 <p className="text-sm font-medium">
                   Tor {torRunning ? t("settings.torRunning") : t("settings.torStopped")}
@@ -457,7 +484,7 @@ export function SettingsModal({ open, onClose }: Props) {
 
             {/* Tor 接続確認 */}
             {torRunning && (
-              <div className="rounded-2xl bg-muted/40 p-3">
+              <div className="rounded-2xl bg-muted/40 p-3 sm:col-span-2">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">{t("settings.torConnectionStatus")}</p>
                   <button
@@ -511,8 +538,9 @@ export function SettingsModal({ open, onClose }: Props) {
             )}
             {/* 手動プロキシ設定（詳細） */}
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">
-                {t("settings.torProxyLabel")}
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.torProxyLabelManual")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.torProxyEnv")}</span>
               </label>
               <input
                 type="text"
@@ -523,8 +551,9 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">
-                {t("settings.scrapeProxyLabel")}
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.scrapeProxyLabelManual")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.scrapeProxyEnv")}</span>
               </label>
               <input
                 type="text"
@@ -539,10 +568,13 @@ export function SettingsModal({ open, onClose }: Props) {
 
         {/* Database */}
         <details className="mb-4">
-          <summary className="cursor-pointer rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70">{t("settings.database")}</summary>
-          <div className="mt-2 space-y-3">
+          <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70"><span aria-hidden="true">🗄️</span>{t("settings.database")}</summary>
+          <div className="mt-3 space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">DATABASE_URL</label>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.databaseUrlLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.databaseUrlEnv")}</span>
+              </label>
               <input
                 type="text"
                 value={form.databaseUrl ?? ""}
