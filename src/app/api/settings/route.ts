@@ -148,6 +148,10 @@ export async function GET(req: Request) {
     databaseUrl: process.env.DATABASE_URL || "",
     hostOs: process.env.HOST_OS || "",
     tz: process.env.TZ || "",
+    // Notion OAuth
+    notionClientId: process.env.NOTION_CLIENT_ID || "",
+    notionClientSecret: process.env.NOTION_CLIENT_SECRET || "",
+    authUrl: process.env.AUTH_URL || "http://localhost:3001",
   });
 }
 
@@ -176,6 +180,10 @@ type SettingsBody = {
   // 実行環境
   hostOs?: string;
   tz?: string;
+  // Notion OAuth
+  notionClientId?: string;
+  notionClientSecret?: string;
+  authUrl?: string;
   // マイグレーション確認
   applyMigration?: boolean;
 };
@@ -294,7 +302,10 @@ export async function POST(req: Request) {
     // 実行環境
     if (body.hostOs !== undefined) updates.HOST_OS = body.hostOs;
     if (body.tz !== undefined) updates.TZ = body.tz;
-
+    // Notion OAuth
+    if (body.notionClientId !== undefined) updates.NOTION_CLIENT_ID = body.notionClientId;
+    if (body.notionClientSecret !== undefined) updates.NOTION_CLIENT_SECRET = body.notionClientSecret;
+    if (body.authUrl !== undefined) updates.AUTH_URL = body.authUrl;
     for (const [key, value] of Object.entries(updates)) {
       const regex = new RegExp(`^${key}=.*$`, "m");
       if (regex.test(envContent)) {

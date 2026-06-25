@@ -207,6 +207,7 @@ const ja = {
     disconnect: "切断",
     connectionSuccess: "コネクションを追加しました",
     connectionError: "コネクションに失敗しました",
+    saveFirst: "保存してから「Notion に接続」を押してください",
   },
   threadSettings: {
     toggle: "スレッド設定を開閉",
@@ -505,6 +506,7 @@ const en: typeof ja = {
     disconnect: "Disconnect",
     connectionSuccess: "Connection added",
     connectionError: "Connection failed",
+    saveFirst: "Save settings first, then click \"Connect Notion\"",
   },
   threadSettings: {
     toggle: "Toggle thread settings",

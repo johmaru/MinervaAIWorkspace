@@ -39,6 +39,10 @@ type SettingsResponse = {
   // 実行環境
   hostOs: string;
   tz: string;
+  // Notion OAuth
+  notionClientId: string;
+  notionClientSecret: string;
+  authUrl: string;
 };
 
 type TorConnection = {
@@ -634,6 +638,47 @@ export function SettingsModal({ open, onClose }: Props) {
         {/* コネクション */}
         <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🔗</span>{t("settings.connections")}</>}>
           <div className="mt-3 space-y-3">
+            {/* Notion OAuth 設定 */}
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_ID</span>
+                <span className="block text-[10px] text-muted-foreground">https://www.notion.so/developers で取得</span>
+              </label>
+              <input
+                type="text"
+                value={form.notionClientId ?? ""}
+                onChange={(e) => update("notionClientId", e.target.value)}
+                placeholder="00000000-0000-0000-0000-000000000000"
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_SECRET</span>
+                <span className="block text-[10px] text-muted-foreground">Integration secrets (本番環境用)</span>
+              </label>
+              <input
+                type="password"
+                value={form.notionClientSecret ?? ""}
+                onChange={(e) => update("notionClientSecret", e.target.value)}
+                placeholder="secret_..."
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">AUTH_URL</span>
+                <span className="block text-[10px] text-muted-foreground">Notion の Redirect URI と一致させる</span>
+              </label>
+              <input
+                type="text"
+                value={form.authUrl ?? ""}
+                onChange={(e) => update("authUrl", e.target.value)}
+                placeholder="http://localhost:3001"
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
+            {/* 保存後に「Notion に接続」ボタンが使える */}
             {connections.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
             ) : (
@@ -650,9 +695,13 @@ export function SettingsModal({ open, onClose }: Props) {
                 </div>
               ))
             )}
-            <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
-              {t("settings.connectNotion")}
-            </a>
+            {form.notionClientId ? (
+              <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                {t("settings.connectNotion")}
+              </a>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+            )}
           </div>
         </Accordion>
 
