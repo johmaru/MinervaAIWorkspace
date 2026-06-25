@@ -77,3 +77,84 @@ describe("Markdown — 基本レンダリング", () => {
     expect(container).toBeInTheDocument();
   });
 });
+
+describe("Markdown — ツール呼び出しマークアップのサニタイズ", () => {
+  it("XMLタグ形式の search_web を削除", () => {
+    const content = '確認します。\n<search_web>query="test query"</search_web>\n回答です。';
+    render(<Markdown content={content} />);
+    expect(screen.getByText("確認します。")).toBeInTheDocument();
+    expect(screen.getByText("回答です。")).toBeInTheDocument();
+    expect(screen.queryByText(/search_web/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/query=/)).not.toBeInTheDocument();
+  });
+
+  it("XMLタグ形式の scrape_webpage を削除", () => {
+    const content = '<scrape_webpage url="https://example.com">content here</scrape_webpage>\n回答です。';
+    render(<Markdown content={content} />);
+    expect(screen.getByText("回答です。")).toBeInTheDocument();
+    expect(screen.queryByText(/scrape_webpage/)).not.toBeInTheDocument();
+  });
+
+  it("ストリーミング中の部分的なXMLタグを削除", () => {
+    const content = '確認します。\n<search_web>query="test';
+    render(<Markdown content={content} />);
+    expect(screen.getByText("確認します。")).toBeInTheDocument();
+    expect(screen.queryByText(/search_web/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/query=/)).not.toBeInTheDocument();
+  });
+
+  it("コードフェンス形式も引き続き削除", () => {
+    const content = '確認します。\n```search_web\nquery="test"\n```\n回答です。';
+    render(<Markdown content={content} />);
+    expect(screen.getByText("確認します。")).toBeInTheDocument();
+    expect(screen.getByText("回答です。")).toBeInTheDocument();
+    expect(screen.queryByText(/search_web/)).not.toBeInTheDocument();
+  });
+
+  it("ツールマークアップのみの場合は空になる", () => {
+    const content = '<search_web>query="test"</search_web>';
+    const { container } = render(<Markdown content={content} />);
+    expect(container.querySelector(".markdown-body")).toBeInTheDocument();
+    expect(container.textContent?.trim()).toBe("");
+  });
+
+  it("GLM/Qwen tool_call形式の search_web を削除", () => {
+    const tc = String.fromCharCode(60) + "tool_call" + String.fromCharCode(62);
+    const tcc = String.fromCharCode(60) + "/tool_call" + String.fromCharCode(62);
+    const ak = String.fromCharCode(60) + "arg_key" + String.fromCharCode(62);
+    const akc = String.fromCharCode(60) + "/arg_key" + String.fromCharCode(62);
+    const av = String.fromCharCode(60) + "arg_value" + String.fromCharCode(62);
+    const avc = String.fromCharCode(60) + "/arg_value" + String.fromCharCode(62);
+    const content = "確認します。\n\n" + tc + "search_web" + ak + "query" + akc + av + "test query" + avc + tcc + "\n回答です。";
+    render(<Markdown content={content} />);
+    expect(screen.getByText("確認します。")).toBeInTheDocument();
+    expect(screen.getByText("回答です。")).toBeInTheDocument();
+    expect(screen.queryByText(/search_web/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/arg_value/)).not.toBeInTheDocument();
+  });
+
+  it("GLM/Qwen tool_call形式、ストリーミング中の部分タグを削除", () => {
+    const tc = String.fromCharCode(60) + "tool_call" + String.fromCharCode(62);
+    const ak = String.fromCharCode(60) + "arg_key" + String.fromCharCode(62);
+    const akc = String.fromCharCode(60) + "/arg_key" + String.fromCharCode(62);
+    const av = String.fromCharCode(60) + "arg_value" + String.fromCharCode(62);
+    const content = "確認します。\n" + tc + "search_web" + ak + "query" + akc + av + "partial";
+    render(<Markdown content={content} />);
+    expect(screen.getByText("確認します。")).toBeInTheDocument();
+    expect(screen.queryByText(/search_web/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/arg_value/)).not.toBeInTheDocument();
+  });
+
+  it("GLM/Qwen tool_call形式のみの場合は空になる", () => {
+    const tc = String.fromCharCode(60) + "tool_call" + String.fromCharCode(62);
+    const tcc = String.fromCharCode(60) + "/tool_call" + String.fromCharCode(62);
+    const ak = String.fromCharCode(60) + "arg_key" + String.fromCharCode(62);
+    const akc = String.fromCharCode(60) + "/arg_key" + String.fromCharCode(62);
+    const av = String.fromCharCode(60) + "arg_value" + String.fromCharCode(62);
+    const avc = String.fromCharCode(60) + "/arg_value" + String.fromCharCode(62);
+    const content = tc + "search_web" + ak + "query" + akc + av + "test" + avc + tcc;
+    const { container } = render(<Markdown content={content} />);
+    expect(container.querySelector(".markdown-body")).toBeInTheDocument();
+    expect(container.textContent?.trim()).toBe("");
+  });
+});

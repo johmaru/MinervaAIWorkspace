@@ -23,10 +23,24 @@ import rehypeKatex from "rehype-katex";
  */
 function sanitizeToolCallMarkup(content: string): string {
   return content
-    // 完全形: ```tool_name ... ``` → 削除
+    // コードフェンス形式: ```tool_name ... ``` → 削除
     .replace(/```(?:scrape_webpage|search_web)\b[\s\S]*?```/g, "")
-    // 部分形（ストリーミング中）: ```tool_name ... （閉じフェンスなし）→ 削除
+    // コードフェンス形式（ストリーミング中）: ```tool_name ... （閉じフェンスなし）→ 削除
     .replace(/```(?:scrape_webpage|search_web)\b[\s\S]*/g, "")
+    // XMLタグ形式: <search_web>...</search_web> → 削除
+    .replace(/<(?:scrape_webpage|search_web)\b[^>]*>[\s\S]*?<\/(?:scrape_webpage|search_web)>/g, "")
+    // XMLタグ自己閉鎖形式: <search_web ... /> → 削除
+    .replace(/<(?:scrape_webpage|search_web)\b[^>]*\/>/g, "")
+    // XMLタグ形式（ストリーミング中）: <search_web ...>...（閉じタグなし）→ 削除
+    .replace(/<(?:scrape_webpage|search_web)\b[^>]*>[\s\S]*/g, "")
+    // XMLタグ形式（ストリーミング中・開きタグ未完了）: <search_web query="... （> なし）→ 削除
+    .replace(/<(?:scrape_webpage|search_web)\b[^>]*/g, "")
+    // GLM/Qwen tool_call形式（完全形）→ 削除
+    .replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/g, "")
+    // GLM/Qwen tool_call形式（ストリーミング中・閉じタグなし）→ 削除
+    .replace(/<tool_call\b[^>]*>[\s\S]*/g, "")
+    // GLM/Qwen tool_call形式（ストリーミング中・開きタグ未完了）: <tool_call ... （> なし）→ 削除
+    .replace(/<tool_call\b[^>]*/g, "")
     .trim();
 }
 export function Markdown({ content }: { content: string }) {
