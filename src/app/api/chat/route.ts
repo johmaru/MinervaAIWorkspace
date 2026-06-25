@@ -571,7 +571,7 @@ async function buildSearchContext({
 
   return {
     role: "system",
-    content: `Web search results (use these to answer):\n${contextContent}`,
+    content: `Web search has already been completed. The results are provided below. Do NOT attempt to search or scrape again — do not output any tool-call commands. Answer the user's question directly using only these results.\n\nWeb search results:\n${contextContent}`,
   };
 }
 /**
@@ -634,9 +634,9 @@ function buildFinalMessages({
     ...history.map(
       (m) => ({ role: m.role, content: m.content }) as OpenAI.Chat.Completions.ChatCompletionMessageParam,
     ),
-    { role: "user" as const, content },
     ...(searchContextMessage ? [searchContextMessage] : []),
     ...(urlContextMessage ? [urlContextMessage] : []),
+    { role: "user" as const, content },
   ];
 }
 

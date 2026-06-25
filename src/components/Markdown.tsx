@@ -15,7 +15,22 @@ import rehypeKatex from "rehype-katex";
  * ユーザー入欄はプレーンテキストのままでよい（Markdown パース不要）。
  * ストリーミング中の不完全な Markdown は react-markdown が寛容に扱う。
  */
+/**
+ * LLM が関数呼び出しをサポートしない環境で、ツール呼び出し構文を
+ * プレーンテキストとして出力することがある（例: ```scrape_webpage urls="..."```）。
+ * これが未閉鎖のコードフェンスとして描画され、UI が崩れるのを防ぐ。
+ * ストリーミング中の部分的な出力も安全に処理する。
+ */
+function sanitizeToolCallMarkup(content: string): string {
+  return content
+    // 完全形: ```tool_name ... ``` → 削除
+    .replace(/```(?:scrape_webpage|search_web)\b[\s\S]*?```/g, "")
+    // 部分形（ストリーミング中）: ```tool_name ... （閉じフェンスなし）→ 削除
+    .replace(/```(?:scrape_webpage|search_web)\b[\s\S]*/g, "")
+    .trim();
+}
 export function Markdown({ content }: { content: string }) {
+  const sanitized = sanitizeToolCallMarkup(content);
   return (
     <div className="markdown-body text-sm leading-relaxed">
       <ReactMarkdown
@@ -95,7 +110,7 @@ export function Markdown({ content }: { content: string }) {
           hr: () => <hr className="my-3 border-border" />,
         }}
       >
-        {content}
+        {sanitized}
       </ReactMarkdown>
     </div>
   );
