@@ -149,7 +149,6 @@ body::before {
     radial-gradient(ellipse 65% 55% at 50% 95%, rgba(251, 191, 36, 0.05), transparent 60%);
   background-size: 180% 180%, 160% 160%, 200% 200%;
   background-repeat: no-repeat;
-  animation: aurora-drift 30s ease-in-out infinite;
 }
 
 /* ダーク背景ではオーロラの alpha を高めて可視性を確保 */
@@ -158,9 +157,6 @@ body::before {
     radial-gradient(ellipse 60% 50% at 10% 10%, rgba(34, 211, 238, 0.10), transparent 60%),
     radial-gradient(ellipse 55% 45% at 90% 15%, rgba(232, 121, 249, 0.09), transparent 60%),
     radial-gradient(ellipse 65% 55% at 50% 95%, rgba(251, 191, 36, 0.08), transparent 60%);
-}
-body.modal-open::before {
-  animation-play-state: paused;
 }
 
 /* 細いスクロールバー（ミニマル） */
@@ -188,22 +184,6 @@ body.modal-open::before {
   50% { opacity: 0.2; }
 }
 
-
-/* 低速ドリフトオーロラ: background-position を二次元的に緩やかに移動 */
-@keyframes aurora-drift {
-  0% {
-    background-position: 0% 0%, 100% 0%, 50% 100%;
-  }
-  33% {
-    background-position: 50% 30%, 50% 60%, 30% 70%;
-  }
-  66% {
-    background-position: 100% 60%, 0% 100%, 70% 30%;
-  }
-  100% {
-    background-position: 0% 0%, 100% 0%, 50% 100%;
-  }
-}
 
 /* prefers-reduced-motion: 装飾アニメーションを無効化。
    ローディングスピナーは状態フィードバックのため回転を維持。 */

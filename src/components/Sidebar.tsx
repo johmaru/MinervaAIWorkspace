@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { MotionButton } from "@/components/ui/motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -38,7 +38,7 @@ type SidebarProps = {
 
 type MenuState = { x: number; y: number; items: MenuItem[] };
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   threads,
   folders,
   isLoading,
@@ -70,14 +70,14 @@ export function Sidebar({
     currentFolderId: string | null;
   } | null>(null);
 
-  function toggleFolder(id: string) {
+  const toggleFolder = useCallback((id: string) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
 
   // 空欄右クリック → 新規フォルダ作成
   function handleNavContextMenu(e: React.MouseEvent<HTMLDivElement>) {
@@ -96,63 +96,63 @@ export function Sidebar({
     });
   }
 
-  function handleFolderContextMenu(
-    e: React.MouseEvent,
-    folder: FolderSummary,
-  ) {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        {
-          type: "item",
-          label: t("sidebar.settings"),
-          onClick: () => onEditFolder(folder),
-        },
-        {
-          type: "separator",
-        },
-        {
-          type: "item",
-          label: t("common.delete"),
-          danger: true,
-          onClick: () => onDeleteFolder(folder.id),
-        },
-      ],
-    });
-  }
+  const handleFolderContextMenu = useCallback(
+    (e: React.MouseEvent, folder: FolderSummary) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: [
+          {
+            type: "item",
+            label: t("sidebar.settings"),
+            onClick: () => onEditFolder(folder),
+          },
+          {
+            type: "separator",
+          },
+          {
+            type: "item",
+            label: t("common.delete"),
+            danger: true,
+            onClick: () => onDeleteFolder(folder.id),
+          },
+        ],
+      });
+    },
+    [t, onEditFolder, onDeleteFolder],
+  );
 
-  function handleThreadContextMenu(
-    e: React.MouseEvent,
-    thread: ThreadSummary,
-  ) {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        {
-          type: "item",
-          label: t("sidebar.moveFolder"),
-          onClick: () =>
-            setMoveTarget({
-              threadId: thread.id,
-              currentFolderId: thread.folderId,
-            }),
-        },
-        { type: "separator" },
-        {
-          type: "item",
-          label: t("common.delete"),
-          danger: true,
-          onClick: () => onDelete(thread.id),
-        },
-      ],
-    });
-  }
+  const handleThreadContextMenu = useCallback(
+    (e: React.MouseEvent, thread: ThreadSummary) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: [
+          {
+            type: "item",
+            label: t("sidebar.moveFolder"),
+            onClick: () =>
+              setMoveTarget({
+                threadId: thread.id,
+                currentFolderId: thread.folderId,
+              }),
+          },
+          { type: "separator" },
+          {
+            type: "item",
+            label: t("common.delete"),
+            danger: true,
+            onClick: () => onDelete(thread.id),
+          },
+        ],
+      });
+    },
+    [t, onDelete],
+  );
 
   const unassignedThreads = threads.filter((t) => t.folderId === null);
 
@@ -255,8 +255,8 @@ export function Sidebar({
                       folder={f}
                       collapsed={collapsed}
                       count={folderThreads.length}
-                      onToggle={() => toggleFolder(f.id)}
-                      onContextMenu={(e) => handleFolderContextMenu(e, f)}
+                      onToggle={toggleFolder}
+                      onContextMenu={handleFolderContextMenu}
                     />
                     {!collapsed && (
                       <ul className="ml-3 flex flex-col gap-0.5 border-l border-border pl-1">
@@ -270,11 +270,11 @@ export function Sidebar({
                               key={t.id}
                               thread={t}
                               active={t.id === activeThreadId}
-                              onSelect={() => onSelect(t.id)}
-                              onDelete={() => onDelete(t.id)}
+                              onSelect={onSelect}
+                              onDelete={onDelete}
                               onRename={onRename}
                               onRenamed={onRenamed}
-                              onContextMenu={(e) => handleThreadContextMenu(e, t)}
+                              onContextMenu={handleThreadContextMenu}
                             />
                           ))
                         )}
@@ -304,11 +304,11 @@ export function Sidebar({
                         key={t.id}
                         thread={t}
                         active={t.id === activeThreadId}
-                        onSelect={() => onSelect(t.id)}
-                        onDelete={() => onDelete(t.id)}
+                        onSelect={onSelect}
+                        onDelete={onDelete}
                         onRename={onRename}
                         onRenamed={onRenamed}
-                        onContextMenu={(e) => handleThreadContextMenu(e, t)}
+                        onContextMenu={handleThreadContextMenu}
                       />
                     ))}
                   </ul>
@@ -348,17 +348,17 @@ export function Sidebar({
       />
     </aside>
   );
-}
+});
 
 type FolderRowProps = {
   folder: FolderSummary;
   collapsed: boolean;
   count: number;
-  onToggle: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onToggle: (id: string) => void;
+  onContextMenu: (e: React.MouseEvent, folder: FolderSummary) => void;
 };
 
-function FolderRow({
+const FolderRow = memo(function FolderRow({
   folder,
   collapsed,
   count,
@@ -369,14 +369,14 @@ function FolderRow({
   return (
     <div
       className="group flex items-center gap-1 rounded-xl px-1 py-1 transition-all duration-150 hover:bg-muted/70"
-      onClick={onToggle}
-      onContextMenu={onContextMenu}
+      onClick={() => onToggle(folder.id)}
+      onContextMenu={(e) => onContextMenu(e, folder)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onToggle();
+          onToggle(folder.id);
         }
       }}
     >
@@ -405,19 +405,19 @@ function FolderRow({
       <span className="text-xs text-muted-foreground">{count}</span>
     </div>
   );
-}
+});
 
 type ThreadRowProps = {
   thread: ThreadSummary;
   active: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
   onRename: (id: string, title: string) => Promise<boolean> | boolean;
   onRenamed: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent, thread: ThreadSummary) => void;
 };
 
-function ThreadRow({
+const ThreadRow = memo(function ThreadRow({
   thread,
   active,
   onSelect,
@@ -468,11 +468,11 @@ function ThreadRow({
   return (
     <li
       className="group flex items-center gap-1 rounded-xl px-1"
-      onContextMenu={onContextMenu}
+      onContextMenu={(e) => onContextMenu(e, thread)}
     >
       <button
         type="button"
-        onClick={onSelect}
+        onClick={() => onSelect(thread.id)}
         onDoubleClick={() => {
           setDraft(thread.title);
           setEditing(true);
@@ -486,7 +486,7 @@ function ThreadRow({
       </button>
       <button
         type="button"
-        onClick={onDelete}
+        onClick={() => onDelete(thread.id)}
         aria-label={t("common.delete")}
         className="hidden shrink-0 rounded px-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-red-500/10 hover:text-red-500 group-hover:block"
       >
@@ -494,4 +494,4 @@ function ThreadRow({
       </button>
     </li>
   );
-}
+});

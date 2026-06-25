@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, type Variants } from "motion/react";
 
 /* ------------------------------------------------------------------ *
@@ -93,16 +93,6 @@ export function AnimateModal({
   ariaLabel,
   panelClassName = "max-w-2xl",
 }: AnimateModalProps) {
-  useEffect(() => {
-    if (!open) return;
-    document.body.classList.add("modal-open");
-    return () => {
-      window.setTimeout(
-        () => document.body.classList.remove("modal-open"),
-        250,
-      );
-    };
-  }, [open]);
   return (
     <AnimatePresence>
       {open && (
