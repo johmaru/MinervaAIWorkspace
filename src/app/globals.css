@@ -173,7 +173,6 @@ body::before {
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* アニメーションキーフレーム */
-/* DISABLED for flicker diagnosis — restore if needed
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -188,25 +187,22 @@ body::before {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
 }
-*/
 
 
 /* prefers-reduced-motion: 装飾アニメーションを無効化。
    ローディングスピナーは状態フィードバックのため回転を維持。 */
-/* DISABLED for flicker diagnosis — restore if needed
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  ローディング状態のスピナーは回転を維持（フィードバック欠如より UX 上重大）
+  /* ローディング状態のスピナーは回転を維持（フィードバック欠如より UX 上重大） */
   .loading-spinner {
     animation-duration: 1s !important;
     animation-iteration-count: infinite !important;
   }
 }
-*/
 
 /* Markdown レンダリングの調整 */
 .markdown-body > :first-child {
