@@ -638,6 +638,14 @@ export function SettingsModal({ open, onClose }: Props) {
         {/* コネクション */}
         <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🔗</span>{t("settings.connections")}</>}>
           <div className="mt-3 space-y-3">
+            <div className="rounded-xl bg-muted/40 p-3">
+              <p className="text-xs text-muted-foreground">
+                {t("help.connectionsWhatIs")}
+              </p>
+              <a href="https://www.notion.so/developers" target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-foreground underline">
+                Notion Developers →
+              </a>
+            </div>
             {/* Notion OAuth 設定 */}
             <div>
               <label className="mb-1 block">

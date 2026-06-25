@@ -325,6 +325,9 @@ export function ChatWindow({
                         style={{ overflow: "hidden" }}
                       >
                         <div className="border-t border-border/50 px-1 py-1">
+                          <p className="px-1 py-1 text-[10px] text-muted-foreground">
+                            {t("help.connectionsWhatIs")}
+                          </p>
                           {connectionsList.map((conn) => (
                             <label key={conn.id} className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs hover:bg-muted/50">
                               <input
