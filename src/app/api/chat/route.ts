@@ -138,15 +138,25 @@ export async function POST(req: Request) {
           send,
         });
 
-        const memoryMessage = await buildMemoryContext({
-          content: prepared.content,
-          thread,
-        });
+        let memoryMessage: Awaited<ReturnType<typeof buildMemoryContext>> = null;
+        try {
+          memoryMessage = await buildMemoryContext({
+            content: prepared.content,
+            thread,
+          });
+        } catch (err) {
+          console.error("[chat] buildMemoryContext failed:", err);
+        }
 
-        const skillMessage = await buildSkillContext({
-          content: prepared.content,
-          userId: user.id,
-        });
+        let skillMessage: Awaited<ReturnType<typeof buildSkillContext>> = null;
+        try {
+          skillMessage = await buildSkillContext({
+            content: prepared.content,
+            userId: user.id,
+          });
+        } catch (err) {
+          console.error("[chat] buildSkillContext failed:", err);
+        }
 
         // MCP サーバー接続: スレッドで有効化されたサーバーに接続し、ツールを取得。
         // 接続失敗時はスキップし、チャットは継続（非ブロッキング）。
