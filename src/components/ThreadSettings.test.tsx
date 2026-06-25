@@ -45,6 +45,7 @@ type TestThread = {
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
   mcpServerIds: string[];
+  connectionIds: string[];
 };
 
 const baseThread: TestThread = {
@@ -58,6 +59,7 @@ const baseThread: TestThread = {
   dualStrategy: "cross_review" as const,
   dualDebateRounds: 2,
   mcpServerIds: [],
+  connectionIds: [],
 };
 
 function renderSettings(overrides?: Partial<TestThread>) {

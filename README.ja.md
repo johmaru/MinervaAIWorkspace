@@ -27,6 +27,7 @@
 - **モーション UI アニメーション** — モーダル遷移、ボタン押下フィードバック、アコーディオン展開、スムーズスクロール
 - **スレッド単位のシステムプロンプトとモデル選択**
 - **MCP サーバー統合** — 外部の Model Context Protocol サーバー（Streamable HTTP / stdio）を登録し、スレッド単位で有効化。LLM がストリーミング中にツールを発見・呼び出し、組み込みの検索/スクレイプツールと併用可能
+- **コネクション（Notion）** — Notion アカウントを OAuth で連携。チャット中に LLM が `notion_search`、`notion_get_page`、`notion_get_blocks` ツールを呼び出し、Notion のコンテンツを検索・取得。スレッド単位で＋メニューから有効化
 - **アカウント認証** — Auth.js v5 + Credentials プロバイダ。初回 Docker 起動時にアカウント作成が必要、以降はログイン。ユーザー毎にデータが分離
 - **設定 GUI** — `.env` に書き込み、埋め込みモデルのマイグレーション以外は再起動不要
 
@@ -153,8 +154,21 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
 | `AUTH_SECRET`           | Auth.js JWT 暗号化シークレット（必須。`bunx auth secret` で生成） | —                                                  |
 | `AUTH_TRUST_HOST`       | リバースプロキシ背後でホストヘッダーを信頼（Docker 用）            | `true`                                               |
-
 | `TZ`                   | プロンプト日時表示のタイムゾーン（空 = `Asia/Tokyo`）              | —                                                    |
+| `NOTION_CLIENT_ID`      | Notion OAuth クライアント ID（コネクション機能。[Notion 連携設定](#notion-連携設定)を参照） | — |
+| `NOTION_CLIENT_SECRET`  | Notion OAuth クライアントシークレット                              | —                                                    |
+| `AUTH_URL`              | アプリの公開 URL（Notion OAuth リダイレクト URI と一致する必要あり） | `http://localhost:3001`                             |
+
+## Notion 連携設定
+
+コネクション機能を使うと、チャット中に LLM が Notion ツール（ページ検索、ページ内容取得）を呼び出せます。有効化手順:
+
+1. [https://www.notion.so/developers](https://www.notion.so/developers) で **public** インテグレーションを作成する。
+2. リダイレクト URI を `http://localhost:3001/api/connections/notion/callback` に設定する（デプロイ環境に合わせてホスト/ポートを調整）。
+3. `.env` に `NOTION_CLIENT_ID` と `NOTION_CLIENT_SECRET` を設定する。`AUTH_URL` はアプリの公開 URL に合わせる（リダイレクト URI と一致させる）。
+4. アプリを再起動する（`docker compose up -d --build`）。
+5. 設定 → コネクション →「Notion に接続」を開く。Notion で認可すると、コネクションが設定リストに表示される。
+6. スレッド単位: ＋メニュー →「コネクション」→ Notion コネクションをオンにする。LLM が会話内容から判断して Notion ツールを自動呼び出しする。
 
 ## 使い方
 

@@ -74,6 +74,14 @@ export function SettingsModal({ open, onClose }: Props) {
   const [torBusy, setTorBusy] = useState(false);
   const [torConnection, setTorConnection] = useState<TorConnection | null>(null);
   const [torChecking, setTorChecking] = useState(false);
+  const [connections, setConnections] = useState<{
+    id: string;
+    provider: string;
+    workspaceName: string | null;
+    workspaceIcon: string | null;
+    ownerName: string | null;
+    ownerEmail: string | null;
+  }[]>([]);
 
   const fetchTorStatus = useCallback(async () => {
     try {
@@ -102,14 +110,34 @@ export function SettingsModal({ open, onClose }: Props) {
     }
   }, [t]);
 
+  const fetchConnections = useCallback(async () => {
+    try {
+      const res = await fetch("/api/connections");
+      if (!res.ok) return;
+      setConnections(await res.json());
+    } catch {
+      // 無視
+    }
+  }, []);
+
+  const handleDisconnect = useCallback(async (id: string) => {
+    await fetch("/api/connections", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setConnections((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
   useEffect(() => {
     if (open) {
       setMessage(null);
       setMigrationConfirmed(false);
       void fetchSettings();
       void fetchTorStatus();
+      void fetchConnections();
     }
-  }, [open, fetchSettings, fetchTorStatus]);
+  }, [open, fetchSettings, fetchTorStatus, fetchConnections]);
 
   const update = useCallback(<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -601,6 +629,30 @@ export function SettingsModal({ open, onClose }: Props) {
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
+          </div>
+        </Accordion>
+        {/* コネクション */}
+        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🔗</span>{t("settings.connections")}</>}>
+          <div className="mt-3 space-y-3">
+            {connections.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
+            ) : (
+              connections.map((conn) => (
+                <div key={conn.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-3">
+                  {conn.workspaceIcon && <img src={conn.workspaceIcon} alt="" className="h-5 w-5 rounded" />}
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{conn.workspaceName ?? "Notion"}</p>
+                    <p className="text-xs text-muted-foreground">{conn.ownerEmail ?? conn.ownerName}</p>
+                  </div>
+                  <button type="button" onClick={() => void handleDisconnect(conn.id)} className="text-xs text-muted-foreground hover:text-foreground">
+                    {t("settings.disconnect")}
+                  </button>
+                </div>
+              ))
+            )}
+            <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+              {t("settings.connectNotion")}
+            </a>
           </div>
         </Accordion>
 

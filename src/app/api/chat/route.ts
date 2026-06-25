@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
 import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
 import { db } from "@/db";
-import { messages, threads, mcpServers } from "@/db/schema";
+import { messages, threads, mcpServers, connections } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
@@ -26,6 +26,12 @@ import {
   type McpConnection,
   type McpTool,
 } from "@/lib/mcpClient";
+import {
+  loadConnections,
+  getConnectionTools,
+  dispatchConnectionTool,
+  type ConnectionRow,
+} from "@/lib/connections";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -175,6 +181,23 @@ export async function POST(req: Request) {
           }
         }
 
+        // コネクション読み込み: スレッドで有効化されたコネクションのツールを取得。
+        // MCP と異なりステートレスな HTTP API のため接続ハンドル不要。
+        // 失敗時はスキップし、チャットは継続（非ブロッキング）。
+        const activeConnectionIds = thread.connectionIds ?? [];
+        let connectionRows: ConnectionRow[] = [];
+        let connectionTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
+        if (activeConnectionIds.length > 0) {
+          try {
+            connectionRows = await loadConnections(user.id, activeConnectionIds);
+            for (const conn of connectionRows) {
+              connectionTools.push(...getConnectionTools(conn));
+            }
+          } catch (err) {
+            console.error("[connections] failed to load connections:", err);
+          }
+        }
+
         const finalMessages = buildFinalMessages({
           systemContent,
           history: prepared.history,
@@ -233,8 +256,9 @@ export async function POST(req: Request) {
             },
             toolSupport,
             send,
-            extraTools: mcpToolsToOpenAIFormat(mcpTools),
+            extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
             mcpConnections,
+            connectionRows,
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;
@@ -825,6 +849,7 @@ async function streamCompletion({
   send,
   extraTools,
   mcpConnections,
+  connectionRows,
 }: {
   llm: OpenAI;
   model: string;
@@ -835,6 +860,7 @@ async function streamCompletion({
   send?: StreamSend;
   extraTools?: OpenAI.Chat.Completions.ChatCompletionTool[];
   mcpConnections?: McpConnection[];
+  connectionRows?: ConnectionRow[];
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -1002,6 +1028,33 @@ async function streamCompletion({
           }
         } else {
           toolContent = `Unknown tool: ${tc.name}`;
+        }
+      } else if (tc.name.startsWith("notion_") && connectionRows && connectionRows.length > 0) {
+        // コネクションツール: "notion_" プレフィックスでプロバイダーを識別。
+        // Notion は現状唯一のプロバイダーなので最初のマッチするコネクションを使用。
+        const conn = connectionRows[0];
+        send?.("status", { label: `Notion: ${tc.name} を実行中` });
+        try {
+          let connArgs: Record<string, unknown>;
+          try {
+            connArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+          } catch {
+            connArgs = {};
+          }
+          const result = await dispatchConnectionTool(conn, tc.name, connArgs);
+          toolContent = result.content;
+          // リフレッシュされたトークンがあれば DB へ永続化
+          if (result.newAccessToken && result.newRefreshToken) {
+            try {
+              await db.update(connections)
+                .set({ accessToken: result.newAccessToken, refreshToken: result.newRefreshToken, updatedAt: new Date() })
+                .where(eq(connections.id, conn.id));
+            } catch {
+              // 永続化エラーは無視 — 次回呼び出しで再度リフレッシュされる
+            }
+          }
+        } catch {
+          toolContent = `Connection tool ${tc.name} failed`;
         }
       } else {
         toolContent = `Unknown tool: ${tc.name}`;

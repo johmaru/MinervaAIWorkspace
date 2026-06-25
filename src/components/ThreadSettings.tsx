@@ -15,6 +15,7 @@ type Thread = {
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
   mcpServerIds: string[];
+  connectionIds: string[];
 };
 
 type Props = {

@@ -29,12 +29,29 @@ export function ChatWindow({
   const [menuOpen, setMenuOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
+  const [connOpen, setConnOpen] = useState(false);
+  const [connectionIds, setConnectionIds] = useState<string[]>([]);
+  const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // スレッド切替時に mcpServerIds を同期
+  // スレッド切替時に mcpServerIds / connectionIds を同期
   useEffect(() => {
     setMcpServerIds(thread?.mcpServerIds ?? []);
-  }, [thread?.id, thread?.mcpServerIds]);
+    setConnectionIds(thread?.connectionIds ?? []);
+  }, [thread?.id, thread?.mcpServerIds, thread?.connectionIds]);
+
+  const fetchConnections = useCallback(async () => {
+    const res = await fetch("/api/connections");
+    if (res.ok) setConnectionsList(await res.json());
+  }, []);
+
+  const handleConnectionChange = useCallback(
+    (ids: string[]) => {
+      setConnectionIds(ids);
+      void updateThread({ connectionIds: ids });
+    },
+    [updateThread],
+  );
 
   // メニュー外クリックで閉じる
   useEffect(() => {
@@ -43,11 +60,17 @@ export function ChatWindow({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
         setMcpOpen(false);
+        setConnOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
+
+  // メニュー開閉時にコネクション一覧を取得
+  useEffect(() => {
+    if (menuOpen) void fetchConnections();
+  }, [menuOpen, fetchConnections]);
 
   const handleMcpChange = useCallback(
     (ids: string[]) => {
@@ -57,6 +80,19 @@ export function ChatWindow({
     [updateThread],
   );
   const pendingRef = useRef<string | null>(null);
+
+  // OAuth コールバックのリダイレクトパラメータを処理
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connection_success")) {
+      params.delete("connection_success");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (params.get("connection_error")) {
+      params.delete("connection_error");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   // 自動スクロール: ユーザーが下部付近にいる場合のみスムーズスクロール。
   // 上にスクロール中はジャンプしない（ユーザーの閲覧を妨げない）。
@@ -259,6 +295,56 @@ export function ChatWindow({
                             selectedIds={mcpServerIds}
                             onChange={handleMcpChange}
                           />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  {/* コネクション */}
+                  <button
+                    type="button"
+                    onClick={() => setConnOpen((v) => !v)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  >
+                    <span>🔗</span>
+                    <span className="flex-1 text-left">{t("chat.inputMenuConnections")}</span>
+                    {connectionIds.length > 0 && (
+                      <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium">
+                        {connectionIds.length}
+                      </span>
+                    )}
+                    <span className={`text-xs transition-transform duration-200 ${connOpen ? "rotate-90" : ""}`}>▶</span>
+                  </button>
+                  {/* コネクションパネル（展開時） */}
+                  <AnimatePresence>
+                    {connOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <div className="border-t border-border/50 px-1 py-1">
+                          {connectionsList.map((conn) => (
+                            <label key={conn.id} className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs hover:bg-muted/50">
+                              <input
+                                type="checkbox"
+                                checked={connectionIds.includes(conn.id)}
+                                onChange={(e) => {
+                                  handleConnectionChange(
+                                    e.target.checked
+                                      ? [...connectionIds, conn.id]
+                                      : connectionIds.filter((id) => id !== conn.id),
+                                  );
+                                }}
+                              />
+                              <span>{conn.workspaceName ?? "Notion"}</span>
+                              <span className="text-muted-foreground">({conn.provider})</span>
+                            </label>
+                          ))}
+                          {connectionsList.length === 0 && (
+                            <p className="px-1 py-2 text-xs text-muted-foreground">{t("settings.noConnections")}</p>
+                          )}
                         </div>
                       </motion.div>
                     )}

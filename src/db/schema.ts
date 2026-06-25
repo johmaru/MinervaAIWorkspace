@@ -94,6 +94,30 @@ export const mcpServers = pgTable("mcp_servers", {
 
 
 /**
+ * connections — ユーザーが OAuth 認証した外部サービス（Notion 等）。
+ *
+ * provider は enum で拡張可能（"notion" → 将来 "google", "github" 等）。
+ * accessToken / refreshToken はトークン取得済みの行のみ存在（NOT NULL）。
+ * workspaceName / workspaceIcon / ownerName / ownerEmail は表示用メタデータ。
+ * スレッド単位で有効/無効を切り替え（threads.connectionIds に id 配列を保持）。
+ */
+export const connections = pgTable("connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider", { enum: ["notion"] }).notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  workspaceName: text("workspace_name"),
+  workspaceIcon: text("workspace_icon"),
+  botId: text("bot_id"),
+  ownerName: text("owner_name"),
+  ownerEmail: text("owner_email"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+/**
  * threads — 会話スレッド
  * current_leaf_id: 現在表示中の枝の末端 message id。枝分かれナビで切替。
  */
@@ -109,6 +133,7 @@ export const threads = pgTable("threads", {
   dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
   mcpServerIds: jsonb("mcp_server_ids").$type<string[]>().notNull().default([]),
   folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
+  connectionIds: jsonb("connection_ids").$type<string[]>().notNull().default([]),
   currentLeafId: uuid("current_leaf_id"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

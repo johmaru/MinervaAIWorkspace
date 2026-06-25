@@ -27,6 +27,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Motion-based UI animations** — modal transitions, button press feedback, animated accordions, and smooth scroll
 - **Per-thread system prompt and model selection**
 - **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
+- **Connections (Notion)** — connect your Notion account via OAuth; the LLM calls `notion_search`, `notion_get_page`, and `notion_get_blocks` tools during chat to find and read Notion content; enabled per-thread via the ＋ menu
 - **Account authentication** — Auth.js v5 with Credentials provider; first Docker launch requires account creation, then login; each user's data is isolated
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
 
@@ -152,7 +153,20 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
+| `NOTION_CLIENT_ID`       | Notion OAuth client ID (for Connections feature; see [Notion Connection Setup](#notion-connection-setup)) | — |
+| `NOTION_CLIENT_SECRET`   | Notion OAuth client secret                                          | —                                                    |
+| `AUTH_URL`               | Public URL of the app (must match the Notion OAuth redirect URI)   | `http://localhost:3001`                              |
 
+## Notion Connection Setup
+
+The Connections feature lets the LLM call Notion tools (search pages, read page content) during chat. To enable:
+
+1. Go to [https://www.notion.so/developers](https://www.notion.so/developers) and create a **public** integration.
+2. Set the redirect URI to `http://localhost:3001/api/connections/notion/callback` (adjust the host/port for your deployment).
+3. Set `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` in `.env`. Also set `AUTH_URL` to the app's public URL (must match the redirect URI).
+4. Restart the app (`docker compose up -d --build`).
+5. Open Settings → Connections → "Connect Notion". Authorize via Notion. The connection appears in the settings list.
+6. Per-thread: open the ＋ menu → "Connections" → toggle on the Notion connection. The LLM will auto-invoke Notion tools based on conversation context.
 
 ## LLM Provider Modes
 
