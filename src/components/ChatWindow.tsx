@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useRef, useState, useCallback } from "react";
 import { useChat, type ChatMessage, type DualTrace } from "@/hooks/useChat";
 import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
@@ -10,7 +10,7 @@ import { useI18n } from "@/components/I18nProvider";
 import { MotionButton, Accordion } from "@/components/ui/motion";
 import { AnimatePresence, motion } from "motion/react";
 
-export function ChatWindow({
+export const ChatWindow = memo(function ChatWindow({
   threadId,
   onCreateThread,
   onConversationEnded,
@@ -415,7 +415,7 @@ export function ChatWindow({
       </div>
     </div>
   );
-}
+});
 
 function EmptyState() {
   const { t } = useI18n();

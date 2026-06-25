@@ -42,6 +42,7 @@ export function ChatShell() {
     setHelpTopic(topic);
     setHelpOpen(true);
   }, []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   const handleCreateThread = useCallback(
     async (): Promise<string | null> => {
@@ -124,6 +125,7 @@ export function ChatShell() {
     },
     [move],
   );
+  const handleCloseSidebar = useCallback(() => setSidebarOpen(false), []);
 
   // Esc キーでサイドバーを閉じる
   useEffect(() => {
@@ -175,7 +177,7 @@ export function ChatShell() {
           onEditFolder={handleEditFolder}
           onDeleteFolder={handleDeleteFolder}
           onMoveThread={handleMoveThread}
-          onClose={() => setSidebarOpen(false)}
+          onClose={handleCloseSidebar}
           onOpenHelp={openHelp}
         />
       </div>
@@ -213,7 +215,7 @@ export function ChatShell() {
           onSave={handleSaveFolder}
         />
       )}
-      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} initialTopic={helpTopic} />
+      <HelpModal open={helpOpen} onClose={closeHelp} initialTopic={helpTopic} />
     </div>
   );
 }
