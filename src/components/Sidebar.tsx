@@ -8,7 +8,6 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { SearchBar } from "@/components/SearchBar";
 import { UrlInput } from "@/components/UrlInput";
 import { SettingsModal } from "@/components/SettingsModal";
-import { HelpModal } from "@/components/HelpModal";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { MoveToFolderModal } from "@/components/MoveToFolderModal";
 import { useI18n } from "@/components/I18nProvider";
@@ -34,6 +33,7 @@ type SidebarProps = {
   onDeleteFolder: (id: string) => void;
   onMoveThread: (threadId: string, folderId: string | null) => Promise<boolean>;
   onClose?: () => void;
+  onOpenHelp: (topic: string | null) => void;
 };
 
 type MenuState = { x: number; y: number; items: MenuItem[] };
@@ -57,10 +57,10 @@ export function Sidebar({
   onDeleteFolder,
   onMoveThread,
   onClose,
+  onOpenHelp,
 }: SidebarProps) {
   const { t } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     new Set(),
@@ -179,7 +179,7 @@ export function Sidebar({
           </MotionButton>
           <MotionButton
             type="button"
-            onClick={() => setHelpOpen(true)}
+            onClick={() => onOpenHelp(null)}
             className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
             aria-label={t("sidebar.help")}
             whileTap={{ scale: 0.9 }}
@@ -324,8 +324,7 @@ export function Sidebar({
           {t("common.errorPrefix", { error: error || foldersError || "" })}
         </div>
       )}
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} onOpenHelp={onOpenHelp} />
 
       <AnimatePresence>
         {menu && (

@@ -14,10 +14,12 @@ export function ChatWindow({
   threadId,
   onCreateThread,
   onConversationEnded,
+  onOpenHelp,
 }: {
   threadId: string | null;
   onCreateThread?: () => Promise<string | null>;
   onConversationEnded?: () => void;
+  onOpenHelp?: (topic: string | null) => void;
 }) {
   const { messages, thread, isStreaming, isLoading, error, sources, send, stop, updateThread, regenerate, editMessage, switchBranch, getSiblingInfo, pendingAttachments, uploadAttachment, removeAttachment } = useChat(threadId);
   const { t } = useI18n();
@@ -325,9 +327,15 @@ export function ChatWindow({
                         style={{ overflow: "hidden" }}
                       >
                         <div className="border-t border-border/50 px-1 py-1">
-                          <p className="px-1 py-1 text-[10px] text-muted-foreground">
-                            {t("help.connectionsWhatIs")}
-                          </p>
+                          {onOpenHelp && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenHelp("connections.notion")}
+                              className="px-1 py-1 text-left text-[10px] text-muted-foreground underline hover:text-foreground"
+                            >
+                              {t("help.connectionsWhatIs")}
+                            </button>
+                          )}
                           {connectionsList.map((conn) => (
                             <label key={conn.id} className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs hover:bg-muted/50">
                               <input

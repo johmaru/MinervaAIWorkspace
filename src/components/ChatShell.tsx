@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatWindow } from "@/components/ChatWindow";
 import { AnimatePresence, motion } from "motion/react";
 import { FolderSettingsModal } from "@/components/FolderSettingsModal";
+import { HelpModal } from "@/components/HelpModal";
 import { useThreads } from "@/hooks/useThreads";
 import { useFolders, type FolderSummary } from "@/hooks/useFolders";
 import { useI18n } from "@/components/I18nProvider";
@@ -34,6 +35,13 @@ export function ChatShell() {
   const [folderModal, setFolderModal] = useState<{ folder: FolderSummary } | null>(
     null,
   );
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<string | null>(null);
+
+  const openHelp = useCallback((topic: string | null = null) => {
+    setHelpTopic(topic);
+    setHelpOpen(true);
+  }, []);
 
   const handleCreateThread = useCallback(
     async (): Promise<string | null> => {
@@ -168,6 +176,7 @@ export function ChatShell() {
           onDeleteFolder={handleDeleteFolder}
           onMoveThread={handleMoveThread}
           onClose={() => setSidebarOpen(false)}
+          onOpenHelp={openHelp}
         />
       </div>
 
@@ -192,6 +201,7 @@ export function ChatShell() {
           threadId={activeThreadId}
           onCreateThread={handleCreateThread}
           onConversationEnded={handleRenamed}
+          onOpenHelp={openHelp}
         />
       </main>
 
@@ -203,6 +213,7 @@ export function ChatShell() {
           onSave={handleSaveFolder}
         />
       )}
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} initialTopic={helpTopic} />
     </div>
   );
 }

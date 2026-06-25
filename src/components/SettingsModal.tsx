@@ -55,6 +55,7 @@ type TorConnection = {
 type Props = {
   open: boolean;
   onClose: () => void;
+  onOpenHelp?: (topic: string | null) => void;
 };
 
 /**
@@ -67,7 +68,7 @@ type Props = {
  * - Tor プロキシ（TOR_PROXY, SCRAPE_PROXY）
  * - Database URL
  */
-export function SettingsModal({ open, onClose }: Props) {
+export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [form, setForm] = useState<Partial<SettingsResponse>>({});
@@ -642,8 +643,17 @@ export function SettingsModal({ open, onClose }: Props) {
               <p className="text-xs text-muted-foreground">
                 {t("help.connectionsWhatIs")}
               </p>
-              <a href="https://www.notion.so/developers" target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-foreground underline">
-                Notion Developers →
+              {onOpenHelp && (
+                <button
+                  type="button"
+                  onClick={() => onOpenHelp("connections.notion")}
+                  className="mt-1 inline-block text-xs text-foreground underline"
+                >
+                  {t("help.openInHelp")} →
+                </button>
+              )}
+              <a href="https://www.notion.so/developers" target="_blank" rel="noopener noreferrer" className="mt-1 ml-2 inline-block text-xs text-muted-foreground underline">
+                Notion Developers ↗
               </a>
             </div>
             {/* Notion OAuth 設定 */}
