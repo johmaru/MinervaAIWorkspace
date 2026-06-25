@@ -32,6 +32,7 @@ import {
   dispatchConnectionTool,
   type ConnectionRow,
 } from "@/lib/connections";
+import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -269,6 +270,41 @@ export async function POST(req: Request) {
             extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
             mcpConnections,
             connectionRows,
+          });
+        }
+
+        // GLM-5.2 等のツール非対応モデルがツール呼び出し構文をテキストとして
+        // 出力し、そこで生成を停止する問題への対処。
+        // 検出時は構文を除去し、続行プロンプトで再生成する（最大1回）。
+        if (hasToolCallMarkup(assistantContent)) {
+          send("status", { label: "検索結果に基づいて回答を生成しています。" });
+          assistantContent = sanitizeToolCallMarkup(assistantContent);
+
+          const continuationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+            ...finalMessages,
+            { role: "assistant" as const, content: assistantContent },
+            {
+              role: "user" as const,
+              content:
+                "The previous response contained tool-call syntax which is not supported in this environment. " +
+                "Web search results have already been provided above — use them to answer directly. " +
+                "Do not output any tool-call, function-call, or XML-tag syntax. " +
+                "Answer the user's question now.",
+            },
+          ];
+
+          await streamCompletion({
+            llm,
+            model: finalModel,
+            messages: continuationMessages,
+            onDelta: (delta) => {
+              assistantContent += delta;
+              send("delta", { delta });
+            },
+            onReasoning: (delta) => {
+              assistantReasoning += delta;
+              send("thinking", { delta });
+            },
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;

@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 
+import { sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
+
 /**
  * LLM 応答の Markdown レンダリング。
  *
@@ -14,35 +16,8 @@ import rehypeKatex from "rehype-katex";
  *
  * ユーザー入欄はプレーンテキストのままでよい（Markdown パース不要）。
  * ストリーミング中の不完全な Markdown は react-markdown が寛容に扱う。
+ * ツール呼び出しマークアップのサニタイズは sanitizeToolCallMarkup に委譲。
  */
-/**
- * LLM が関数呼び出しをサポートしない環境で、ツール呼び出し構文を
- * プレーンテキストとして出力することがある（例: ```scrape_webpage urls="..."```）。
- * これが未閉鎖のコードフェンスとして描画され、UI が崩れるのを防ぐ。
- * ストリーミング中の部分的な出力も安全に処理する。
- */
-function sanitizeToolCallMarkup(content: string): string {
-  return content
-    // コードフェンス形式: ```tool_name ... ``` → 削除
-    .replace(/```(?:scrape_webpage|search_web)\b[\s\S]*?```/g, "")
-    // コードフェンス形式（ストリーミング中）: ```tool_name ... （閉じフェンスなし）→ 削除
-    .replace(/```(?:scrape_webpage|search_web)\b[\s\S]*/g, "")
-    // XMLタグ形式: <search_web>...</search_web> → 削除
-    .replace(/<(?:scrape_webpage|search_web)\b[^>]*>[\s\S]*?<\/(?:scrape_webpage|search_web)>/g, "")
-    // XMLタグ自己閉鎖形式: <search_web ... /> → 削除
-    .replace(/<(?:scrape_webpage|search_web)\b[^>]*\/>/g, "")
-    // XMLタグ形式（ストリーミング中）: <search_web ...>...（閉じタグなし）→ 削除
-    .replace(/<(?:scrape_webpage|search_web)\b[^>]*>[\s\S]*/g, "")
-    // XMLタグ形式（ストリーミング中・開きタグ未完了）: <search_web query="... （> なし）→ 削除
-    .replace(/<(?:scrape_webpage|search_web)\b[^>]*/g, "")
-    // GLM/Qwen tool_call形式（完全形）→ 削除
-    .replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/g, "")
-    // GLM/Qwen tool_call形式（ストリーミング中・閉じタグなし）→ 削除
-    .replace(/<tool_call\b[^>]*>[\s\S]*/g, "")
-    // GLM/Qwen tool_call形式（ストリーミング中・開きタグ未完了）: <tool_call ... （> なし）→ 削除
-    .replace(/<tool_call\b[^>]*/g, "")
-    .trim();
-}
 export function Markdown({ content }: { content: string }) {
   const sanitized = sanitizeToolCallMarkup(content);
   return (
