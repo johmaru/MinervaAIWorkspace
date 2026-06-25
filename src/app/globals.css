@@ -137,6 +137,7 @@ body {
 }
 
 /* 低速ドリフトする極彩色オーロラ: 疑似要素で分離しコンテンツ再描画コストなし */
+/* DISABLED for flicker diagnosis — restore if needed
 body::before {
   content: "";
   position: fixed;
@@ -150,14 +151,17 @@ body::before {
   background-size: 180% 180%, 160% 160%, 200% 200%;
   background-repeat: no-repeat;
 }
+*/
 
 /* ダーク背景ではオーロラの alpha を高めて可視性を確保 */
+/* DISABLED for flicker diagnosis — restore if needed
 .dark body::before {
   background-image:
     radial-gradient(ellipse 60% 50% at 10% 10%, rgba(34, 211, 238, 0.10), transparent 60%),
     radial-gradient(ellipse 55% 45% at 90% 15%, rgba(232, 121, 249, 0.09), transparent 60%),
     radial-gradient(ellipse 65% 55% at 50% 95%, rgba(251, 191, 36, 0.08), transparent 60%);
 }
+*/
 
 /* 細いスクロールバー（ミニマル） */
 * {
@@ -169,6 +173,7 @@ body::before {
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* アニメーションキーフレーム */
+/* DISABLED for flicker diagnosis — restore if needed
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -183,22 +188,25 @@ body::before {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
 }
+*/
 
 
 /* prefers-reduced-motion: 装飾アニメーションを無効化。
    ローディングスピナーは状態フィードバックのため回転を維持。 */
+/* DISABLED for flicker diagnosis — restore if needed
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  /* ローディング状態のスピナーは回転を維持（フィードバック欠如より UX 上重大） */
+  ローディング状態のスピナーは回転を維持（フィードバック欠如より UX 上重大）
   .loading-spinner {
     animation-duration: 1s !important;
     animation-iteration-count: infinite !important;
   }
 }
+*/
 
 /* Markdown レンダリングの調整 */
 .markdown-body > :first-child {
@@ -253,16 +261,20 @@ body::before {
 }
 
 /* カード/バブルの内側ハイライト + 外側微光 */
+/* DISABLED for flicker diagnosis — restore if needed
 .glass-card {
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.02),
     0 4px 24px -8px rgba(0, 0, 0, 0.4);
 }
+*/
+/* DISABLED for flicker diagnosis — restore if needed
 .dark .glass-card {
   box-shadow:
     inset 0 1px 0 0 rgba(255, 255, 255, 0.03),
     0 4px 24px -8px rgba(0, 0, 0, 0.5);
 }
+*/
 
 @layer base {
   * {
