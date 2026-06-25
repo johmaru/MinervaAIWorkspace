@@ -51,6 +51,7 @@ type Thread = {
   dualModelB: string | null;
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
+  mcpServerIds: string[];
 };
 
 type RawMessage = {
@@ -484,8 +485,8 @@ export function useChat(threadId: string | null) {
       responseMode?: "single" | "dual";
       dualModelA?: string | null;
       dualModelB?: string | null;
-      dualStrategy?: "cross_review" | "debate";
       dualDebateRounds?: number;
+      mcpServerIds?: string[];
     }) => {
       if (!threadId) return;
       try {

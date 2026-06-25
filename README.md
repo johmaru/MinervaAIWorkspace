@@ -26,6 +26,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Model + elapsed time display** — each assistant message shows which model produced it and how long the response took
 - **Motion-based UI animations** — modal transitions, button press feedback, animated accordions, and smooth scroll
 - **Per-thread system prompt and model selection**
+- **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
 - **Account authentication** — Auth.js v5 with Credentials provider; first Docker launch requires account creation, then login; each user's data is isolated
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
 

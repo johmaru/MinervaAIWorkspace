@@ -81,6 +81,7 @@ type PatchBody = {
   dualModelB?: string | null;
   dualStrategy?: "cross_review" | "debate";
   dualDebateRounds?: number;
+  mcpServerIds?: string[];
 };
 
 /**
@@ -111,6 +112,7 @@ export async function PATCH(req: Request) {
   if (body.dualModelB !== undefined) values.dualModelB = body.dualModelB || null;
   if (body.dualStrategy === "cross_review" || body.dualStrategy === "debate") values.dualStrategy = body.dualStrategy;
   if (body.dualDebateRounds !== undefined) values.dualDebateRounds = clampDebateRounds(body.dualDebateRounds);
+  if (Array.isArray(body.mcpServerIds)) values.mcpServerIds = body.mcpServerIds;
 
   const [row] = await db
     .update(threads)

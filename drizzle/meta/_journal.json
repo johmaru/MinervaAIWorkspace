@@ -64,6 +64,13 @@
       "when": 1782354644278,
       "tag": "0009_freezing_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782359856504,
+      "tag": "0010_majestic_roland_deschain",
+      "breakpoints": true
     }
   ]
 }

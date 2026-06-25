@@ -72,6 +72,26 @@ export const skills = pgTable("skills", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * mcpServers — ユーザー単位の MCP (Model Context Protocol) サーバー接続定義。
+ *
+ * transport="http" の場合は url を使用（Streamable HTTP / SSE 自動フォールバック）。
+ * transport="stdio" の場合は command + args + env でローカルプロセスを起動。
+ * スレッド単位で有効/無効を切り替え（threads.mcpServerIds に id 配列を保持）。
+ */
+export const mcpServers = pgTable("mcp_servers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  transport: text("transport", { enum: ["http", "stdio"] }).notNull(),
+  url: text("url"),
+  command: text("command"),
+  args: jsonb("args").$type<string[]>(),
+  env: jsonb("env").$type<Record<string, string>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 
 /**
  * threads — 会話スレッド
@@ -87,6 +107,7 @@ export const threads = pgTable("threads", {
   dualModelB: text("dual_model_b"),
   dualStrategy: text("dual_strategy", { enum: ["cross_review", "debate"] }).notNull().default("cross_review"),
   dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
+  mcpServerIds: jsonb("mcp_server_ids").$type<string[]>().notNull().default([]),
   folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
   currentLeafId: uuid("current_leaf_id"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),

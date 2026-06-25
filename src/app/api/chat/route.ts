@@ -1,8 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
 import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
 import { db } from "@/db";
-import { messages, threads } from "@/db/schema";
+import { messages, threads, mcpServers } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
@@ -17,6 +17,15 @@ import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { readFileSync } from "node:fs";
 import { after } from "next/server";
 import { getSessionUser } from "@/lib/auth-guards";
+import {
+  connectMcpServer,
+  listMcpTools,
+  callMcpTool,
+  mcpToolsToOpenAIFormat,
+  parseMcpToolFunctionName,
+  type McpConnection,
+  type McpTool,
+} from "@/lib/mcpClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +116,7 @@ export async function POST(req: Request) {
       let assistantContent = "";
       let assistantReasoning = "";
       let dualTrace: DualTrace | undefined;
+      let mcpConnections: McpConnection[] = [];
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
@@ -131,6 +141,39 @@ export async function POST(req: Request) {
           content: prepared.content,
           userId: user.id,
         });
+
+        // MCP サーバー接続: スレッドで有効化されたサーバーに接続し、ツールを取得。
+        // 接続失敗時はスキップし、チャットは継続（非ブロッキング）。
+        // ライフサイクルはリクエスト内で完結し、finally で close する。
+        mcpConnections = [];
+        let mcpTools: McpTool[] = [];
+        const activeMcpServerIds = thread.mcpServerIds ?? [];
+        if (activeMcpServerIds.length > 0) {
+          try {
+            const serverConfigs = await db
+              .select({
+                id: mcpServers.id,
+                name: mcpServers.name,
+                transport: mcpServers.transport,
+                url: mcpServers.url,
+                command: mcpServers.command,
+                args: mcpServers.args,
+                env: mcpServers.env,
+              })
+              .from(mcpServers)
+              .where(and(eq(mcpServers.userId, user.id), inArray(mcpServers.id, activeMcpServerIds)));
+            for (const config of serverConfigs) {
+              const conn = await connectMcpServer(config);
+              if (conn) {
+                mcpConnections.push(conn);
+                const tools = await listMcpTools(conn);
+                mcpTools.push(...tools);
+              }
+            }
+          } catch (err) {
+            console.error("[mcp] failed to load MCP servers:", err);
+          }
+        }
 
         const finalMessages = buildFinalMessages({
           systemContent,
@@ -190,6 +233,8 @@ export async function POST(req: Request) {
             },
             toolSupport,
             send,
+            extraTools: mcpToolsToOpenAIFormat(mcpTools),
+            mcpConnections,
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;
@@ -240,6 +285,11 @@ export async function POST(req: Request) {
 
         // ストリーム完了内容を after() コールバックへ引き渡す。
         streamResult.assistantContent = assistantContent;
+
+        // MCP 接続を閉じる（stdio 子プロセスの終了を含む）。
+        for (const conn of mcpConnections) {
+          try { await conn.client.close(); } catch { /* ignore close errors */ }
+        }
 
         // ストリームを即座に閉じる（クライアントの isStreaming を下げる）。
         controller.close();
@@ -773,6 +823,8 @@ async function streamCompletion({
   onReasoning,
   toolSupport,
   send,
+  extraTools,
+  mcpConnections,
 }: {
   llm: OpenAI;
   model: string;
@@ -781,6 +833,8 @@ async function streamCompletion({
   onReasoning: (delta: string) => void;
   toolSupport?: ToolSupport | null;
   send?: StreamSend;
+  extraTools?: OpenAI.Chat.Completions.ChatCompletionTool[];
+  mcpConnections?: McpConnection[];
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -806,7 +860,7 @@ async function streamCompletion({
       stream: true,
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       ...(useToolsThisRound
-        ? { tools: STREAM_TOOLS, tool_choice: "auto" }
+        ? { tools: [...STREAM_TOOLS, ...(extraTools ?? [])], tool_choice: "auto" }
         : {}),
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
@@ -924,6 +978,30 @@ async function streamCompletion({
           if (!toolContent) toolContent = "No results found.";
         } catch {
           toolContent = `Search failed for: ${parsedArgs.query}`;
+        }
+      } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
+        // MCP ツール: 関数名形式 "{serverName}__{toolName}"
+        const parsed = parseMcpToolFunctionName(tc.name);
+        if (parsed) {
+          const conn = mcpConnections.find((c) => c.serverName === parsed.serverName);
+          if (conn) {
+            send?.("status", { label: `MCP: ${parsed.serverName}/${parsed.toolName} を実行中` });
+            try {
+              let mcpArgs: Record<string, unknown>;
+              try {
+                mcpArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+              } catch {
+                mcpArgs = {};
+              }
+              toolContent = await callMcpTool(conn, parsed.toolName, mcpArgs);
+            } catch {
+              toolContent = `MCP tool ${tc.name} failed`;
+            }
+          } else {
+            toolContent = `MCP server "${parsed.serverName}" not connected`;
+          }
+        } else {
+          toolContent = `Unknown tool: ${tc.name}`;
         }
       } else {
         toolContent = `Unknown tool: ${tc.name}`;

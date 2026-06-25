@@ -17,6 +17,12 @@ beforeEach(() => {
           json: () => Promise.resolve({ models: mockModels }),
         });
       }
+      if (url === "/api/mcp-servers") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        });
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     }),
   );
@@ -38,6 +44,7 @@ type TestThread = {
   dualModelB: string | null;
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
+  mcpServerIds: string[];
 };
 
 const baseThread: TestThread = {
@@ -50,6 +57,7 @@ const baseThread: TestThread = {
   dualModelB: null,
   dualStrategy: "cross_review" as const,
   dualDebateRounds: 2,
+  mcpServerIds: [],
 };
 
 function renderSettings(overrides?: Partial<TestThread>) {
