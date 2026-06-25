@@ -3,7 +3,7 @@
 import { useActionState, useRef, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { MotionButton } from "@/components/ui/motion";
-import { login, register } from "@/app/actions/auth";
+import { authenticate } from "@/app/actions/auth";
 
 type Mode = "login" | "register";
 
@@ -16,10 +16,7 @@ export function LoginForm({
 }) {
   const { t } = useI18n();
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [state, action, pending] = useActionState(
-    mode === "login" ? login : register,
-    undefined,
-  );
+  const [state, action, pending] = useActionState(authenticate, undefined);
   const [mismatch, setMismatch] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -51,6 +48,7 @@ export function LoginForm({
             }
           }}
         >
+          <input type="hidden" name="mode" value={mode} />
           {mode === "register" && (
             <div className="space-y-1">
               <label htmlFor="nickname" className="text-sm text-muted-foreground">

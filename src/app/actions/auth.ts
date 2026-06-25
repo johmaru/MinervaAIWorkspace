@@ -63,6 +63,18 @@ export async function login(state: FormState, formData: FormData): Promise<FormS
 }
 
 /**
+ * authenticate — ログイン/登録を統合したサーバーアクション。
+ * useActionState に単一の安定した関数参照を渡すため、
+ * モード切替で action が切り替わる問題を回避する。
+ * formData の mode フィールドで login/register を判定。
+ */
+export async function authenticate(state: FormState, formData: FormData): Promise<FormState> {
+  const mode = String(formData.get("mode") ?? "login");
+  if (mode === "register") return register(state, formData);
+  return login(state, formData);
+}
+
+/**
  * logout — セッション破棄して /login にリダイレクト。
  */
 export async function logout(): Promise<void> {
