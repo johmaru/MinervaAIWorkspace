@@ -27,14 +27,7 @@ type Props = {
     dualModelB?: string | null;
     dualStrategy?: "cross_review" | "debate";
     dualDebateRounds?: number;
-    mcpServerIds?: string[];
   }) => Promise<void>;
-};
-
-type McpServerListItem = {
-  id: string;
-  name: string;
-  transport: string;
 };
 
 /**
@@ -57,15 +50,6 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   const [dualDebateRounds, setDualDebateRounds] = useState(thread.dualDebateRounds);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [mcpServers, setMcpServers] = useState<McpServerListItem[]>([]);
-  const [selectedMcpIds, setSelectedMcpIds] = useState<string[]>(thread.mcpServerIds ?? []);
-  const [mcpFormOpen, setMcpFormOpen] = useState(false);
-  const [mcpFormName, setMcpFormName] = useState("");
-  const [mcpFormTransport, setMcpFormTransport] = useState<"http" | "stdio">("http");
-  const [mcpFormUrl, setMcpFormUrl] = useState("");
-  const [mcpFormCommand, setMcpFormCommand] = useState("");
-  const [mcpFormArgs, setMcpFormArgs] = useState("");
-  const [mcpAdding, setMcpAdding] = useState(false);
 
   // モデルリスト取得
   useEffect(() => {
@@ -91,20 +75,6 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     };
   }, []);
 
-  // MCP サーバー一覧取得
-  const fetchMcpServers = useCallback(async () => {
-    try {
-      const res = await fetch("/api/mcp-servers");
-      if (!res.ok) return;
-      const data = await res.json();
-      setMcpServers(Array.isArray(data) ? data : []);
-    } catch {
-      // サイレント失敗
-    }
-  }, []);
-  useEffect(() => {
-    void fetchMcpServers();
-  }, [fetchMcpServers]);
 
   // スレッド切替時にローカル state を同期
   useEffect(() => {
@@ -116,9 +86,8 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     setDualModelB(thread.dualModelB ?? thread.model);
     setDualStrategy(thread.dualStrategy);
     setDualDebateRounds(thread.dualDebateRounds);
-    setSelectedMcpIds(thread.mcpServerIds ?? []);
     setSaved(false);
-  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds, thread.mcpServerIds]);
+  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds]);
 
   const handleSave = useCallback(async () => {
     const resolvedDualModelA = dualModelA || model;
@@ -137,14 +106,13 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
         dualModelB: responseMode === "dual" ? resolvedDualModelB : null,
         dualStrategy,
         dualDebateRounds,
-        mcpServerIds: selectedMcpIds,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
       setSaving(false);
     }
-  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, selectedMcpIds, onUpdate]);
+  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, onUpdate]);
 
   const dirty =
     systemPrompt !== (thread.systemPrompt ?? "") ||
@@ -152,53 +120,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     responseMode !== thread.responseMode ||
     dualModelA !== (thread.dualModelA ?? thread.model) ||
     dualModelB !== (thread.dualModelB ?? thread.model) ||
-    dualDebateRounds !== thread.dualDebateRounds ||
-    selectedMcpIds !== (thread.mcpServerIds ?? []);
-
-  const handleAddMcpServer = useCallback(async () => {
-    const name = mcpFormName.trim();
-    if (!name) return;
-    if (mcpFormTransport === "http" && !mcpFormUrl.trim()) return;
-    if (mcpFormTransport === "stdio" && !mcpFormCommand.trim()) return;
-    setMcpAdding(true);
-    try {
-      const body: Record<string, unknown> = { name, transport: mcpFormTransport };
-      if (mcpFormTransport === "http") {
-        body.url = mcpFormUrl.trim();
-      } else {
-        body.command = mcpFormCommand.trim();
-        body.args = mcpFormArgs.trim() ? mcpFormArgs.split(/\s+/) : [];
-      }
-      const res = await fetch("/api/mcp-servers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        setMcpFormName("");
-        setMcpFormUrl("");
-        setMcpFormCommand("");
-        setMcpFormArgs("");
-        await fetchMcpServers();
-      }
-    } catch {
-      // サイレント失敗
-    } finally {
-      setMcpAdding(false);
-    }
-  }, [mcpFormName, mcpFormTransport, mcpFormUrl, mcpFormCommand, mcpFormArgs, fetchMcpServers]);
-
-  const handleDeleteMcpServer = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/mcp-servers/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        setSelectedMcpIds((prev) => prev.filter((sid) => sid !== id));
-        await fetchMcpServers();
-      }
-    } catch {
-      // サイレント失敗
-    }
-  }, [fetchMcpServers]);
+    dualDebateRounds !== thread.dualDebateRounds;
 
   return (
     <div className="border-b border-border/50">
@@ -326,129 +248,6 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
               )}
             </select>
           </label>
-
-          {/* MCP サーバー選択 */}
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted-foreground">
-              {t("threadSettings.mcpServers")}
-            </span>
-            {mcpServers.length === 0 ? (
-              <span className="text-xs text-muted-foreground">
-                {t("threadSettings.mcpNoServers")}
-              </span>
-            ) : (
-              <div className="flex flex-col gap-1">
-                {mcpServers.map((srv) => (
-                  <div key={srv.id} className="flex items-center gap-2 text-xs">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedMcpIds.includes(srv.id)}
-                        onChange={(e) => {
-                          setSelectedMcpIds((prev) =>
-                            e.target.checked
-                              ? [...prev, srv.id]
-                              : prev.filter((id) => id !== srv.id),
-                          );
-                        }}
-                      />
-                      <span>{srv.name}</span>
-                      <span className="text-muted-foreground">({srv.transport})</span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteMcpServer(srv.id)}
-                      className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
-                      aria-label={t("threadSettings.mcpDelete")}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => setMcpFormOpen((v) => !v)}
-              className="text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {t("threadSettings.mcpAddServer")}
-            </button>
-            {mcpFormOpen && (
-              <div className="flex flex-col gap-2 rounded-xl bg-muted px-2 py-1.5 text-xs">
-                <label className="flex flex-col gap-1">
-                  <span className="font-medium text-muted-foreground">
-                    {t("threadSettings.mcpServerName")}
-                  </span>
-                  <input
-                    value={mcpFormName}
-                    onChange={(e) => setMcpFormName(e.target.value)}
-                    className="rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="font-medium text-muted-foreground">
-                    {t("threadSettings.mcpTransport")}
-                  </span>
-                  <select
-                    value={mcpFormTransport}
-                    onChange={(e) => setMcpFormTransport(e.target.value === "stdio" ? "stdio" : "http")}
-                    className="rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20"
-                  >
-                    <option value="http">{t("threadSettings.mcpTransportHttp")}</option>
-                    <option value="stdio">{t("threadSettings.mcpTransportStdio")}</option>
-                  </select>
-                </label>
-                {mcpFormTransport === "http" ? (
-                  <label className="flex flex-col gap-1">
-                    <span className="font-medium text-muted-foreground">
-                      {t("threadSettings.mcpUrl")}
-                    </span>
-                    <input
-                      value={mcpFormUrl}
-                      onChange={(e) => setMcpFormUrl(e.target.value)}
-                      placeholder="http://localhost:3001/mcp"
-                      className="rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20"
-                    />
-                  </label>
-                ) : (
-                  <>
-                    <label className="flex flex-col gap-1">
-                      <span className="font-medium text-muted-foreground">
-                        {t("threadSettings.mcpCommand")}
-                      </span>
-                      <input
-                        value={mcpFormCommand}
-                        onChange={(e) => setMcpFormCommand(e.target.value)}
-                        placeholder="npx"
-                        className="rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="font-medium text-muted-foreground">
-                        {t("threadSettings.mcpArgs")}
-                      </span>
-                      <input
-                        value={mcpFormArgs}
-                        onChange={(e) => setMcpFormArgs(e.target.value)}
-                        placeholder="-y @modelcontextprotocol/server-everything"
-                        className="rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20"
-                      />
-                    </label>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void handleAddMcpServer()}
-                  disabled={mcpAdding}
-                  className="rounded-lg bg-foreground px-2 py-1 text-background transition-all duration-200 hover:opacity-90 disabled:opacity-40"
-                >
-                  {t("threadSettings.mcpAdd")}
-                </button>
-              </div>
-            )}
-          </div>
-
           <div className="flex items-center gap-2">
             <button
               type="button"

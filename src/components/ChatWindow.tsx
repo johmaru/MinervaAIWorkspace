@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useChat, type ChatMessage, type DualTrace } from "@/hooks/useChat";
 import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
+import { McpPanel } from "@/components/McpPanel";
 import { useI18n } from "@/components/I18nProvider";
 import { MotionButton, Accordion } from "@/components/ui/motion";
 import { AnimatePresence, motion } from "motion/react";
@@ -25,6 +26,36 @@ export function ChatWindow({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // スレッド切替時に mcpServerIds を同期
+  useEffect(() => {
+    setMcpServerIds(thread?.mcpServerIds ?? []);
+  }, [thread?.id, thread?.mcpServerIds]);
+
+  // メニュー外クリックで閉じる
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+        setMcpOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  const handleMcpChange = useCallback(
+    (ids: string[]) => {
+      setMcpServerIds(ids);
+      void updateThread({ mcpServerIds: ids });
+    },
+    [updateThread],
+  );
   const pendingRef = useRef<string | null>(null);
 
   // 自動スクロール: ユーザーが下部付近にいる場合のみスムーズスクロール。
@@ -164,18 +195,78 @@ export function ChatWindow({
             onChange={handleFileSelect}
             className="hidden"
           />
-          <MotionButton
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isCreating || !threadId}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted text-sm transition-all duration-200 hover:bg-muted/80 disabled:opacity-40"
-            aria-label={t("chat.attachFile")}
-            title={t("chat.attachFile")}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.9 }}
-          >
-            📎
-          </MotionButton>
+          <div ref={menuRef} className="relative">
+            <MotionButton
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              disabled={isCreating || !threadId}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted text-sm transition-all duration-200 hover:bg-muted/80 disabled:opacity-40"
+              aria-label={t("chat.inputMenu")}
+              aria-expanded={menuOpen}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <span className={`transition-transform duration-200 ${menuOpen ? "rotate-45" : ""}`}>＋</span>
+            </MotionButton>
+            <AnimatePresence>
+              {menuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-2xl border border-border bg-background p-1 shadow-lg"
+                >
+                  {/* ファイル添付 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fileInputRef.current?.click();
+                      setMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  >
+                    <span>📎</span>
+                    <span>{t("chat.inputMenuAttach")}</span>
+                  </button>
+                  {/* MCP サーバー */}
+                  <button
+                    type="button"
+                    onClick={() => setMcpOpen((v) => !v)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  >
+                    <span>🔌</span>
+                    <span className="flex-1 text-left">{t("chat.inputMenuMcp")}</span>
+                    {mcpServerIds.length > 0 && (
+                      <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium">
+                        {mcpServerIds.length}
+                      </span>
+                    )}
+                    <span className={`text-xs transition-transform duration-200 ${mcpOpen ? "rotate-90" : ""}`}>▶</span>
+                  </button>
+                  {/* MCP パネル（展開時） */}
+                  <AnimatePresence>
+                    {mcpOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <div className="border-t border-border/50 px-1 py-1">
+                          <McpPanel
+                            selectedIds={mcpServerIds}
+                            onChange={handleMcpChange}
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <textarea
             ref={taRef}
             value={input}
