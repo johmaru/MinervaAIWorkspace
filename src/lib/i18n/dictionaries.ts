@@ -280,6 +280,14 @@ const ja = {
     logout: "ログアウト",
     firstRunBanner: "最初のアカウントを作成してください",
   },
+  skills: {
+    saved: "スキルを保存しました",
+    saveFailed: "スキルの保存に失敗しました",
+    notFound: "スキルが見つかりません",
+    list: "スキル一覧",
+    delete: "スキルを削除",
+    applied: "スキル「{name}」を適用しました",
+  },
 };
 
 const en: typeof ja = {
@@ -545,6 +553,14 @@ const en: typeof ja = {
     switchToEn: "English",
     switchToJa: "日本語",
     label: "Language",
+  },
+  skills: {
+    saved: "Skill saved",
+    saveFailed: "Failed to save skill",
+    notFound: "Skill not found",
+    list: "Skills",
+    delete: "Delete skill",
+    applied: "Applied skill: {name}",
   },
 };
 

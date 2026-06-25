@@ -11,7 +11,9 @@ import { decideSearch } from "@/lib/searchDecision";
 import { probeToolSupport } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildMemoryContext } from "@/lib/memoryStore";
+import { buildSkillContext } from "@/lib/skillStore";
 import { generateMemories } from "@/lib/memory";
+import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { readFileSync } from "node:fs";
 import { after } from "next/server";
 import { getSessionUser } from "@/lib/auth-guards";
@@ -125,12 +127,18 @@ export async function POST(req: Request) {
           thread,
         });
 
+        const skillMessage = await buildSkillContext({
+          content: prepared.content,
+          userId: user.id,
+        });
+
         const finalMessages = buildFinalMessages({
           systemContent,
           history: prepared.history,
           content: prepared.content,
           searchContextMessage,
           urlContextMessage,
+          skillMessage,
           memoryMessage,
         });
 
@@ -264,6 +272,15 @@ export async function POST(req: Request) {
       );
     } catch (err) {
       console.error("[memory] generation failed:", err);
+    }
+
+    // スキル保存トリガー検出: ユーザーが「スキルで保存」「save as skill」等を要求
+    if (/(スキルで保存|スキルとして保存|save\s+as\s+skill)/i.test(prepared.content)) {
+      try {
+        await generateSkillFromConversation(body.threadId, user.id, llm, finalModel);
+      } catch (err) {
+        console.error("[skill] generation failed:", err);
+      }
     }
   });
 
@@ -514,6 +531,7 @@ function buildFinalMessages({
   content,
   searchContextMessage,
   urlContextMessage,
+  skillMessage,
   memoryMessage,
 }: {
   systemContent?: string | null;
@@ -521,11 +539,13 @@ function buildFinalMessages({
   content: string;
   searchContextMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam | null;
   urlContextMessage?: OpenAI.Chat.Completions.ChatCompletionMessageParam | null;
+  skillMessage?: { role: "system"; content: string } | null;
   memoryMessage?: { role: "system"; content: string } | null;
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return [
     { role: "system" as const, content: getEnvContext() },
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
+    ...(skillMessage ? [skillMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...history.map(
       (m) => ({ role: m.role, content: m.content }) as OpenAI.Chat.Completions.ChatCompletionMessageParam,

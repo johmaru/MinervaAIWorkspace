@@ -53,6 +53,25 @@ export const verificationTokens = pgTable("verification_tokens", {
 // モデル切替時は env で指定 + DB マイグレーション（vector 列の再作成）が必要。
 const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
+/**
+ * skills — ユーザー単位の再利用可能プロンプト（persona / behavior / knowledge）。
+ *
+ * 会話から LLM で抽出・命名し、embedding 付きで保存。
+ * 次回以降の全スレッドで pgvector 検索 → system context に注入。
+ * ユーザーが「〇〇スキルを使って」と指定すれば名前で直接適用。
+ * 「スキルで保存して」で現在の会話からスキルを生成。
+ */
+export const skills = pgTable("skills", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
+  contentHash: text("content_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 
 /**
  * threads — 会話スレッド
