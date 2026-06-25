@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, type Variants } from "motion/react";
 
 /* ------------------------------------------------------------------ *
@@ -10,11 +10,11 @@ import { AnimatePresence, motion, type Variants } from "motion/react";
  * motion language stays consistent across the app.
  * ------------------------------------------------------------------ */
 
-/** Modals / panels: scale + fade. */
+/** Modals / panels: fade only. */
 export const fadeScaleIn: Variants = {
-  initial: { opacity: 0, scale: 0.96 },
-  animate: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0.98 },
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
 };
 
 /** Message bubbles / list rows: slide up + fade. */
@@ -93,6 +93,16 @@ export function AnimateModal({
   ariaLabel,
   panelClassName = "max-w-2xl",
 }: AnimateModalProps) {
+  useEffect(() => {
+    if (!open) return;
+    document.body.classList.add("modal-open");
+    return () => {
+      window.setTimeout(
+        () => document.body.classList.remove("modal-open"),
+        250,
+      );
+    };
+  }, [open]);
   return (
     <AnimatePresence>
       {open && (

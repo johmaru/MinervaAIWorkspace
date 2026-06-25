@@ -218,7 +218,7 @@ export const ChatWindow = memo(function ChatWindow({
         </div>
       </div>
 
-      <div className="bg-background/80 px-3 py-3 backdrop-blur-md border-t border-border sm:px-4 sm:py-4" role="region" aria-label={t("chat.messageInput")}>
+      <div className="bg-background px-3 py-3 border-t border-border sm:px-4 sm:py-4" role="region" aria-label={t("chat.messageInput")}>
         {pendingAttachments.length > 0 && (
           <div className="mx-auto mb-2 max-w-3xl">
             <AttachmentBar attachments={pendingAttachments} onRemove={removeAttachment} />

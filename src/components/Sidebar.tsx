@@ -158,7 +158,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="flex h-full w-60 shrink-0 flex-col bg-[var(--glass-bg)] backdrop-blur-xl glass-card"
+      className="flex h-full w-60 shrink-0 flex-col bg-sidebar glass-card"
       aria-label={t("sidebar.threadList")}
     >
       <div className="flex items-center justify-between px-3 py-3">
