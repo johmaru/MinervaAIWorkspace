@@ -199,7 +199,7 @@ export function ChatWindow({
             <MotionButton
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              disabled={isCreating || !threadId}
+              disabled={isCreating}
               className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted text-sm transition-all duration-200 hover:bg-muted/80 disabled:opacity-40"
               aria-label={t("chat.inputMenu")}
               aria-expanded={menuOpen}
