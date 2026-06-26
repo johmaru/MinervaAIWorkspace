@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
-import { AnimateModal, MotionButton, Accordion } from "@/components/ui/motion";
+import { AnimateModal, MotionButton } from "@/components/ui/motion";
 
 
 type EmbedModelOption = {
@@ -79,6 +79,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const [torBusy, setTorBusy] = useState(false);
   const [torConnection, setTorConnection] = useState<TorConnection | null>(null);
   const [torChecking, setTorChecking] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
   const [connections, setConnections] = useState<{
     id: string;
     provider: string;
@@ -138,6 +139,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     if (open) {
       setMessage(null);
       setMigrationConfirmed(false);
+      setActiveTab(0);
       void fetchSettings();
       void fetchTorStatus();
       void fetchConnections();
@@ -265,9 +267,15 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setTorChecking(false);
     }
   }, [fetchTorStatus, torConnection, t]);
+  const tabs = [
+    { icon: "🤖", label: t("settings.tabAiModels") },
+    { icon: "🔍", label: t("settings.tabSearchNetwork") },
+    { icon: "🖥️", label: t("settings.tabSystem") },
+    { icon: "🔗", label: t("settings.tabConnections") },
+  ];
 
   return (
-    <AnimateModal open={open} onClose={onClose} ariaLabel={t("settings.title")} panelClassName="max-w-2xl">
+    <AnimateModal open={open} onClose={onClose} ariaLabel={t("settings.title")} panelClassName="max-w-3xl">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
         <MotionButton
@@ -280,8 +288,30 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         </MotionButton>
       </div>
 
+      <div className="flex gap-4" style={{ minHeight: "400px" }}>
+        {/* Vertical tab rail */}
+        <div className="flex w-40 shrink-0 flex-col gap-1">
+          {tabs.map((tab, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setActiveTab(i)}
+              className={`flex items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200 ${
+                activeTab === i
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <span aria-hidden="true">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {/* Tab content — scrollable */}
+        <div className="flex-1 overflow-y-auto pr-1">
+          {activeTab === 0 && (
+          <div className="space-y-6">
         {/* LLM 設定 */}
-        <Accordion className="mb-4" defaultOpen={true} summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🤖</span>{t("settings.llmSettings")}</>}>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block">
@@ -347,10 +377,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               </p>
             </div>
           </div>
-        </Accordion>
 
-        {/* 埋め込みモデル */}
-        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">📐</span>{t("settings.embedModelLabel")}</>}>
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -399,10 +426,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               </div>
             )}
           </div>
-        </Accordion>
-
+          </div>
+          )}
+          {activeTab === 1 && (
+          <div className="space-y-6">
         {/* Web 検索 */}
-        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🔍</span>{t("settings.webSearch")}</>}>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="mb-1 block">
@@ -471,10 +499,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               />
             </div>
           </div>
-        </Accordion>
 
-        {/* Tor プロキシ */}
-        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🧅</span>{t("settings.torProxy")}</>}>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {/* Tor 起動/停止トグル */}
             <div className="flex items-center justify-between rounded-2xl bg-muted/40 p-3 sm:col-span-2">
@@ -584,10 +609,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               />
             </div>
           </div>
-        </Accordion>
-
+          </div>
+          )}
+          {activeTab === 2 && (
+          <div className="space-y-6">
         {/* 実行環境 */}
-        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🖥️</span>{t("settings.environment")}</>}>
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -616,9 +642,6 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               />
             </div>
           </div>
-        </Accordion>
-        {/* Database */}
-        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🗄️</span>{t("settings.database")}</>}>
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -633,9 +656,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               />
             </div>
           </div>
-        </Accordion>
+          </div>
+          )}
+          {activeTab === 3 && (
+          <div className="space-y-6">
         {/* コネクション */}
-        <Accordion className="mb-4" summaryClassName="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium transition-colors duration-200 hover:bg-muted/70" summary={<><span aria-hidden="true">🔗</span>{t("settings.connections")}</>}>
           <div className="mt-3 space-y-3">
             <div className="rounded-xl bg-muted/40 p-3">
               <p className="text-xs text-muted-foreground">
@@ -719,7 +744,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
             )}
           </div>
-        </Accordion>
+          </div>
+          )}
+        </div>
+      </div>
 
         {/* メッセージ */}
         {message && (

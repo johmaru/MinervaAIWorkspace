@@ -111,6 +111,10 @@ const ja = {
   },
   settings: {
     title: "アプリ設定",
+    tabAiModels: "AI・モデル",
+    tabSearchNetwork: "検索・ネット",
+    tabSystem: "システム",
+    tabConnections: "コネクション",
     llmSettings: "LLM 設定",
     llmBaseUrlLabel: "API ベース URL",
     llmApiKeyLabel: "API キー",
@@ -454,6 +458,10 @@ const en: typeof ja = {
   },
   settings: {
     title: "Settings",
+    tabAiModels: "AI & Models",
+    tabSearchNetwork: "Search & Network",
+    tabSystem: "System",
+    tabConnections: "Connections",
     llmSettings: "LLM Settings",
     llmBaseUrlLabel: "API base URL",
     llmApiKeyLabel: "API key",
