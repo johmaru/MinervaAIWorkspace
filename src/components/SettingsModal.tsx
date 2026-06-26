@@ -249,10 +249,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setTorChecking(true);
     setMessage(null);
     try {
-      // 接続確認前に scraper を再起動（SCRAPE_PROXY の変更を反映）
-      await fetch("/api/tor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restart-scraper" }) }).catch(() => {});
-      // 少し待ってから接続確認
-      await new Promise((r) => setTimeout(r, 3000));
+      // Tor の on/off に関わらず scraper は最新の SCRAPE_PROXY で起動しているので
+      // 接続確認のみ実行（不要な再起動を省く）
       await fetchTorStatus();
       if (torConnection?.connected) {
         setMessage({ type: "success", text: t("settings.torConnSuccess", { torIp: torConnection.torIp ?? "", directIp: torConnection.directIp ?? "" }) });

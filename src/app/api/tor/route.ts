@@ -12,24 +12,22 @@ const COMPOSE_DIR = process.cwd();
 const SOCKS_PROXY = "socks5://tor:9050";
 
 /**
- * GET /api/tor — Tor コンテナの状態 + 現在のプロキシ設定を返す。
+ * GET /api/tor — Tor プロキシの状態 + 接続確認を返す。
+ *
+ * Tor コンテナは docker-compose up で常時起動している。
+ * running は SCRAPE_PROXY が設定されているか（= Tor 経由で通信中か）で判定する。
  *
  * レスポンス:
- *   { running: boolean, scraPeProxy: string, torProxy: string }
+ *   { running: boolean, scrapeProxy: string, torProxy: string, connection: {...} }
  */
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
-  let running = false;
-  try {
-    const { stdout } = await execAsync(
-      `docker ps --filter name=umanschat-tor --filter status=running --format "{{.Names}}"`,
-      { cwd: COMPOSE_DIR },
-    );
-    running = stdout.trim().includes("umanschat-tor");
-  } catch {
-    // docker コマンドが無い or エラー時は停止扱い
-  }
+
+  const scrapeProxy = process.env.SCRAPE_PROXY || "";
+  const torProxy = process.env.TOR_PROXY || "";
+  // Tor コンテナは常時起動。running は SCRAPE_PROXY が設定されているかで判定。
+  const running = scrapeProxy === SOCKS_PROXY;
 
   // 実際の Tor 接続確認: scraper の /tor-check を呼ぶ
   // 直接接続IP と Tor 経由IP を比較し、実際に Tor が機能しているか検証
@@ -55,27 +53,25 @@ export async function GET() {
 
   return Response.json({
     running,
-    scrapeProxy: process.env.SCRAPE_PROXY || "",
-    torProxy: process.env.TOR_PROXY || "",
+    scrapeProxy,
+    torProxy,
     socksProxy: SOCKS_PROXY,
     connection,
   });
 }
 
 type TorBody = {
-  action: "start" | "stop" | "restart-scraper";
+  action: "start" | "stop";
 };
 
 /**
- * POST /api/tor — Tor コンテナの起動/停止 + SCRAPE_PROXY の切り替え。
+ * POST /api/tor — Tor プロキシの有効/無効を切り替える。
  *
- * action=start:
- *   1. docker compose up -d tor で Tor コンテナ起動
- *   2. .env の SCRAPE_PROXY を socks5://tor:9050 に設定
+ * Tor コンテナ自体は docker-compose up で常時起動している。
+ * この API は SCRAPE_PROXY / TOR_PROXY の .env 書き換え + scraper 再起動のみ行う。
  *
- * action=stop:
- *   1. docker compose stop tor で Tor コンテナ停止
- *   2. .env の SCRAPE_PROXY を空に設定
+ * action=start:  SCRAPE_PROXY / TOR_PROXY を socks5://tor:9050 に設定
+ * action=stop:   SCRAPE_PROXY / TOR_PROXY を空に設定
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -88,41 +84,12 @@ export async function POST(req: Request) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  if (body.action !== "start" && body.action !== "stop" && body.action !== "restart-scraper") {
-    return new Response("action must be start, stop, or restart-scraper", { status: 400 });
-  }
-
-  // scraper コンテナの再起動のみ（SCRAPE_PROXY の変更を反映）
-  if (body.action === "restart-scraper") {
-    try {
-      await execAsync("docker compose restart scraper", {
-        cwd: COMPOSE_DIR,
-        timeout: 60_000,
-      });
-      return Response.json({ success: true, message: t(locale, "settings.apiTorRestartScraperOk") });
-    } catch (err) {
-      return Response.json(
-        { error: t(locale, "settings.apiTorRestartScraperFail", { error: err instanceof Error ? err.message : String(err) }) },
-        { status: 500 },
-      );
-    }
+  if (body.action !== "start" && body.action !== "stop") {
+    return new Response("action must be start or stop", { status: 400 });
   }
 
   const wantProxy = body.action === "start" ? SOCKS_PROXY : "";
 
-  // Tor コンテナの起動/停止
-  try {
-    const cmd = body.action === "start" ? "up -d --force-recreate tor" : "stop tor";
-    await execAsync(`docker compose ${cmd}`, {
-      cwd: COMPOSE_DIR,
-      timeout: 60_000,
-    });
-  } catch (err) {
-    return Response.json(
-      { error: t(locale, "settings.apiTorContainerFail", { action: body.action === "start" ? t(locale, "settings.torStart") : t(locale, "settings.torStop"), error: err instanceof Error ? err.message : String(err) }) },
-      { status: 500 },
-    );
-  }
   // .env の SCRAPE_PROXY と TOR_PROXY を更新
   try {
     const { readFileSync, writeFileSync } = await import("node:fs");
@@ -155,6 +122,19 @@ export async function POST(req: Request) {
   } catch (err) {
     return Response.json(
       { error: t(locale, "settings.apiEnvUpdateFail", { error: err instanceof Error ? err.message : String(err) }) },
+      { status: 500 },
+    );
+  }
+
+  // scraper コンテナを再起動して SCRAPE_PROXY の変更を反映
+  try {
+    await execAsync("docker compose restart scraper", {
+      cwd: COMPOSE_DIR,
+      timeout: 60_000,
+    });
+  } catch (err) {
+    return Response.json(
+      { error: t(locale, "settings.apiTorRestartScraperFail", { error: err instanceof Error ? err.message : String(err) }) },
       { status: 500 },
     );
   }

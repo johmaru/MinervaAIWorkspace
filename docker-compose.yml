@@ -28,6 +28,8 @@ services:
         condition: service_healthy
       embedder:
         condition: service_started
+      scraper:
+        condition: service_started
     # ホストの .env をマウント: GUI で設定変更した .env が
     # 再ビルド後も保持される（イメージに焼き込まれない）
     volumes:

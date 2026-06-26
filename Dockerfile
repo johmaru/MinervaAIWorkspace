@@ -1,6 +1,6 @@
 FROM oven/bun:1.3 AS deps
 WORKDIR /app
-COPY package.json bun.lock ./
+COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile
 RUN rm -rf node_modules/@xenova/transformers/node_modules/sharp
 
