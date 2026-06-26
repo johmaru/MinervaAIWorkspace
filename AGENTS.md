@@ -91,6 +91,7 @@ Report clearly
 When finishing, include:
 What changed.
 How it was verified.
+- Test results: what `bun run test` reported (pass/fail count), and which new test files were added.
 Any risks or follow-up tasks.
 Whether AGENTS.md or README files were updated, and why.
 
@@ -118,6 +119,37 @@ Follow up later: polish, optional refactors, or larger design improvements.
   書き換えて `git push --force-with-lease` で再 push する。
   （共同作業者がいる場合は履歴書き換えの同意を確認してから）
 - コミットメッセージは英語で、変更内容・検証結果を簡潔に記載する。
+
+## Testing
+
+- **Framework:** Vitest v4 (`bun run test` for single run, `bun run test:watch` for watch mode).
+  No Jest, no Playwright/E2E layer. Config: `vitest.config.mts`, setup: `vitest.setup.ts`.
+
+- **New features and bug fixes MUST include tests.** Co-locate test files next to
+  the source as `*.test.ts` (logic, route handlers, hooks) or `*.test.tsx` (React
+  components). Do not create a separate `__tests__/` or `tests/` directory.
+
+- **Environment:** default is jsdom (components, hooks). For `src/lib/*` and
+  `src/app/api/**` tests, add `// @vitest-environment node` as the first line.
+  This is the Vitest 4 mechanism (replaces the removed `environmentMatchGlobs`).
+
+- **Mocking:** use inline Vitest primitives (`vi.fn`, `vi.mock`, `vi.stubGlobal`,
+  `vi.stubEnv`). No central `__mocks__/` or fixtures directory. Clean up in
+  `afterEach` (`cleanup()` from `@testing-library/react`, `vi.restoreAllMocks()`,
+  `vi.unstubAllGlobals()`, env-var restore).
+
+- **DB tests:** use the real Postgres via `@/db`; create rows and tear them down in
+  `afterAll`. Do not mock the database.
+
+- **Before claiming work is done:** run `bun run test` and confirm zero failures.
+  If a test needs an external API (LLM, embedder) that is unavailable, gate it
+  behind a helper like the existing `itReal()` pattern or skip with a clear reason.
+  Never delete or weaken an assertion to make a test pass.
+
+
+## GitHub Repository
+
+When the user mentions "GitHub", "the repo", "the repository", "issues", "PRs", or similar without specifying which one, assume they mean **this project's repository**: https://github.com/johmaru/UmansChat-Unofficial (private). If it is still ambiguous which repository they mean, ask for confirmation before proceeding.
 
 ## Project Rule Memory
 When the user says 「今度覚えといて」「これ覚えといて」 or similar, decide whether the content is a durable project rule, workflow rule, known pitfall, or implementation convention.
