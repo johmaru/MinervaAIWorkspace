@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, type Variants } from "motion/react";
 
 /* ------------------------------------------------------------------ *
@@ -93,7 +94,8 @@ export function AnimateModal({
   ariaLabel,
   panelClassName = "max-w-2xl",
 }: AnimateModalProps) {
-  return (
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -120,7 +122,8 @@ export function AnimateModal({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
 
