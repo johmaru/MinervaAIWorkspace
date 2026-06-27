@@ -359,3 +359,61 @@ describe("POST /api/chat — 記憶注入", () => {
     expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
   }, 60_000);
 });
+
+describe("POST /api/chat — rapid mode", () => {
+  itReal("rapid:true で検索・記憶・URL をスキップしつつ start/delta/done は送信する", async () => {
+    const id = await createThread();
+
+    // 検索が必要な設定にしておき、rapid でスキップされることを検証
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      needsSearch: true,
+      reason: "latest info",
+      userNotice: "最新情報を確認するね。",
+      queries: ["python programming language"],
+    });
+    // 記憶ありの戻り値を設定しておき、rapid で呼ばれないことを検証
+    vi.mocked(buildMemoryContext).mockResolvedValueOnce({
+      role: "system",
+      content: "Past memories from previous conversations.",
+    });
+    vi.mocked(searchWeb).mockResolvedValueOnce({
+      query: "python programming language",
+      results: [
+        {
+          url: "https://example.com/python",
+          title: "Python",
+          snippet: "Python is a programming language",
+          scraped: true,
+          content: "Python is a high-level programming language.",
+          scrapeTitle: "Python",
+        },
+      ],
+    });
+
+    const res = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ threadId: id, content: "Pythonとは何ですか？", rapid: true }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // ラピッドモード: 検索・記憶・URL スクレイプは一切呼ばれない
+    expect(vi.mocked(decideSearch)).not.toHaveBeenCalled();
+    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
+    expect(vi.mocked(buildMemoryContext)).not.toHaveBeenCalled();
+
+    // ただしストリーミング自体は動作する
+    const start = events.filter((e) => e.event === "start");
+    const deltas = events.filter((e) => e.event === "delta" && typeof e.data.delta === "string");
+    const done = events.filter((e) => e.event === "done");
+    expect(start).toHaveLength(1);
+    expect(deltas.length).toBeGreaterThan(0);
+    expect(done).toHaveLength(1);
+    expect(events.some((e) => e.event === "error")).toBe(false);
+  }, 60_000);
+});

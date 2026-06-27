@@ -46,6 +46,7 @@ type Body = {
   model?: string;
   mode?: "send" | "regenerate" | "edit";
   parentMessageId?: string;
+  rapid?: boolean;
 };
 
 type DbMessage = {
@@ -126,37 +127,44 @@ export async function POST(req: Request) {
       let mcpConnections: McpConnection[] = [];
 
       try {
-        send("start", { userMessageId: prepared.userMessage.id });
-        const searchContextMessage = await buildSearchContext({
-          content: prepared.content,
-          llm,
-          history: prepared.history,
-          send,
-        });
+        const searchContextMessage = body.rapid
+          ? null
+          : await buildSearchContext({
+              content: prepared.content,
+              llm,
+              history: prepared.history,
+              send,
+            });
 
-        const urlContextMessage = await buildUrlContext({
-          content: prepared.content,
-          send,
-        });
+        const urlContextMessage = body.rapid
+          ? null
+          : await buildUrlContext({
+              content: prepared.content,
+              send,
+            });
 
         let memoryMessage: Awaited<ReturnType<typeof buildMemoryContext>> = null;
-        try {
-          memoryMessage = await buildMemoryContext({
-            content: prepared.content,
-            thread,
-          });
-        } catch (err) {
-          console.error("[chat] buildMemoryContext failed:", err);
+        if (!body.rapid) {
+          try {
+            memoryMessage = await buildMemoryContext({
+              content: prepared.content,
+              thread,
+            });
+          } catch (err) {
+            console.error("[chat] buildMemoryContext failed:", err);
+          }
         }
 
         let skillMessage: Awaited<ReturnType<typeof buildSkillContext>> = null;
-        try {
-          skillMessage = await buildSkillContext({
-            content: prepared.content,
-            userId: user.id,
-          });
-        } catch (err) {
-          console.error("[chat] buildSkillContext failed:", err);
+        if (!body.rapid) {
+          try {
+            skillMessage = await buildSkillContext({
+              content: prepared.content,
+              userId: user.id,
+            });
+          } catch (err) {
+            console.error("[chat] buildSkillContext failed:", err);
+          }
         }
 
         // MCP サーバー接続: スレッドで有効化されたサーバーに接続し、ツールを取得。
@@ -380,6 +388,8 @@ export async function POST(req: Request) {
   after(async () => {
     await streamDone;
     if (!streamResult.assistantContent) return;
+    // ラピッドモード: 記憶・スキル生成をスキップし、即座に終了する。
+    if (body.rapid) return;
     try {
       await generateMemories(
         body.threadId,

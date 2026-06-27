@@ -34,12 +34,14 @@ export const ChatWindow = memo(function ChatWindow({
   const [connOpen, setConnOpen] = useState(false);
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
+  const [rapid, setRapid] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // スレッド切替時に mcpServerIds / connectionIds を同期
+  // スレッド切替時に mcpServerIds / connectionIds / rapid を同期
   useEffect(() => {
     setMcpServerIds(thread?.mcpServerIds ?? []);
     setConnectionIds(thread?.connectionIds ?? []);
+    setRapid(false);
   }, [thread?.id, thread?.mcpServerIds, thread?.connectionIds]);
 
   const fetchConnections = useCallback(async () => {
@@ -152,7 +154,7 @@ export const ChatWindow = memo(function ChatWindow({
       return;
     }
 
-    void send(trimmed, { attachmentIds }).then(() => {
+    void send(trimmed, { attachmentIds, rapid }).then(() => {
       onConversationEnded?.();
     });
     setInput("");
@@ -167,7 +169,7 @@ export const ChatWindow = memo(function ChatWindow({
     if (!threadId || pendingRef.current === null || isLoading || !thread) return;
     const content = pendingRef.current;
     pendingRef.current = null;
-    void send(content).then(() => onConversationEnded?.());
+    void send(content, { rapid }).then(() => onConversationEnded?.());
   }, [threadId, isLoading, thread, send, onConversationEnded]);
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -364,6 +366,19 @@ export const ChatWindow = memo(function ChatWindow({
               )}
             </AnimatePresence>
           </div>
+          <MotionButton
+            type="button"
+            onClick={() => setRapid((v) => !v)}
+            className={`flex h-10 w-10 items-center justify-center rounded-2xl text-sm transition-all duration-200 disabled:opacity-40 ${
+              rapid ? "bg-foreground/15 text-foreground" : "bg-muted hover:bg-muted/80"
+            }`}
+            aria-label={rapid ? t("chat.rapidModeActive") : t("chat.rapidMode")}
+            aria-pressed={rapid}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
+          >
+            ⚡
+          </MotionButton>
           <textarea
             ref={taRef}
             value={input}

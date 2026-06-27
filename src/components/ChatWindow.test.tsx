@@ -25,7 +25,7 @@ type UseChatReturn = {
   isLoading: boolean;
   error: string | null;
   sources: { url: string; title: string; snippet: string }[];
-  send: (input: string, opts?: { systemPrompt?: string; model?: string; attachmentIds?: string[] }) => Promise<void>;
+  send: (input: string, opts?: { systemPrompt?: string; model?: string; attachmentIds?: string[]; rapid?: boolean }) => Promise<void>;
   stop: () => void;
   clear: () => void;
   updateThread: (patch: {
