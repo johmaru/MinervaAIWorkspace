@@ -37,11 +37,10 @@ export const ChatWindow = memo(function ChatWindow({
   const [rapid, setRapid] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // スレッド切替時に mcpServerIds / connectionIds / rapid を同期
+  // スレッド切替時に mcpServerIds / connectionIds を同期（rapid はユーザー操作まで維持）
   useEffect(() => {
     setMcpServerIds(thread?.mcpServerIds ?? []);
     setConnectionIds(thread?.connectionIds ?? []);
-    setRapid(false);
   }, [thread?.id, thread?.mcpServerIds, thread?.connectionIds]);
 
   const fetchConnections = useCallback(async () => {

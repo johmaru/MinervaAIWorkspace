@@ -7,7 +7,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 ## Features
 
 - **Streaming chat** with SSE (token-by-token output)
-- **Rapid mode** — a per-message ⚡ toggle in the composer that skips web search, URL scraping, and memory/skill RAG (both pre-LLM retrieval and post-stream generation) for lower first-token latency; MCP/connections tools and dual-model flow stay active. State is sticky until toggled off or the thread changes.
+- **Rapid mode** — a per-message ⚡ toggle in the composer that skips web search, URL scraping, and memory/skill RAG (both pre-LLM retrieval and post-stream generation) for lower first-token latency; MCP/connections tools and dual-model flow stay active. Stays on across messages and threads until you click ⚡ again.
 - **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
 - **Semantic search** across all threads (pgvector cosine similarity)
@@ -196,7 +196,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 
 - **Create a thread** — start typing in the composer; the thread is created on first send and an auto title is generated from your first message.
 - **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token. Each completed assistant message shows the model name and elapsed response time below the answer.
-- **Rapid mode** — click ⚡ in the composer to skip web search, URL scraping, and memory/skill retrieval for faster responses. The toggle stays on for subsequent messages until you click ⚡ again or switch threads. MCP/connections tools and dual-model mode still work normally.
+- **Rapid mode** — click ⚡ in the composer to skip web search, URL scraping, and memory/skill retrieval for faster responses. Stays on for subsequent messages (and across thread switches) until you click ⚡ again. MCP/connections tools and dual-model mode still work normally.
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
 - **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
 - **Attachments** — attach images (sent to vision-capable models), PDFs (text extracted), or text/code files (up to 10MB each).
