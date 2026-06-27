@@ -5,6 +5,7 @@
 """
 import asyncio
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -255,3 +256,65 @@ class TestScrapeUrlSafe:
     def test_metadata_endpoint_blocked_returns_empty(self):
         result = asyncio.run(scrape_url_safe("http://169.254.169.254/latest/meta-data/"))
         assert result == {}
+
+
+class TestSearchTimeRange:
+    """time_range を SearXNG リクエスト params に透過するか検証（httpx をモック）。"""
+
+    @staticmethod
+    def _ok_response() -> MagicMock:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"results": []}
+        return mock_resp
+
+    def test_week_passed_to_searxng(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "time_range": "week"}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert params.get("time_range") == "week"
+
+    def test_day_passed_to_searxng(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "time_range": "day"}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert params.get("time_range") == "day"
+
+    def test_none_omits_time_range(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "time_range": None}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert "time_range" not in params
+
+    def test_invalid_falls_back_to_all_time(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "time_range": "invalid"}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert "time_range" not in params
+
+    def test_default_no_time_range(self, client):
+        # time_range を送らない（後方互換: 既存呼び出しは全期間）
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert "time_range" not in params

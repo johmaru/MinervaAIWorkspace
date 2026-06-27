@@ -35,6 +35,7 @@ export const ChatWindow = memo(function ChatWindow({
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
   const [rapid, setRapid] = useState(false);
+  const [timeRange, setTimeRange] = useState<"day" | "week" | "month" | "year" | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // スレッド切替時に mcpServerIds / connectionIds を同期（rapid はユーザー操作まで維持）
@@ -153,7 +154,7 @@ export const ChatWindow = memo(function ChatWindow({
       return;
     }
 
-    void send(trimmed, { attachmentIds, rapid }).then(() => {
+    void send(trimmed, { attachmentIds, rapid, timeRange: timeRange ?? undefined }).then(() => {
       onConversationEnded?.();
     });
     setInput("");
@@ -168,7 +169,7 @@ export const ChatWindow = memo(function ChatWindow({
     if (!threadId || pendingRef.current === null || isLoading || !thread) return;
     const content = pendingRef.current;
     pendingRef.current = null;
-    void send(content, { rapid }).then(() => onConversationEnded?.());
+    void send(content, { rapid, timeRange: timeRange ?? undefined }).then(() => onConversationEnded?.());
   }, [threadId, isLoading, thread, send, onConversationEnded]);
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -378,6 +379,22 @@ export const ChatWindow = memo(function ChatWindow({
           >
             ⚡
           </MotionButton>
+          <select
+            value={timeRange ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setTimeRange(v === "" ? null : (v as "day" | "week" | "month" | "year"));
+            }}
+            className="h-10 rounded-2xl bg-muted px-2 text-sm outline-none transition-all duration-200 hover:bg-muted/80 disabled:opacity-40"
+            aria-label={t("chat.searchTimeRange")}
+            disabled={isCreating}
+          >
+            <option value="">{t("chat.timeRangeNone")}</option>
+            <option value="day">{t("chat.timeRangeDay")}</option>
+            <option value="week">{t("chat.timeRangeWeek")}</option>
+            <option value="month">{t("chat.timeRangeMonth")}</option>
+            <option value="year">{t("chat.timeRangeYear")}</option>
+          </select>
           <textarea
             ref={taRef}
             value={input}

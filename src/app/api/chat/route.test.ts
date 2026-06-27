@@ -82,10 +82,20 @@ async function createThread(): Promise<string> {
   return row.id;
 }
 
-function chatReq(threadId: string, content: string, opts?: { systemPrompt?: string }): Request {
+function chatReq(
+  threadId: string,
+  content: string,
+  opts?: { systemPrompt?: string; rapid?: boolean; timeRange?: "day" | "week" | "month" | "year" },
+): Request {
   return new Request("http://localhost/api/chat", {
     method: "POST",
-    body: JSON.stringify({ threadId, content, systemPrompt: opts?.systemPrompt }),
+    body: JSON.stringify({
+      threadId,
+      content,
+      systemPrompt: opts?.systemPrompt,
+      rapid: opts?.rapid,
+      timeRange: opts?.timeRange,
+    }),
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -415,5 +425,43 @@ describe("POST /api/chat — rapid mode", () => {
     expect(deltas.length).toBeGreaterThan(0);
     expect(done).toHaveLength(1);
     expect(events.some((e) => e.event === "error")).toBe(false);
+  }, 60_000);
+});
+
+describe("POST /api/chat — time_range 透過", () => {
+  itReal("body.timeRange が searchWeb の第3引数に渡される", async () => {
+    const id = await createThread();
+
+    // 検索判定ルーターをモック: needsSearch:true でクエリ1件
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      needsSearch: true,
+      reason: "latest info",
+      userNotice: "最新情報を確認するね。",
+      queries: ["latest news today"],
+    });
+    vi.mocked(searchWeb).mockResolvedValueOnce({
+      query: "latest news today",
+      results: [
+        {
+          url: "https://example.com/news",
+          title: "News",
+          snippet: "Breaking news",
+          scraped: false,
+          content: "",
+          scrapeTitle: "News",
+        },
+      ],
+    });
+
+    const res = await POST(chatReq(id, "最新のニュース教えて", { timeRange: "week" }));
+    expect(res.status).toBe(200);
+
+    await sseChunks(res);
+
+    // searchWeb の第3引数（timeRange）が body.timeRange と一致すること
+    expect(vi.mocked(searchWeb)).toHaveBeenCalled();
+    const callArgs = vi.mocked(searchWeb).mock.calls[0];
+    expect(callArgs[0]).toBe("latest news today");
+    expect(callArgs[2]).toBe("week");
   }, 60_000);
 });

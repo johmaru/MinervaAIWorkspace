@@ -371,7 +371,7 @@ export function useChat(threadId: string | null) {
   const send = useCallback(
     async (
       input: string,
-      opts?: { systemPrompt?: string; model?: string; attachmentIds?: string[]; rapid?: boolean },
+      opts?: { systemPrompt?: string; model?: string; attachmentIds?: string[]; rapid?: boolean; timeRange?: "day" | "week" | "month" | "year" },
     ) => {
       if (!threadId || !thread || isLoading || isStreaming) return;
       const trimmed = input.trim();
@@ -394,6 +394,7 @@ export function useChat(threadId: string | null) {
           model: opts?.model,
           attachmentIds: opts?.attachmentIds,
           rapid: opts?.rapid,
+          timeRange: opts?.timeRange,
           mode: "send",
         },
         userMsg,

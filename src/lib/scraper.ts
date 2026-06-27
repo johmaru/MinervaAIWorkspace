@@ -65,13 +65,16 @@ export type SourceInfo = {
  * microservice の /search を呼ぶ（SearXNG 検索 → 上位 URL をスクレイピング）。
  * タイムアウトは SearXNG 検索(20s) + スクレイピング5件並列(30s) + 余裕で 60s。
  */
-export async function searchWeb(query: string, maxResults = 5): Promise<WebSearchResponse> {
+export async function searchWeb(
+  query: string,
+  maxResults = 5,
+  timeRange?: "day" | "week" | "month" | "year",
+): Promise<WebSearchResponse> {
   const base = process.env.SCRAPER_URL || "http://localhost:8000";
   const res = await fetch(`${base}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, max_results: maxResults }),
-    signal: AbortSignal.timeout(60_000),
+    body: JSON.stringify({ query, max_results: maxResults, time_range: timeRange ?? null }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {

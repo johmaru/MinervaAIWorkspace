@@ -47,6 +47,7 @@ type Body = {
   mode?: "send" | "regenerate" | "edit";
   parentMessageId?: string;
   rapid?: boolean;
+  timeRange?: "day" | "week" | "month" | "year";
 };
 
 type DbMessage = {
@@ -134,6 +135,7 @@ export async function POST(req: Request) {
               llm,
               history: prepared.history,
               send,
+              timeRange: body.timeRange,
             });
 
         const urlContextMessage = body.rapid
@@ -250,6 +252,7 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
+            timeRange: body.timeRange,
           });
         } else {
           // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
@@ -278,6 +281,7 @@ export async function POST(req: Request) {
             extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
             mcpConnections,
             connectionRows,
+            timeRange: body.timeRange,
           });
         }
 
@@ -313,6 +317,7 @@ export async function POST(req: Request) {
               assistantReasoning += delta;
               send("thinking", { delta });
             },
+            timeRange: body.timeRange,
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;
@@ -549,11 +554,13 @@ async function buildSearchContext({
   llm,
   history,
   send,
+  timeRange,
 }: {
   content: string;
   llm: OpenAI;
   history: DbMessage[];
   send: StreamSend;
+  timeRange?: "day" | "week" | "month" | "year";
 }): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam | null> {
   const searchModel = defaultSearchModel();
   const decision = await decideSearch(
@@ -575,7 +582,7 @@ async function buildSearchContext({
 
   for (const query of decision.queries.slice(0, maxRounds)) {
     try {
-      const response = await searchWeb(query, maxResults);
+      const response = await searchWeb(query, maxResults, timeRange);
       for (const r of response.results) {
         allSources.push({ url: r.url, title: r.scrapeTitle || r.title, snippet: r.snippet });
         allResults.push({
@@ -906,6 +913,7 @@ async function streamCompletion({
   extraTools,
   mcpConnections,
   connectionRows,
+  timeRange,
 }: {
   llm: OpenAI;
   model: string;
@@ -917,6 +925,7 @@ async function streamCompletion({
   extraTools?: OpenAI.Chat.Completions.ChatCompletionTool[];
   mcpConnections?: McpConnection[];
   connectionRows?: ConnectionRow[];
+  timeRange?: "day" | "week" | "month" | "year";
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -1043,7 +1052,7 @@ async function streamCompletion({
       } else if (tc.name === "search_web" && parsedArgs.query) {
         send?.("status", { label: "Webで検索しています。" });
         try {
-          const response = await searchWeb(parsedArgs.query, 3);
+          const response = await searchWeb(parsedArgs.query, 3, timeRange);
           for (const r of response.results) {
             sources.push({
               url: r.url,

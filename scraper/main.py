@@ -115,6 +115,9 @@ async def scrape(req: ScrapeRequest):
 class SearchRequest(BaseModel):
     query: str
     max_results: int = 5
+    time_range: str | None = None  # "day" | "week" | "month" | "year" | None
+
+ALLOWED_TIME_RANGES = {"day", "week", "month", "year"}
 
 
 @app.post("/search")
@@ -131,9 +134,13 @@ async def search(req: SearchRequest):
     searxng_url = os.environ.get("SEARXNG_URL", "http://searxng:8080")
     try:
         async with httpx.AsyncClient(timeout=20) as client:
+            time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
+            params = {"q": req.query, "format": "json", "engines": "bing,google,yahoo,wikipedia"}
+            if time_range:
+                params["time_range"] = time_range
             resp = await client.get(
                 f"{searxng_url}/search",
-                params={"q": req.query, "format": "json", "engines": "bing,google,yahoo,wikipedia"},
+                params=params,
             )
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"search failed: {str(e)}"})
