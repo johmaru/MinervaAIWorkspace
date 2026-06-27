@@ -44,6 +44,10 @@ type UseChatReturn = {
   pendingAttachments: never[];
   uploadAttachment: (file: File) => Promise<unknown>;
   removeAttachment: (id: string) => void;
+  rapid: boolean;
+  setRapid: (v: boolean | ((prev: boolean) => boolean)) => void;
+  timeRange: "day" | "week" | "month" | "year" | null;
+  setTimeRange: (v: "day" | "week" | "month" | "year" | null) => void;
 };
 
 let mockState: UseChatReturn;
@@ -95,6 +99,10 @@ beforeEach(() => {
     pendingAttachments: [],
     uploadAttachment: vi.fn().mockResolvedValue(null),
     removeAttachment: vi.fn(),
+    rapid: false,
+    setRapid: vi.fn(),
+    timeRange: null,
+    setTimeRange: vi.fn(),
   };
 });
 

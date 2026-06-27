@@ -21,7 +21,7 @@ export const ChatWindow = memo(function ChatWindow({
   onConversationEnded?: () => void;
   onOpenHelp?: (topic: string | null) => void;
 }) {
-  const { messages, thread, isStreaming, isLoading, error, sources, send, stop, updateThread, regenerate, editMessage, switchBranch, getSiblingInfo, pendingAttachments, uploadAttachment, removeAttachment } = useChat(threadId);
+  const { messages, thread, isStreaming, isLoading, error, sources, send, stop, updateThread, regenerate, editMessage, switchBranch, getSiblingInfo, pendingAttachments, uploadAttachment, removeAttachment, rapid, setRapid, timeRange, setTimeRange } = useChat(threadId);
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -34,8 +34,6 @@ export const ChatWindow = memo(function ChatWindow({
   const [connOpen, setConnOpen] = useState(false);
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
-  const [rapid, setRapid] = useState(false);
-  const [timeRange, setTimeRange] = useState<"day" | "week" | "month" | "year" | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // スレッド切替時に mcpServerIds / connectionIds を同期（rapid はユーザー操作まで維持）
@@ -154,7 +152,7 @@ export const ChatWindow = memo(function ChatWindow({
       return;
     }
 
-    void send(trimmed, { attachmentIds, rapid, timeRange: timeRange ?? undefined }).then(() => {
+    void send(trimmed, { attachmentIds }).then(() => {
       onConversationEnded?.();
     });
     setInput("");
@@ -169,7 +167,7 @@ export const ChatWindow = memo(function ChatWindow({
     if (!threadId || pendingRef.current === null || isLoading || !thread) return;
     const content = pendingRef.current;
     pendingRef.current = null;
-    void send(content, { rapid, timeRange: timeRange ?? undefined }).then(() => onConversationEnded?.());
+    void send(content, {}).then(() => onConversationEnded?.());
   }, [threadId, isLoading, thread, send, onConversationEnded]);
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {

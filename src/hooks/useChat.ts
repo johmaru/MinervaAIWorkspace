@@ -112,6 +112,8 @@ export function useChat(threadId: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceInfo[]>([]);
   const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([]);
+  const [rapid, setRapid] = useState(false);
+  const [timeRange, setTimeRange] = useState<"day" | "week" | "month" | "year" | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // 全メッセージを byId マップで保持（枝分かれの全ノード）
@@ -393,8 +395,8 @@ export function useChat(threadId: string | null) {
           systemPrompt: opts?.systemPrompt,
           model: opts?.model,
           attachmentIds: opts?.attachmentIds,
-          rapid: opts?.rapid,
-          timeRange: opts?.timeRange,
+          rapid: opts?.rapid ?? rapid,
+          timeRange: opts?.timeRange ?? timeRange,
           mode: "send",
         },
         userMsg,
@@ -402,7 +404,7 @@ export function useChat(threadId: string | null) {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [threadId, isStreaming, thread, isLoading, t],
+    [threadId, isStreaming, thread, isLoading, t, rapid, timeRange],
   );
 
   const regenerate = useCallback(
@@ -415,13 +417,15 @@ export function useChat(threadId: string | null) {
           threadId,
           mode: "regenerate",
           parentMessageId: userMessageId,
+          rapid,
+          timeRange,
         },
         null,
         assistantId,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [threadId, isStreaming, thread, isLoading, t],
+    [threadId, isStreaming, thread, isLoading, t, rapid, timeRange],
   );
 
   const editMessage = useCallback(
@@ -445,13 +449,15 @@ export function useChat(threadId: string | null) {
           content: trimmed,
           mode: "edit",
           parentMessageId: userMessageId,
+          rapid,
+          timeRange,
         },
         userMsg,
         assistantId,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [threadId, isStreaming, thread, isLoading, t],
+    [threadId, isStreaming, thread, isLoading, t, rapid, timeRange],
   );
 
   const switchBranch = useCallback(
@@ -563,6 +569,10 @@ export function useChat(threadId: string | null) {
     pendingAttachments,
     uploadAttachment,
     removeAttachment,
+    rapid,
+    setRapid,
+    timeRange,
+    setTimeRange,
   };
 }
 
