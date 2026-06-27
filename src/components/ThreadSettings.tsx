@@ -16,6 +16,7 @@ type Thread = {
   dualDebateRounds: number;
   mcpServerIds: string[];
   connectionIds: string[];
+  globalInstructionId: string | null;
 };
 
 type Props = {
@@ -27,6 +28,7 @@ type Props = {
     dualModelA?: string | null;
     dualModelB?: string | null;
     dualStrategy?: "cross_review" | "debate";
+    globalInstructionId?: string | null;
     dualDebateRounds?: number;
   }) => Promise<void>;
 };
@@ -51,6 +53,8 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   const [dualDebateRounds, setDualDebateRounds] = useState(thread.dualDebateRounds);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [instructions, setInstructions] = useState<{ id: string; name: string }[]>([]);
+  const [globalInstructionId, setGlobalInstructionId] = useState<string | null>(thread.globalInstructionId ?? null);
 
   // モデルリスト取得
   useEffect(() => {
@@ -75,6 +79,23 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
       cancelled = true;
     };
   }, []);
+  // グローバルインストラクション一覧取得（名前のみ表示）
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/global-instructions");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data)) setInstructions(data);
+      } catch {
+        // サイレント失敗
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
 
   // スレッド切替時にローカル state を同期
@@ -87,8 +108,9 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     setDualModelB(thread.dualModelB ?? thread.model);
     setDualStrategy(thread.dualStrategy);
     setDualDebateRounds(thread.dualDebateRounds);
+    setGlobalInstructionId(thread.globalInstructionId ?? null);
     setSaved(false);
-  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds]);
+  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds, thread.globalInstructionId]);
 
   const handleSave = useCallback(async () => {
     const resolvedDualModelA = dualModelA || model;
@@ -107,13 +129,14 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
         dualModelB: responseMode === "dual" ? resolvedDualModelB : null,
         dualStrategy,
         dualDebateRounds,
+        globalInstructionId,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
       setSaving(false);
     }
-  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, onUpdate]);
+  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, globalInstructionId, onUpdate]);
 
   const dirty =
     systemPrompt !== (thread.systemPrompt ?? "") ||
@@ -121,7 +144,8 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     responseMode !== thread.responseMode ||
     dualModelA !== (thread.dualModelA ?? thread.model) ||
     dualModelB !== (thread.dualModelB ?? thread.model) ||
-    dualDebateRounds !== thread.dualDebateRounds;
+    dualDebateRounds !== thread.dualDebateRounds ||
+    globalInstructionId !== (thread.globalInstructionId ?? null);
 
   return (
     <div className="border-b border-border/50">
@@ -158,6 +182,22 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
               placeholder={t("threadSettings.systemPromptPlaceholder")}
               className="resize-none rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
             />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              {t("threadSettings.globalInstruction")}
+            </span>
+            <select
+              value={globalInstructionId ?? ""}
+              onChange={(e) => setGlobalInstructionId(e.target.value || null)}
+              className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+            >
+              <option value="">{t("threadSettings.globalInstructionNone")}</option>
+              {instructions.map((instr) => (
+                <option key={instr.id} value={instr.id}>{instr.name}</option>
+              ))}
+            </select>
           </label>
 
           <label className="flex flex-col gap-1">

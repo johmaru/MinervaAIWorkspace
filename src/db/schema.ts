@@ -10,14 +10,27 @@ import {
   real,
 } from "drizzle-orm/pg-core";
 // ── Auth.js tables ──
+/**
+ * global_instructions — ユーザー単位の名前付きグローバルシステムインストラクション。
+ * 複数作成可。users.activeInstructionId で既定、threads.globalInstructionId でスレッド上書き。
+ * users の前に定義（users.activeInstructionId が本テーブルを前方参照するため）。
+ */
+export const globalInstructions = pgTable("global_instructions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // users: アプリユーザー。emailUnique でログイン。passwordHash で Credentials 認証。
-// nickname は UI に表示される表示名。
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   nickname: text("nickname").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  systemInstruction: text("system_instruction"),
+  activeInstructionId: uuid("active_instruction_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -135,6 +148,7 @@ export const threads = pgTable("threads", {
   mcpServerIds: jsonb("mcp_server_ids").$type<string[]>().notNull().default([]),
   folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
   connectionIds: jsonb("connection_ids").$type<string[]>().notNull().default([]),
+  globalInstructionId: uuid("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
   currentLeafId: uuid("current_leaf_id"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

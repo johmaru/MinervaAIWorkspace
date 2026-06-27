@@ -23,6 +23,12 @@ beforeEach(() => {
           json: () => Promise.resolve([]),
         });
       }
+      if (url === "/api/global-instructions") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        });
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     }),
   );
@@ -46,6 +52,7 @@ type TestThread = {
   dualDebateRounds: number;
   mcpServerIds: string[];
   connectionIds: string[];
+  globalInstructionId: string | null;
 };
 
 const baseThread: TestThread = {
@@ -60,6 +67,7 @@ const baseThread: TestThread = {
   dualDebateRounds: 2,
   mcpServerIds: [],
   connectionIds: [],
+  globalInstructionId: null,
 };
 
 function renderSettings(overrides?: Partial<TestThread>) {

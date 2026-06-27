@@ -53,6 +53,7 @@ type Thread = {
   dualDebateRounds: number;
   mcpServerIds: string[];
   connectionIds: string[];
+  globalInstructionId: string | null;
 };
 
 type RawMessage = {
@@ -500,6 +501,7 @@ export function useChat(threadId: string | null) {
       dualDebateRounds?: number;
       mcpServerIds?: string[];
       connectionIds?: string[];
+      globalInstructionId?: string | null;
     }) => {
       if (!threadId) return;
       try {

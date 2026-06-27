@@ -122,9 +122,9 @@ export async function GET(req: Request) {
   const locale = getRequestLocale(req);
   const dims = await getVectorDim();
 
-  // ユーザーのグローバルシステムインストラクションを取得（DB、ユーザー単位）
+  // ユーザーの既定グローバルインストラクション選択を取得（DB、ユーザー単位）
   const [userRow] = await db
-    .select({ systemInstruction: users.systemInstruction })
+    .select({ activeInstructionId: users.activeInstructionId })
     .from(users)
     .where(eq(users.id, user.id));
 
@@ -159,8 +159,8 @@ export async function GET(req: Request) {
     notionClientId: process.env.NOTION_CLIENT_ID || "",
     notionClientSecret: process.env.NOTION_CLIENT_SECRET || "",
     authUrl: process.env.AUTH_URL || "http://localhost:3001",
-    // グローバルシステムインストラクション（ユーザー単位、DB）
-    systemInstruction: userRow?.systemInstruction ?? "",
+    // 既定グローバルインストラクション選択（ユーザー単位、DB）
+    activeInstructionId: userRow?.activeInstructionId ?? null,
   });
 }
 
@@ -168,8 +168,8 @@ type SettingsBody = {
   // LLM
   llmBaseUrl?: string;
   llmApiKey?: string;
-  // グローバルシステムインストラクション（ユーザー単位、DB に保存）
-  systemInstruction?: string;
+  // 既定グローバルインストラクション選択（ユーザー単位、DB に保存）
+  activeInstructionId?: string | null;
   llmModel?: string;
   llmModels?: string;
   thinkingEffort?: string;
@@ -278,12 +278,11 @@ export async function POST(req: Request) {
     await db.execute(sql`CREATE INDEX "page_embeddings_embedding_hnsw" ON "page_embeddings" USING hnsw ("embedding" vector_cosine_ops)`);
   }
 
-  // グローバルシステムインストラクションはユーザー単位なので DB に保存（.env ではなく）
-  if (body.systemInstruction !== undefined) {
-    const trimmed = body.systemInstruction.trim();
+  // 既定のグローバルインストラクション選択を DB に保存
+  if (body.activeInstructionId !== undefined) {
     await db
       .update(users)
-      .set({ systemInstruction: trimmed || null })
+      .set({ activeInstructionId: body.activeInstructionId || null })
       .where(eq(users.id, user.id));
   }
 

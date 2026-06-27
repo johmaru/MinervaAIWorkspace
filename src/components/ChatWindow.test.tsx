@@ -20,6 +20,7 @@ type UseChatReturn = {
     dualModelB: string | null;
     dualStrategy: "cross_review" | "debate";
     dualDebateRounds: number;
+    globalInstructionId: string | null;
   } | null;
   isStreaming: boolean;
   isLoading: boolean;
@@ -36,6 +37,7 @@ type UseChatReturn = {
     dualModelB?: string | null;
     dualStrategy?: "cross_review" | "debate";
     dualDebateRounds?: number;
+    globalInstructionId?: string | null;
   }) => Promise<void>;
   regenerate: (userMessageId: string) => Promise<void>;
   editMessage: (userMessageId: string, newContent: string) => Promise<void>;
@@ -62,6 +64,7 @@ function mockThread(overrides: Partial<NonNullable<UseChatReturn["thread"]>> = {
     responseMode: "single",
     dualModelA: null,
     dualModelB: null,
+    globalInstructionId: null,
     dualStrategy: "cross_review",
     dualDebateRounds: 2,
     ...overrides,

@@ -43,8 +43,8 @@ type SettingsResponse = {
   notionClientId: string;
   notionClientSecret: string;
   authUrl: string;
-  // グローバルシステムインストラクション（ユーザー単位、DB）
-  systemInstruction: string;
+  // 既定グローバルインストラクション選択（ユーザー単位、DB）
+  activeInstructionId: string | null;
 };
 
 type TorConnection = {
@@ -90,6 +90,12 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     ownerName: string | null;
     ownerEmail: string | null;
   }[]>([]);
+  const [instructions, setInstructions] = useState<{ id: string; name: string; content: string }[]>([]);
+  const [instrSaving, setInstrSaving] = useState(false);
+  const [instrFormOpen, setInstrFormOpen] = useState(false);
+  const [instrFormName, setInstrFormName] = useState("");
+  const [instrFormContent, setInstrFormContent] = useState("");
+  const [editingInstrId, setEditingInstrId] = useState<string | null>(null);
 
   const fetchTorStatus = useCallback(async () => {
     try {
@@ -128,6 +134,16 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     }
   }, []);
 
+  const fetchInstructions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/global-instructions");
+      if (!res.ok) return;
+      setInstructions(await res.json());
+    } catch {
+      // 無視
+    }
+  }, []);
+
   const handleDisconnect = useCallback(async (id: string) => {
     await fetch("/api/connections", {
       method: "DELETE",
@@ -145,8 +161,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       void fetchSettings();
       void fetchTorStatus();
       void fetchConnections();
+      void fetchInstructions();
     }
-  }, [open, fetchSettings, fetchTorStatus, fetchConnections]);
+  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions]);
 
   const update = useCallback(<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -269,6 +286,68 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setTorChecking(false);
     }
   }, [fetchTorStatus, torConnection, t]);
+  const handleSaveInstruction = useCallback(async () => {
+    const name = instrFormName.trim();
+    const content = instrFormContent.trim();
+    if (!name || !content) {
+      setMessage({ type: "error", text: t("settings.gsiNameContentRequired") });
+      return;
+    }
+    setInstrSaving(true);
+    try {
+      if (editingInstrId) {
+        const res = await fetch(`/api/global-instructions/${editingInstrId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, content }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } else {
+        const res = await fetch("/api/global-instructions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, content }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      }
+      setInstrFormName("");
+      setInstrFormContent("");
+      setInstrFormOpen(false);
+      setEditingInstrId(null);
+      await fetchInstructions();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
+    } finally {
+      setInstrSaving(false);
+    }
+  }, [instrFormName, instrFormContent, editingInstrId, fetchInstructions, t]);
+
+  const handleEditInstruction = useCallback(
+    (id: string) => {
+      const instr = instructions.find((i) => i.id === id);
+      if (!instr) return;
+      setEditingInstrId(id);
+      setInstrFormName(instr.name);
+      setInstrFormContent(instr.content);
+      setInstrFormOpen(true);
+    },
+    [instructions],
+  );
+
+  const handleDeleteInstruction = useCallback(
+    async (id: string) => {
+      try {
+        const res = await fetch(`/api/global-instructions/${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // 削除された行が active だったら選択解除
+        if (form.activeInstructionId === id) update("activeInstructionId", null);
+        await fetchInstructions();
+      } catch (err) {
+        setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
+      }
+    },
+    [form.activeInstructionId, update, fetchInstructions, t],
+  );
   const tabs = [
     { icon: "🤖", label: t("settings.tabAiModels") },
     { icon: "🔍", label: t("settings.tabSearchNetwork") },
@@ -429,20 +508,53 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             )}
           </div>
 
-          {/* グローバルシステムインストラクション（ユーザー単位） */}
+          {/* グローバルシステムインストラクション — 複数保存・選択 */}
           <div className="mt-3">
-            <label className="mb-1 block">
-              <span className="block text-xs font-medium text-foreground">
-                {t("settings.globalSystemInstruction")}
-              </span>
-            </label>
-            <textarea
-              value={form.systemInstruction ?? ""}
-              onChange={(e) => update("systemInstruction", e.target.value)}
-              rows={4}
-              placeholder={t("settings.globalSystemInstructionPlaceholder")}
-              className="w-full resize-y rounded-xl bg-muted px-2 py-1.5 text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-            />
+            <span className="mb-1 block text-xs font-medium text-foreground">
+              {t("settings.globalSystemInstruction")}
+            </span>
+            {instructions.length === 0 ? (
+              <p className="px-1 py-2 text-xs text-muted-foreground">
+                {t("settings.gsiNone")}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {instructions.map((instr) => (
+                  <div key={instr.id} className="flex items-center gap-2 rounded-lg px-1 py-1 text-xs hover:bg-muted/50">
+                    <label className="flex flex-1 items-center gap-2">
+                      <input
+                        type="radio"
+                        name="active-instruction"
+                        checked={form.activeInstructionId === instr.id}
+                        onChange={() => update("activeInstructionId", instr.id)}
+                      />
+                      <span>{instr.name}</span>
+                    </label>
+                    <button type="button" onClick={() => handleEditInstruction(instr.id)} className="text-muted-foreground hover:text-foreground" aria-label={t("settings.gsiEdit")}>✎</button>
+                    <button type="button" onClick={() => void handleDeleteInstruction(instr.id)} className="text-muted-foreground hover:text-foreground" aria-label={t("settings.gsiDelete")}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* 選択解除 */}
+            {form.activeInstructionId && (
+              <button type="button" onClick={() => update("activeInstructionId", null)} className="mt-1 rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
+                {t("settings.gsiClearSelection")}
+              </button>
+            )}
+            {/* 追加/編集フォーム トグル */}
+            <button type="button" onClick={() => { setInstrFormOpen(v => !v); setEditingInstrId(null); setInstrFormName(""); setInstrFormContent(""); }} className="rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
+              {t("settings.gsiAdd")}
+            </button>
+            {instrFormOpen && (
+              <div className="flex flex-col gap-2 rounded-xl bg-muted px-2 py-2 text-xs">
+                <input value={instrFormName} onChange={(e) => setInstrFormName(e.target.value)} placeholder={t("settings.gsiNamePlaceholder")} className="rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20" />
+                <textarea value={instrFormContent} onChange={(e) => setInstrFormContent(e.target.value)} rows={4} placeholder={t("settings.gsiContentPlaceholder")} className="resize-y rounded-lg bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-foreground/20" />
+                <button type="button" onClick={() => void handleSaveInstruction()} disabled={instrSaving} className="rounded-lg bg-foreground px-2 py-1 text-background hover:opacity-90 disabled:opacity-40">
+                  {editingInstrId ? t("settings.gsiUpdate") : t("settings.gsiAddButton")}
+                </button>
+              </div>
+            )}
           </div>
           </div>
           )}

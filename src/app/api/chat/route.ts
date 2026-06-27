@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
 import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
 import { db } from "@/db";
-import { messages, threads, users, mcpServers, connections } from "@/db/schema";
+import { messages, threads, users, mcpServers, connections, globalInstructions } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
@@ -105,14 +105,24 @@ export async function POST(req: Request) {
 
   const llm = createLLM();
   const finalModel = body.model ?? thread.model ?? defaultModel();
-  // ユーザーのグローバルシステムインストラクションを取得（全スレッド共通）
+  // グローバルシステムインストラクション解決。
+  // 優先順位: スレッド上書き > ユーザー既定。両方 null なら body.systemPrompt へ。
+  let resolvedGlobalInstruction: string | null = null;
+  const threadInstrId = thread.globalInstructionId ?? null;
   const [userRow] = await db
-    .select({ systemInstruction: users.systemInstruction })
+    .select({ activeInstructionId: users.activeInstructionId })
     .from(users)
     .where(eq(users.id, user.id));
-  const globalInstruction = userRow?.systemInstruction?.trim() || null;
-  // 優先順位: スレッド個別 > グローバル > リクエスト body
-  const systemContent = thread.systemPrompt ?? globalInstruction ?? body.systemPrompt;
+  const effectiveInstrId = threadInstrId ?? userRow?.activeInstructionId ?? null;
+  if (effectiveInstrId) {
+    const [instr] = await db
+      .select({ content: globalInstructions.content })
+      .from(globalInstructions)
+      .where(and(eq(globalInstructions.id, effectiveInstrId), eq(globalInstructions.userId, user.id)));
+    resolvedGlobalInstruction = instr?.content?.trim() || null;
+  }
+  // 優先順位: スレッド個別 systemPrompt > グローバル(スレッド上書き or ユーザー既定) > body
+  const systemContent = thread.systemPrompt ?? resolvedGlobalInstruction ?? body.systemPrompt;
 
   // ストリーム完了を待つ Promise。after() コールバックがリクエストコンテキスト内で
   // generateMemories を実行するため、ストリーム完了後に内容を引き渡す。

@@ -37,6 +37,7 @@ type CreateBody = {
   dualModelB?: string | null;
   dualStrategy?: "cross_review" | "debate";
   dualDebateRounds?: number;
+  globalInstructionId?: string | null;
 };
 
 /**
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
       dualModelB: body.dualModelB ?? null,
       dualStrategy: body.dualStrategy === "debate" ? "debate" : "cross_review",
       dualDebateRounds: clampDebateRounds(body.dualDebateRounds),
+      globalInstructionId: body.globalInstructionId ?? null,
     })
     .returning();
   return Response.json(row, { status: 201 });
@@ -83,6 +85,7 @@ type PatchBody = {
   dualDebateRounds?: number;
   mcpServerIds?: string[];
   connectionIds?: string[];
+  globalInstructionId?: string | null;
 };
 
 /**
@@ -116,6 +119,7 @@ export async function PATCH(req: Request) {
   if (Array.isArray(body.mcpServerIds)) values.mcpServerIds = body.mcpServerIds;
 
   if (Array.isArray(body.connectionIds)) values.connectionIds = body.connectionIds;
+  if (body.globalInstructionId !== undefined) values.globalInstructionId = body.globalInstructionId || null;
   const [row] = await db
     .update(threads)
     .set(values)
