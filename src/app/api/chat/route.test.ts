@@ -235,6 +235,7 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
           scraped: true,
           content: "Python is a high-level programming language.",
           scrapeTitle: "Python",
+          raw_content: "Python is a programming language",
         },
       ],
     });
@@ -318,6 +319,7 @@ describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () =>
           scraped: false,
           content: "",
           scrapeTitle: "Test",
+          raw_content: "Test snippet",
         },
       ],
     });
@@ -396,6 +398,7 @@ describe("POST /api/chat — rapid mode", () => {
           scraped: true,
           content: "Python is a high-level programming language.",
           scrapeTitle: "Python",
+          raw_content: "Python is a programming language",
         },
       ],
     });
@@ -449,6 +452,7 @@ describe("POST /api/chat — time_range 透過", () => {
           scraped: false,
           content: "",
           scrapeTitle: "News",
+          raw_content: "Breaking news",
         },
       ],
     });

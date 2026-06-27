@@ -135,7 +135,7 @@ async def search(req: SearchRequest):
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
-            params = {"q": req.query, "format": "json", "engines": "bing,google,yahoo,wikipedia"}
+            params = {"q": req.query, "format": "json"}
             if time_range:
                 params["time_range"] = time_range
             resp = await client.get(
@@ -172,6 +172,7 @@ async def search(req: SearchRequest):
             "scraped": False,
             "content": "",
             "scrape_title": "",
+            "raw_content": (r.get("content", "") or "")[:1000],  # SearXNG の content 全文(スクレイピング失敗時のフォールバック)
         }
         if url:
             scraped_r = next(scrape_iter, None)

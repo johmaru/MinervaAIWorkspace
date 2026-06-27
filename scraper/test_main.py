@@ -318,3 +318,12 @@ class TestSearchTimeRange:
         assert resp.status_code == 200
         params = mock_get.call_args.kwargs.get("params", {})
         assert "time_range" not in params
+
+    def test_no_engines_param(self, client):
+        """engines パラメータは SearXNG 設定に委譲し、送信しない"""
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post("/search", json={"query": "test", "max_results": 3})
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert "engines" not in params

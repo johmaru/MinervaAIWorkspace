@@ -33,7 +33,8 @@ Do not use web search when:
 - the user asks about past conversations, memories, or what was previously discussed
 - the entity is a well-known general concept that the model confidently knows (e.g. "what is Python", "what is HTTP") — only search when uncertain
 
-If search is needed, create 1 to 3 precise search queries in the user's language.
+If search is needed, create 2 to 3 precise search queries in the user's language.
+Use different phrasings or aspects of the question for each query (e.g. a direct question, a keyword-focused query, and a variant with synonyms). This improves result coverage across search engines.
 The userNotice should be a SHORT status-style sentence in the user's language (e.g. "最新の情報をWebで確認します。"). If no search needed, set userNotice to null.
 
 Return JSON:

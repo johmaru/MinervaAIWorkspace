@@ -589,7 +589,9 @@ async function buildSearchContext({
           url: r.url,
           title: r.scrapeTitle || r.title,
           snippet: r.snippet,
-          content: r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : "",
+          content: r.scraped
+            ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)
+            : r.raw_content || r.snippet,
         });
       }
     } catch {

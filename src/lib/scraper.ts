@@ -45,6 +45,7 @@ export type WebSearchResult = {
   scraped: boolean;
   content: string; // スクレイピングした本文（scraped=false は空）
   scrapeTitle: string;
+  raw_content: string; // SearXNG の content 全文（スクレイピング失敗時のフォールバック）
 };
 
 export type WebSearchResponse = {
