@@ -43,6 +43,8 @@ type SettingsResponse = {
   notionClientId: string;
   notionClientSecret: string;
   authUrl: string;
+  // グローバルシステムインストラクション（ユーザー単位、DB）
+  systemInstruction: string;
 };
 
 type TorConnection = {
@@ -425,6 +427,22 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 </label>
               </div>
             )}
+          </div>
+
+          {/* グローバルシステムインストラクション（ユーザー単位） */}
+          <div className="mt-3">
+            <label className="mb-1 block">
+              <span className="block text-xs font-medium text-foreground">
+                {t("settings.globalSystemInstruction")}
+              </span>
+            </label>
+            <textarea
+              value={form.systemInstruction ?? ""}
+              onChange={(e) => update("systemInstruction", e.target.value)}
+              rows={4}
+              placeholder={t("settings.globalSystemInstructionPlaceholder")}
+              className="w-full resize-y rounded-xl bg-muted px-2 py-1.5 text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+            />
           </div>
           </div>
           )}

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
 import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
 import { db } from "@/db";
-import { messages, threads, mcpServers, connections } from "@/db/schema";
+import { messages, threads, users, mcpServers, connections } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
@@ -105,7 +105,14 @@ export async function POST(req: Request) {
 
   const llm = createLLM();
   const finalModel = body.model ?? thread.model ?? defaultModel();
-  const systemContent = thread.systemPrompt ?? body.systemPrompt;
+  // ユーザーのグローバルシステムインストラクションを取得（全スレッド共通）
+  const [userRow] = await db
+    .select({ systemInstruction: users.systemInstruction })
+    .from(users)
+    .where(eq(users.id, user.id));
+  const globalInstruction = userRow?.systemInstruction?.trim() || null;
+  // 優先順位: スレッド個別 > グローバル > リクエスト body
+  const systemContent = thread.systemPrompt ?? globalInstruction ?? body.systemPrompt;
 
   // ストリーム完了を待つ Promise。after() コールバックがリクエストコンテキスト内で
   // generateMemories を実行するため、ストリーム完了後に内容を引き渡す。
@@ -255,34 +262,53 @@ export async function POST(req: Request) {
             timeRange: body.timeRange,
           });
         } else {
-          // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
-          // サポート時はストリーミング中に自律的に検索/スクレイプを実行。
-          // 非サポート時は decideSearch ルーター方式（buildSearchContext）にフォールバック。
-          let toolSupport: ToolSupport | null = null;
-          try {
-            toolSupport = await probeToolSupport(llm, finalModel);
-          } catch {
-            toolSupport = null;
+          if (body.rapid) {
+            // rapid モード: ツール使用プローブ・MCP・接続ツールをすべてスキップし、
+            // 純粋な LLM 即時回答のみ行う。
+            await streamCompletion({
+              llm,
+              model: finalModel,
+              messages: finalMessages,
+              onDelta: (delta) => {
+                assistantContent += delta;
+                send("delta", { delta });
+              },
+              onReasoning: (delta) => {
+                assistantReasoning += delta;
+                send("thinking", { delta });
+              },
+              timeRange: body.timeRange,
+            });
+          } else {
+            // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
+            // サポート時はストリーディング中に自律的に検索/スクレイプを実行。
+            // 非サポート時は decideSearch ルーター方式（buildSearchContext）にフォールバック。
+            let toolSupport: ToolSupport | null = null;
+            try {
+              toolSupport = await probeToolSupport(llm, finalModel);
+            } catch {
+              toolSupport = null;
+            }
+            await streamCompletion({
+              llm,
+              model: finalModel,
+              messages: finalMessages,
+              onDelta: (delta) => {
+                assistantContent += delta;
+                send("delta", { delta });
+              },
+              onReasoning: (delta) => {
+                assistantReasoning += delta;
+                send("thinking", { delta });
+              },
+              toolSupport,
+              send,
+              extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
+              mcpConnections,
+              connectionRows,
+              timeRange: body.timeRange,
+            });
           }
-          await streamCompletion({
-            llm,
-            model: finalModel,
-            messages: finalMessages,
-            onDelta: (delta) => {
-              assistantContent += delta;
-              send("delta", { delta });
-            },
-            onReasoning: (delta) => {
-              assistantReasoning += delta;
-              send("thinking", { delta });
-            },
-            toolSupport,
-            send,
-            extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
-            mcpConnections,
-            connectionRows,
-            timeRange: body.timeRange,
-          });
         }
 
         // GLM-5.2 等のツール非対応モデルがツール呼び出し構文をテキストとして

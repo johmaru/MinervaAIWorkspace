@@ -221,6 +221,8 @@ const ja = {
     connectionSuccess: "コネクションを追加しました",
     connectionError: "コネクションに失敗しました",
     saveFirst: "保存してから「Notion に接続」を押してください",
+    globalSystemInstruction: "グローバルシステムインストラクション",
+    globalSystemInstructionPlaceholder: "全スレッドに適用されるシステムプロンプト（任意）。スレッド個別の設定がある場合はそちらが優先されます。",
   },
   threadSettings: {
     toggle: "スレッド設定を開閉",
@@ -574,6 +576,8 @@ const en: typeof ja = {
     connectionSuccess: "Connection added",
     connectionError: "Connection failed",
     saveFirst: "Save settings first, then click \"Connect Notion\"",
+    globalSystemInstruction: "Global system instruction",
+    globalSystemInstructionPlaceholder: "System prompt applied to all threads (optional). Thread-specific setting takes precedence if set.",
   },
   threadSettings: {
     toggle: "Toggle thread settings",

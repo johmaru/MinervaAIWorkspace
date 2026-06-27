@@ -1,5 +1,6 @@
 import { db } from "@/db";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { users } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
@@ -121,6 +122,12 @@ export async function GET(req: Request) {
   const locale = getRequestLocale(req);
   const dims = await getVectorDim();
 
+  // ユーザーのグローバルシステムインストラクションを取得（DB、ユーザー単位）
+  const [userRow] = await db
+    .select({ systemInstruction: users.systemInstruction })
+    .from(users)
+    .where(eq(users.id, user.id));
+
   return Response.json({
     // LLM
     llmBaseUrl: process.env.LLM_BASE_URL || "",
@@ -152,6 +159,8 @@ export async function GET(req: Request) {
     notionClientId: process.env.NOTION_CLIENT_ID || "",
     notionClientSecret: process.env.NOTION_CLIENT_SECRET || "",
     authUrl: process.env.AUTH_URL || "http://localhost:3001",
+    // グローバルシステムインストラクション（ユーザー単位、DB）
+    systemInstruction: userRow?.systemInstruction ?? "",
   });
 }
 
@@ -159,6 +168,8 @@ type SettingsBody = {
   // LLM
   llmBaseUrl?: string;
   llmApiKey?: string;
+  // グローバルシステムインストラクション（ユーザー単位、DB に保存）
+  systemInstruction?: string;
   llmModel?: string;
   llmModels?: string;
   thinkingEffort?: string;
@@ -265,6 +276,15 @@ export async function POST(req: Request) {
     // 4. インデックス再作成
     await db.execute(sql`CREATE INDEX "memories_embedding_hnsw" ON "memories" USING hnsw ("embedding" vector_cosine_ops)`);
     await db.execute(sql`CREATE INDEX "page_embeddings_embedding_hnsw" ON "page_embeddings" USING hnsw ("embedding" vector_cosine_ops)`);
+  }
+
+  // グローバルシステムインストラクションはユーザー単位なので DB に保存（.env ではなく）
+  if (body.systemInstruction !== undefined) {
+    const trimmed = body.systemInstruction.trim();
+    await db
+      .update(users)
+      .set({ systemInstruction: trimmed || null })
+      .where(eq(users.id, user.id));
   }
 
   // .env に全設定を保存
