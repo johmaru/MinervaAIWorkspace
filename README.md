@@ -29,7 +29,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Per-thread system prompt and model selection**
 - **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
 - **Connections (Notion)** — connect your Notion account via OAuth; the LLM calls `notion_search`, `notion_get_page`, and `notion_get_blocks` tools during chat to find and read Notion content; enabled per-thread via the ＋ menu
-- **Account authentication** — Auth.js v5 with Credentials provider; first Docker launch requires account creation, then login; each user's data is isolated
+- **Account authentication** — Auth.js v5 with Credentials (email/password) and optional Google OAuth; first Docker launch requires account creation, then login; each user's data is isolated
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
 
 ## Architecture
@@ -86,6 +86,10 @@ cp .env.example .env
 
 # 2b. Generate an AUTH_SECRET and add it to .env
 bunx auth secret
+# 2c. (Optional) To enable "Sign in with Google", set in .env:
+#     GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+#     Create credentials at https://console.cloud.google.com/apis/credentials
+#     Redirect URI: http://localhost:3001/api/auth/callback/google
 # 3. Start all services
 docker compose up -d
 

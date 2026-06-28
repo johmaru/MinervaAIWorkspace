@@ -29,17 +29,19 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   nickname: text("nickname").notNull(),
   email: text("email").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  passwordHash: text("password_hash"),
   activeInstructionId: uuid("active_instruction_id"),
+  // DrizzleAdapter が OAuth createUser で書き込む列（Google ログイン用）
+  name: text("name"),
+  emailVerified: timestamp("email_verified", { withTimezone: true }),
+  image: text("image"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// accounts/sessions/verificationTokens: DrizzleAdapter が期待するスキーマ形状。
-// JWT セッション戦略（Credentials で必須）のため sessions は実行時に未使用だが、
-// アダプター互換のためにテーブルを定義しておく。
 export const accounts = pgTable("accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type"),  // DrizzleAdapter linkAccount 用（oauth / oidc / email）
   provider: text("provider").notNull(),
   providerAccountId: text("provider_account_id").notNull(),
   accessToken: text("access_token"),

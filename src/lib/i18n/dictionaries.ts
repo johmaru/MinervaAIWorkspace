@@ -331,6 +331,8 @@ const ja = {
     haveAccount: "既にアカウントをお持ちですか？",
     logout: "ログアウト",
     firstRunBanner: "最初のアカウントを作成してください",
+    or: "または",
+    googleSignIn: "Google でログイン",
   },
   skills: {
     saved: "スキルを保存しました",
@@ -703,6 +705,8 @@ const en: typeof ja = {
     haveAccount: "Already have an account?",
     logout: "Log out",
     firstRunBanner: "Create the first admin account",
+    or: "or",
+    googleSignIn: "Sign in with Google",
   },
   urlInput: {
     placeholder: "Turn URL into knowledge…",

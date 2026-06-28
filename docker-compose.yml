@@ -48,6 +48,8 @@ services:
       # .env ファイルから読み込む（GUI 書き換え対応）
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     ports:
       - "3001:3000"
 

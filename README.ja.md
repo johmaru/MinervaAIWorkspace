@@ -29,7 +29,7 @@
 - **スレッド単位のシステムプロンプトとモデル選択**
 - **MCP サーバー統合** — 外部の Model Context Protocol サーバー（Streamable HTTP / stdio）を登録し、スレッド単位で有効化。LLM がストリーミング中にツールを発見・呼び出し、組み込みの検索/スクレイプツールと併用可能
 - **コネクション（Notion）** — Notion アカウントを OAuth で連携。チャット中に LLM が `notion_search`、`notion_get_page`、`notion_get_blocks` ツールを呼び出し、Notion のコンテンツを検索・取得。スレッド単位で＋メニューから有効化
-- **アカウント認証** — Auth.js v5 + Credentials プロバイダ。初回 Docker 起動時にアカウント作成が必要、以降はログイン。ユーザー毎にデータが分離
+- **アカウント認証** — Auth.js v5 + Credentials（email/password）+ オプションで Google OAuth。初回 Docker 起動時にアカウント作成が必要、以降はログイン。ユーザー毎にデータが分離
 - **設定 GUI** — `.env` に書き込み、埋め込みモデルのマイグレーション以外は再起動不要
 
 ## アーキテクチャ
@@ -86,6 +86,10 @@ cp .env.example .env
 
 # 2b. AUTH_SECRET を生成して .env に追加
 bunx auth secret
+# 2c.（任意）「Google でログイン」を有効にする場合、.env に設定:
+#     GOOGLE_CLIENT_ID と GOOGLE_CLIENT_SECRET
+#     https://console.cloud.google.com/apis/credentials で認証情報を作成
+#     リダイレクト URI: http://localhost:3001/api/auth/callback/google
 
 # 3. 全サービスを起動
 docker compose up -d

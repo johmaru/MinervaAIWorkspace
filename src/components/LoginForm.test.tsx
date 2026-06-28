@@ -5,14 +5,18 @@ import type { ReactNode } from "react";
 // authenticate をモック: フォーム送信時に渡された formData の mode 値を記録し、
 // 安定した関数参照として useActionState に渡せるようにする。
 // vi.mock はファイル先頭に巻き上げられるため、vi.hoisted で事前定義する。
-const { authenticateMock } = vi.hoisted(() => ({
+const { authenticateMock, signInMock } = vi.hoisted(() => ({
   authenticateMock: vi.fn(async (_state: unknown, formData: FormData) => {
     return { submittedMode: String(formData.get("mode") ?? "login") };
   }),
+  signInMock: vi.fn(),
 }));
 
 vi.mock("@/app/actions/auth", () => ({
   authenticate: authenticateMock,
+}));
+vi.mock("@/auth", () => ({
+  signIn: signInMock,
 }));
 
 // I18nProvider は localStorage / cookie を触るため、テスト用に軽量な Provider で差し替え。
@@ -38,10 +42,12 @@ import { LoginForm } from "@/components/LoginForm";
 afterEach(() => {
   cleanup();
   authenticateMock.mockClear();
+  signInMock.mockClear();
 });
 
 beforeEach(() => {
   authenticateMock.mockClear();
+  signInMock.mockClear();
 });
 
 describe("LoginForm — モード切替と hidden mode フィールド", () => {
@@ -107,5 +113,29 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
     const formData = authenticateMock.mock.calls[0][1] as FormData;
     expect(formData.get("mode")).toBe("login");
     expect(formData.get("email")).toBe("test@example.com");
+  });
+});
+
+describe("LoginForm — Google ログインボタン", () => {
+  it("ログインモードで Google ボタンが表示される", () => {
+    render(<LoginForm />);
+    expect(screen.getByText("auth.googleSignIn")).toBeTruthy();
+    expect(screen.getByText("auth.or")).toBeTruthy();
+  });
+
+  it("登録モードでは Google ボタンが非表示", () => {
+    render(<LoginForm />);
+    // 初期状態（login）では表示
+    expect(screen.getByText("auth.googleSignIn")).toBeTruthy();
+    // 登録モードに切替
+    fireEvent.click(screen.getByText("auth.noAccount"));
+    expect(screen.queryByText("auth.googleSignIn")).toBeNull();
+  });
+
+  it("Google ボタンクリックで signIn('google') が呼ばれる", () => {
+    render(<LoginForm />);
+    fireEvent.click(screen.getByText("auth.googleSignIn"));
+    expect(signInMock).toHaveBeenCalledTimes(1);
+    expect(signInMock).toHaveBeenCalledWith("google", { callbackUrl: "/" });
   });
 });
