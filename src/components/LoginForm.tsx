@@ -3,8 +3,7 @@
 import { useActionState, useRef, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { MotionButton } from "@/components/ui/motion";
-import { authenticate } from "@/app/actions/auth";
-import { signIn } from "@/auth";
+import { authenticate, signInWithGoogle } from "@/app/actions/auth";
 
 type Mode = "login" | "register";
 
@@ -147,7 +146,7 @@ export function LoginForm({
               type="button"
               disabled={pending}
               onClick={() => {
-                void signIn("google", { callbackUrl: "/" });
+                void signInWithGoogle();
               }}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-50"
               whileTap={{ scale: 0.98 }}

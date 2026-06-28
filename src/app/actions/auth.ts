@@ -81,3 +81,12 @@ export async function logout(): Promise<void> {
   await signOut();
   redirect("/login");
 }
+
+/**
+ * signInWithGoogle — Google OAuth ログインを開始するサーバーアクション。
+ * Client Component から直接 signIn("google") を呼ぶと auth.ts → db → pg が
+ * ブラウザバンドルに巻き込まれるため、サーバーアクション経由で呼ぶ。
+ */
+export async function signInWithGoogle(): Promise<void> {
+  await signIn("google", { callbackUrl: "/" });
+}

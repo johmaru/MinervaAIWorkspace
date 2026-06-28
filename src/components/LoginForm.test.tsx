@@ -14,9 +14,7 @@ const { authenticateMock, signInMock } = vi.hoisted(() => ({
 
 vi.mock("@/app/actions/auth", () => ({
   authenticate: authenticateMock,
-}));
-vi.mock("@/auth", () => ({
-  signIn: signInMock,
+  signInWithGoogle: signInMock,
 }));
 
 // I18nProvider は localStorage / cookie を触るため、テスト用に軽量な Provider で差し替え。
@@ -132,10 +130,10 @@ describe("LoginForm — Google ログインボタン", () => {
     expect(screen.queryByText("auth.googleSignIn")).toBeNull();
   });
 
-  it("Google ボタンクリックで signIn('google') が呼ばれる", () => {
+  it("Google ボタンクリックで signInWithGoogle が呼ばれる", () => {
     render(<LoginForm />);
     fireEvent.click(screen.getByText("auth.googleSignIn"));
     expect(signInMock).toHaveBeenCalledTimes(1);
-    expect(signInMock).toHaveBeenCalledWith("google", { callbackUrl: "/" });
+    expect(signInMock).toHaveBeenCalledWith();
   });
 });
