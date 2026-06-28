@@ -100,6 +100,26 @@ docker compose up -d
 
 On first run, database migrations are applied automatically by the app, and you'll be prompted to create the first admin account (nickname + email + password). Subsequent visits require login. Each user's threads, folders, and memories are isolated. If you change the embedding model after initial setup, see [Database Migrations](#database-migrations).
 
+## Public Access via Cloudflare Tunnel (Optional)
+
+To expose the app over public HTTPS without port forwarding or a public IP, use a Cloudflare named tunnel. This is the recommended way to use Google OAuth from a remote network.
+
+1. Create a named tunnel at [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel (type: Cloudflared).
+2. Add a public hostname and route it to `Service=http://app:3000`.
+3. Copy the tunnel token into `.env`:
+   ```
+   TUNNEL_TOKEN=your-token-here
+   AUTH_URL=https://your-tunnel.example.com
+   ```
+4. Start with the tunnel profile:
+   ```bash
+   docker compose --profile tunnel up -d
+   ```
+5. In Google Cloud Console, set the authorized redirect URI to:
+   `https://your-tunnel.example.com/api/auth/callback/google`
+
+Without `--profile tunnel`, the cloudflared service is excluded and the app runs on `localhost:3001` as usual.
+
 ## Quick Start (Local Dev)
 
 For development of the Next.js app itself.

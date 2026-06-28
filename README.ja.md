@@ -101,6 +101,26 @@ docker compose up -d
 
 初回起動時、データベースのマイグレーションはアプリが自動的に適用されます。また、初回は管理者アカウントの作成（ニックネーム + メールアドレス + パスワード）を求められます。以降のアクセスにはログインが必要です。ユーザー毎にスレッド・フォルダ・記憶は分離されます。初期セットアップ後に埋め込みモデルを変更する場合は [データベースマイグレーション](#データベースマイグレーション) を参照してください。
 
+## Cloudflare Tunnel によるパブリックアクセス（任意）
+
+ポート開放やパブリック IP なしで HTTPS 経由でアプリを公開するには、Cloudflare 名前付きトンネルを使います。リモートネットワークから Google OAuth を利用する場合に推奨します。
+
+1. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel で名前付きトンネルを作成（タイプ: Cloudflared）。
+2. パブリックホスト名を追加し、`Service=http://app:3000` にルーティング。
+3. 発行されたトークンを `.env` に設定:
+   ```
+   TUNNEL_TOKEN=your-token-here
+   AUTH_URL=https://your-tunnel.example.com
+   ```
+4. トンネルプロファイル付きで起動:
+   ```bash
+   docker compose --profile tunnel up -d
+   ```
+5. Google Cloud Console で認可リダイレクト URI を以下に設定:
+   `https://your-tunnel.example.com/api/auth/callback/google`
+
+`--profile tunnel` なしの場合、cloudflared サービスは除外され、アプリは通常通り `localhost:3001` で動作します。
+
 ## クイックスタート（ローカル開発）
 
 Next.js アプリ本体を開発する場合の手順です。

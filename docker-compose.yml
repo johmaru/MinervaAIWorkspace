@@ -51,7 +51,25 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     ports:
-      - "3001:3000"
+      - "3001:3000"  # Cloudflare Tunnel 使用時も localhost:3001 で直接確認可能
+
+  # Cloudflare Tunnel: 名前付きトンネルで app をパブリック HTTPS で公開。
+  # TUNNEL_TOKEN 未設定時は起動せず、localhost:3001 で直接アクセス可能。
+  # トンネル作成手順:
+  #   1. https://one.dash.cloudflare.com/ → Networks → Tunnels → Create a tunnel
+  #   2. タイプ: Cloudflared → トンネル名を指定（例: umanschat）
+  #   3. Public Hostname で app サービスにルーティング: Service=http://app:3000
+  #   4. 発行されたトークンを .env の TUNNEL_TOKEN に設定
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: umanschat-cloudflared
+    restart: unless-stopped
+    depends_on:
+      - app
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    profiles: ["tunnel"]  # --profile tunnel で有効化。TUNNEL_TOKEN 未設定時は起動しない
 
   scraper:
     build:
