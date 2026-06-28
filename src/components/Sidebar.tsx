@@ -8,6 +8,7 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { SearchBar } from "@/components/SearchBar";
 import { UrlInput } from "@/components/UrlInput";
 import { SettingsModal } from "@/components/SettingsModal";
+import { MemoryViewerModal } from "@/components/MemoryViewerModal";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { MoveToFolderModal } from "@/components/MoveToFolderModal";
 import { useI18n } from "@/components/I18nProvider";
@@ -61,6 +62,7 @@ export const Sidebar = memo(function Sidebar({
 }: SidebarProps) {
   const { t } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     new Set(),
@@ -175,6 +177,18 @@ export const Sidebar = memo(function Sidebar({
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </MotionButton>
+          <MotionButton
+            type="button"
+            onClick={() => setMemoryOpen(true)}
+            className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+            aria-label={t("sidebar.memory")}
+            whileTap={{ scale: 0.9 }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.27 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.27 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
             </svg>
           </MotionButton>
           <MotionButton
@@ -325,6 +339,7 @@ export const Sidebar = memo(function Sidebar({
         </div>
       )}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} onOpenHelp={onOpenHelp} />
+      <MemoryViewerModal open={memoryOpen} onClose={() => setMemoryOpen(false)} />
 
       <AnimatePresence>
         {menu && (
