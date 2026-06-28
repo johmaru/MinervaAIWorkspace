@@ -11,7 +11,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
 - **Semantic search** across all threads (pgvector cosine similarity)
-- **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context
+- **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context; view, search, edit, delete, and manually add memories from the sidebar 🧠 Memory Manager
 - **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers; URLs pasted in chat are scraped automatically and injected as context
 - **Web search** — app-level SearXNG pipeline with a dedicated search model for query generation and result summarization; triggers on volatile info, explicit requests, and unfamiliar terms/proper nouns; configurable in settings
 - **Dual-model conclusions** — run two models in cross-review or debate mode, then stream a synthesized final answer with the model work kept in collapsible details
@@ -204,6 +204,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
 - **Tor** — toggle Tor in settings for anonymous scraping.
 - **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
+- **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories.
 
 ## Database Migrations
 
