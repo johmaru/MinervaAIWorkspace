@@ -1,91 +1,99 @@
+import { randomUUID } from "node:crypto";
 import {
-  pgTable,
-  uuid,
+  sqliteTable,
   text,
-  timestamp,
   integer,
-  index,
-  vector,
-  jsonb,
   real,
-} from "drizzle-orm/pg-core";
+  index,
+} from "drizzle-orm/sqlite-core";
+
+/** タイムスタンプ列の共通ヘルパー: Unix epoch ms（integer）で保存し Date で読み書き。 */
+function ts(name: string) {
+  return integer(name, { mode: "timestamp_ms" });
+}
+/** NOT NULL タイムスタンプ列 + デフォルト now()。 */
+function tsNow(name: string) {
+  return integer(name, { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date());
+}
+
 // ── Auth.js tables ──
 /**
  * global_instructions — ユーザー単位の名前付きグローバルシステムインストラクション。
  * 複数作成可。users.activeInstructionId で既定、threads.globalInstructionId でスレッド上書き。
  * users の前に定義（users.activeInstructionId が本テーブルを前方参照するため）。
  */
-export const globalInstructions = pgTable("global_instructions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+export const globalInstructions = sqliteTable("global_instructions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   content: text("content").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
 });
 
 // users: アプリユーザー。emailUnique でログイン。passwordHash で Credentials 認証。
-export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   nickname: text("nickname").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash"),
-  activeInstructionId: uuid("active_instruction_id"),
+  activeInstructionId: text("active_instruction_id"),
   // DrizzleAdapter が OAuth createUser で書き込む列（Google ログイン用）
   name: text("name"),
-  emailVerified: timestamp("email_verified", { withTimezone: true }),
+  emailVerified: ts("email_verified"),
   image: text("image"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: tsNow("created_at"),
 });
 
-export const accounts = pgTable("accounts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+export const accounts = sqliteTable("accounts", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   type: text("type"),  // DrizzleAdapter linkAccount 用（oauth / oidc / email）
   provider: text("provider").notNull(),
   providerAccountId: text("provider_account_id").notNull(),
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  expiresAt: ts("expires_at"),
   tokenType: text("token_type"),
   scope: text("scope"),
   idToken: text("id_token"),
 });
 
-export const sessions = pgTable("sessions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  expires: timestamp("expires", { withTimezone: true }).notNull(),
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expires: ts("expires").notNull(),
   sessionToken: text("session_token").notNull().unique(),
 });
 
-export const verificationTokens = pgTable("verification_tokens", {
+export const verificationTokens = sqliteTable("verification_tokens", {
   identifier: text("identifier").notNull(),
   token: text("token").notNull(),
-  expires: timestamp("expires", { withTimezone: true }).notNull(),
+  expires: ts("expires").notNull(),
 });
 
 // 埋め込み次元数: env EMBED_DIM（デフォルト 1024 = LFM2.5-Embedding-350M）。
-// モデル切替時は env で指定 + DB マイグレーション（vector 列の再作成）が必要。
-const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
+// SQLite では embedding は text（JSON 配列）で保存するため、次元は列型ではなく
+// アプリ側の cosine 関数（vectorSearch.ts）で検証用として使われる。
+export const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
 /**
  * skills — ユーザー単位の再利用可能プロンプト（persona / behavior / knowledge）。
  *
  * 会話から LLM で抽出・命名し、embedding 付きで保存。
- * 次回以降の全スレッドで pgvector 検索 → system context に注入。
+ * 次回以降の全スレッドでアプリ側 cosine 検索 → system context に注入。
  * ユーザーが「〇〇スキルを使って」と指定すれば名前で直接適用。
  * 「スキルで保存して」で現在の会話からスキルを生成。
  */
-export const skills = pgTable("skills", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+export const skills = sqliteTable("skills", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   content: text("content").notNull(),
-  embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
+  embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
   contentHash: text("content_hash").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
 });
 
 /**
@@ -95,17 +103,17 @@ export const skills = pgTable("skills", {
  * transport="stdio" の場合は command + args + env でローカルプロセスを起動。
  * スレッド単位で有効/無効を切り替え（threads.mcpServerIds に id 配列を保持）。
  */
-export const mcpServers = pgTable("mcp_servers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+export const mcpServers = sqliteTable("mcp_servers", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   transport: text("transport", { enum: ["http", "stdio"] }).notNull(),
   url: text("url"),
   command: text("command"),
-  args: jsonb("args").$type<string[]>(),
-  env: jsonb("env").$type<Record<string, string>>(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  args: text("args", { mode: "json" }).$type<string[]>(),
+  env: text("env", { mode: "json" }).$type<Record<string, string>>(),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
 });
 
 
@@ -117,9 +125,9 @@ export const mcpServers = pgTable("mcp_servers", {
  * workspaceName / workspaceIcon / ownerName / ownerEmail は表示用メタデータ。
  * スレッド単位で有効/無効を切り替え（threads.connectionIds に id 配列を保持）。
  */
-export const connections = pgTable("connections", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+export const connections = sqliteTable("connections", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   provider: text("provider", { enum: ["notion"] }).notNull(),
   accessToken: text("access_token").notNull(),
   refreshToken: text("refresh_token").notNull(),
@@ -128,8 +136,8 @@ export const connections = pgTable("connections", {
   botId: text("bot_id"),
   ownerName: text("owner_name"),
   ownerEmail: text("owner_email"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
 });
 
 
@@ -137,8 +145,8 @@ export const connections = pgTable("connections", {
  * threads — 会話スレッド
  * current_leaf_id: 現在表示中の枝の末端 message id。枝分かれナビで切替。
  */
-export const threads = pgTable("threads", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const threads = sqliteTable("threads", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   title: text("title").notNull().default("New chat"),
   systemPrompt: text("system_prompt"),
   model: text("model").notNull().default("umans-glm-5.2"),
@@ -147,14 +155,14 @@ export const threads = pgTable("threads", {
   dualModelB: text("dual_model_b"),
   dualStrategy: text("dual_strategy", { enum: ["cross_review", "debate"] }).notNull().default("cross_review"),
   dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
-  mcpServerIds: jsonb("mcp_server_ids").$type<string[]>().notNull().default([]),
-  folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
-  connectionIds: jsonb("connection_ids").$type<string[]>().notNull().default([]),
-  globalInstructionId: uuid("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
-  currentLeafId: uuid("current_leaf_id"),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  mcpServerIds: text("mcp_server_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
+  folderId: text("folder_id").references(() => folders.id, { onDelete: "set null" }),
+  connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
+  globalInstructionId: text("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
+  currentLeafId: text("current_leaf_id"),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
 });
 
 /**
@@ -164,14 +172,14 @@ export const threads = pgTable("threads", {
  * "global" の場合は従来通り全スレッド横断（デフォルト、後方互換）。
  * フォルダ階層は1階層のみ（自己参照なし）。
  */
-export const folders = pgTable("folders", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const folders = sqliteTable("folders", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   name: text("name").notNull().default("New folder"),
   instruction: text("instruction"),
   memoryScope: text("memory_scope", { enum: ["folder", "global"] }).notNull().default("global"),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
 });
 
 /**
@@ -180,18 +188,18 @@ export const folders = pgTable("folders", {
  * 編集/再生成は新しい行を作り parent_id で親に繋ぐ。
  * 古い枝も残す（ChatGPT 式）。
  */
-export const messages = pgTable(
+export const messages = sqliteTable(
   "messages",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    threadId: uuid("thread_id")
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
-    parentId: uuid("parent_id"), // 自己参照（ルートは NULL）
+    parentId: text("parent_id"), // 自己参照（ルートは NULL）
     role: text("role", { enum: ["user", "assistant", "system"] }).notNull(),
     content: text("content").notNull(),
     reasoning: text("reasoning"), // assistant の思考プロセス（折りたたみ表示用）
-    metadata: jsonb("metadata").$type<{
+    metadata: text("metadata", { mode: "json" }).$type<{
       dualTrace?: {
         strategy: "cross_review" | "debate";
         modelA: string;
@@ -206,7 +214,7 @@ export const messages = pgTable(
       model?: string;
       elapsedMs?: number;
     }>(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
     threadIdx: index("messages_thread_idx").on(t.threadId),
@@ -218,32 +226,33 @@ export const messages = pgTable(
  * memories — 会話記憶（fact / working）。
  *
  * アシスタント応答完了後に LLM で会話を要約・分類し、embedding 付きで保存。
- * 次回送信時に pgvector 検索 → LLM rerank → recency スコアで並べ替え →
+ * 次回送信時にアプリ側 cosine 検索 → LLM rerank → recency スコアで並べ替え →
  * top-5 を system context に注入（RAG）。
  *
  * - kind: "fact" = 不変のユーザー情報・環境・設定。"working" = 現在のタスク・一時文脈。
  * - suppressedAt: 論理削除。replace/merge で古い記憶を無効化。
  * - folderId: folders.memoryScope が "folder" の場合、検索を同一フォルダに限定。
  *   "global" の場合は全スレッド横断（デフォルト）。
+ * - embedding: JSON 配列（text 列, mode: json）。vectorSearch.ts で cosine 計算。
  */
-export const memories = pgTable(
+export const memories = sqliteTable(
   "memories",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    threadId: uuid("thread_id")
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
-    folderId: uuid("folder_id").references(() => folders.id, { onDelete: "set null" }),
+    folderId: text("folder_id").references(() => folders.id, { onDelete: "set null" }),
     kind: text("kind", { enum: ["fact", "working"] }).notNull(),
     content: text("content").notNull(),
-    sourceMessageIds: jsonb("source_message_ids").$type<string[]>(),
-    embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
+    sourceMessageIds: text("source_message_ids", { mode: "json" }).$type<string[]>(),
+    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     importance: real("importance").notNull().default(0.5),
-    suppressedAt: timestamp("suppressed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    suppressedAt: ts("suppressed_at"),
+    createdAt: tsNow("created_at"),
+    updatedAt: tsNow("updated_at"),
   },
   (t) => ({
     threadIdx: index("memories_thread_idx").on(t.threadId),
@@ -258,14 +267,14 @@ export const memories = pgTable(
  * 画像は base64 を dataURL として保存（vision モデルへ inline 渡し）。
  * PDF/テキストはサーバ側でテキスト抽出し extractedText に保存。
  */
-export const attachments = pgTable(
+export const attachments = sqliteTable(
   "attachments",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    threadId: uuid("thread_id")
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
-    messageId: uuid("message_id")
+    messageId: text("message_id")
       .references(() => messages.id, { onDelete: "cascade" }),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
@@ -273,7 +282,7 @@ export const attachments = pgTable(
     dataUrl: text("data_url"),
     // PDF/テキストの場合: 抽出されたテキスト。画像の場合: null
     extractedText: text("extracted_text"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
     messageIdx: index("attachments_message_idx").on(t.messageId),
@@ -286,16 +295,16 @@ export const attachments = pgTable(
  * URL 単位で1行。contentHash が一致すれば再取得スキップ。
  * page_embeddings でスレッド横断の RAG/検索に供給。
  */
-export const pages = pgTable(
+export const pages = sqliteTable(
   "pages",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
     url: text("url").notNull().unique(),
     urlHash: text("url_hash").notNull().unique(), // SHA-256(normalized URL), 取得キャッシュ判定
     title: text("title"),
     content: text("content").notNull(),
     contentHash: text("content_hash").notNull(), // SHA-256(content), 変更検知
-    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    fetchedAt: tsNow("fetched_at"),
     status: integer("status").notNull().default(200),
     errorMessage: text("error_message"),
   },
@@ -307,18 +316,19 @@ export const pages = pgTable(
 /**
  * page_embeddings — ページ本文の埋め込みベクトル。
  * memories テーブルの embedding 列と同次元。EMBED_DIM（env で変更可能）。
+ * embedding は JSON 配列（text 列, mode: json）。vectorSearch.ts で cosine 計算。
  */
-export const pageEmbeddings = pgTable(
+export const pageEmbeddings = sqliteTable(
   "page_embeddings",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    pageId: uuid("page_id")
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    pageId: text("page_id")
       .notNull()
       .references(() => pages.id, { onDelete: "cascade" }),
     contentHash: text("content_hash").notNull(),
-    embedding: vector("embedding", { dimensions: EMBED_DIM }).notNull(),
+    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
     model: text("model").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
     pageIdx: index("page_embeddings_page_idx").on(t.pageId),

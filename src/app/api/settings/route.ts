@@ -1,6 +1,8 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { db } from "@/db";
-import { eq, sql } from "drizzle-orm";
-import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { users, memories, pageEmbeddings } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
@@ -67,49 +69,13 @@ export function getEmbedModelOptions(locale: Locale) {
 export { EMBED_MODEL_BASE };
 
 /**
- * 指定テーブルの vector 列の次元を取得。
- * 行が存在する場合は vector_dims() で、空の場合は列の宣言型（vector(N)）から取得。
- * どちらも取得できない場合は 0。
- *
- * table は "memories" | "page_embeddings" のみ（呼び出し元で固定）。
- * FROM ${tableName} は sql.raw で識別子を埋め込むため、引数を union 型にして
- * 型レベルで安全を保証する。
+ * 現在の埋め込み次元を取得。
+ * SQLite では embedding は JSON 配列（text 列）のため、次元は列型ではなく
+ * 環境変数 EMBED_DIM から取得する。次元変更時は既存データをクリアする必要があるが、
+ * 列の DDL は不要（text 列は任意次元の JSON を格納可能）。
  */
-async function getTableVectorDim(table: "memories" | "page_embeddings"): Promise<number> {
-  const tableName = table === "page_embeddings" ? sql.raw("page_embeddings") : sql.raw("memories");
-  try {
-    // 行があれば vector_dims() で実次元
-    const result = await db.execute(sql`SELECT vector_dims(embedding) as dim FROM ${tableName} LIMIT 1`);
-    const rows = (result as { rows?: Array<{ dim: number }> }).rows;
-    if (rows && rows.length > 0) return rows[0].dim;
-    // 行が空でも列の宣言型 vector(N) から次元を取得。
-    // ${table} は文字列リテラルとして bind され '::regclass' でキャストされるため安全。
-    const colResult = await db.execute(sql`
-      SELECT format_type(atttypid, atttypmod) as ty
-      FROM pg_attribute
-      WHERE attrelid = ${table}::regclass AND attname = 'embedding'
-    `);
-    const colRows = (colResult as { rows?: Array<{ ty: string }> }).rows;
-    if (colRows && colRows.length > 0) {
-      const m = colRows[0].ty.match(/vector\((\d+)\)/);
-      if (m) return Number(m[1]);
-    }
-  } catch {
-    // テーブル未作成 or エラー時は 0
-  }
-  return 0;
-}
-
-/**
- * memories / page_embeddings 両テーブルの vector 列次元を取得。
- * 検索クエリは両テーブルを横断するため、次元不整合を両方で検出する必要がある。
- */
-async function getVectorDim(): Promise<{ memories: number; pageEmbeddings: number }> {
-  const [memories, pageEmbeddings] = await Promise.all([
-    getTableVectorDim("memories"),
-    getTableVectorDim("page_embeddings"),
-  ]);
-  return { memories, pageEmbeddings };
+function getEmbedDim(): number {
+  return Number(process.env.EMBED_DIM) || 1024;
 }
 
 
@@ -120,7 +86,6 @@ export async function GET(req: Request) {
   const user = await getSessionUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
-  const dims = await getVectorDim();
 
   // ユーザーの既定グローバルインストラクション選択を取得（DB、ユーザー単位）
   const [userRow] = await db
@@ -140,8 +105,8 @@ export async function GET(req: Request) {
     embedDim: Number(process.env.EMBED_DIM) || 1024,
     embedProvider: process.env.EMBED_PROVIDER || "http",
     embedModelOptions: getEmbedModelOptions(locale),
-    dbVectorDim: dims.memories,
-    dbPageEmbeddingsDim: dims.pageEmbeddings,
+    dbVectorDim: getEmbedDim(),
+    dbPageEmbeddingsDim: getEmbedDim(),
     // Web 検索
     webSearchModel: process.env.WEB_SEARCH_MODEL || "umans-coder",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
@@ -232,18 +197,14 @@ export async function POST(req: Request) {
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
-  const dims = await getVectorDim();
-  const dbVectorDim = dims.memories;
+  const dbVectorDim = getEmbedDim();
 
   // 新しい次元を決定
-  const newDim = body.embedDim ?? Number(process.env.EMBED_DIM) ?? 1024;
-  // 両テーブルの次元が newDim と一致しない、または互いに不一致なら要マイグレーション。
-  // 検索クエリは memories と page_embeddings を横断するため、片方だけずれても
-  // "different vector dimensions" エラーになる。
-  const needsMigration =
-    (dims.memories > 0 && dims.memories !== newDim) ||
-    (dims.pageEmbeddings > 0 && dims.pageEmbeddings !== newDim) ||
-    (dims.memories > 0 && dims.pageEmbeddings > 0 && dims.memories !== dims.pageEmbeddings);
+  const newDim = body.embedDim ?? dbVectorDim;
+  // SQLite では embedding は text（JSON 配列）のため、次元変更に列 DDL は不要。
+  // ただし異なるモデルのベクトル空間は互換しないため、次元が変わる場合は
+  // 既存の embedding データを全削除する必要がある。
+  const needsMigration = body.embedDim !== undefined && body.embedDim !== dbVectorDim;
 
   if (needsMigration && !body.applyMigration) {
     return Response.json(
@@ -258,24 +219,10 @@ export async function POST(req: Request) {
   }
 
   if (needsMigration && body.applyMigration) {
-    // newDim は 1-4096 の整数としてバリデーション済み。DDL の型修飾子
-    // vector(N) は bind parameter を許可しないため raw で埋め込む。
-    const dim = sql.raw(String(newDim));
-    // 1. インデックス削除（列削除前に依存を解除）
-    await db.execute(sql`DROP INDEX IF EXISTS "memories_embedding_hnsw"`);
-    await db.execute(sql`DROP INDEX IF EXISTS "page_embeddings_embedding_hnsw"`);
-    // 2. 既存ベクトルデータを全削除（次元が変わるため変換不可）。
-    //    先に削除することで、空テーブルに対する ADD COLUMN ... NOT NULL が成功する。
-    await db.execute(sql`DELETE FROM memories`);
-    await db.execute(sql`DELETE FROM page_embeddings`);
-    // 3. 列を再作成（テーブルが空なので NOT NULL でも失敗しない）
-    await db.execute(sql`ALTER TABLE "memories" DROP COLUMN "embedding"`);
-    await db.execute(sql`ALTER TABLE "memories" ADD COLUMN "embedding" vector(${dim}) NOT NULL`);
-    await db.execute(sql`ALTER TABLE "page_embeddings" DROP COLUMN "embedding"`);
-    await db.execute(sql`ALTER TABLE "page_embeddings" ADD COLUMN "embedding" vector(${dim}) NOT NULL`);
-    // 4. インデックス再作成
-    await db.execute(sql`CREATE INDEX "memories_embedding_hnsw" ON "memories" USING hnsw ("embedding" vector_cosine_ops)`);
-    await db.execute(sql`CREATE INDEX "page_embeddings_embedding_hnsw" ON "page_embeddings" USING hnsw ("embedding" vector_cosine_ops)`);
+    // embedding 列は text（JSON）なので DDL 不要。次元が変わるため
+    // 既存ベクトルデータを全削除（異なるモデル空間のベクトルは互換しない）。
+    await db.delete(memories);
+    await db.delete(pageEmbeddings);
   }
 
   // 既定のグローバルインストラクション選択を DB に保存
@@ -288,8 +235,6 @@ export async function POST(req: Request) {
 
   // .env に全設定を保存
   try {
-    const { readFileSync, writeFileSync } = await import("node:fs");
-    const { resolve } = await import("node:path");
     const envPath = resolve(process.cwd(), ".env");
     let envContent = "";
     try {

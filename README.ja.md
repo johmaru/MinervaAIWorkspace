@@ -10,7 +10,7 @@
 - **ラピッドモード** — 入力欄の ⚡ ボタンで、Web 検索・URL スクレイプ・記憶/スキル RAG（LLM 前の取得とストリーム後の生成の両方）をスキップし、初回トークンまでのレイテンシを下げます。MCP/コネクションツールとデュアルモデルフローは有効なまま。再度 ⚡ をクリックするまで、メッセージやスレッドを跨いでオン状態が維持されます。
 - **枝分かれする会話ツリー** — 再生成やメッセージ編集で兄弟ノードを作成。`< 1/N >` で兄弟間を移動
 - **添付ファイル** — 画像（ビジョン）、PDF（テキスト抽出）、テキスト/コードファイル（1ファイル最大 10MB）
-- **セマンティック検索** — 全スレッド横断で pgvector のコサイン類似度により検索
+- **セマンティック検索** — 全スレッド横断でコサイン類似度により検索
 - **会話記憶** — 各ターン終了後に fact/working 記憶を抽出し、RAG コンテキストとして注入。サイドバーの 🧠 メモリマネージャーから記憶の確認・検索・編集・削除・手動追加が可能
 - **Web ページスクレイピング → 知識化** — スクレイプしたページを RAG ソースとして取り込み、以降の回答に活用。チャットに URL を貼ると自動でスクレイプしてコンテキストに注入
 - **Web 検索** — アプリレベルの SearXNG パイプライン。検索クエリ生成と結果要約は検索専用モデルが担当。揮発性情報・明示的な検索要求・未知の語や固有名詞で自動起動。設定で切替可能
@@ -29,12 +29,12 @@
 - **スレッド単位のシステムプロンプトとモデル選択**
 - **MCP サーバー統合** — 外部の Model Context Protocol サーバー（Streamable HTTP / stdio）を登録し、スレッド単位で有効化。LLM がストリーミング中にツールを発見・呼び出し、組み込みの検索/スクレイプツールと併用可能
 - **コネクション（Notion）** — Notion アカウントを OAuth で連携。チャット中に LLM が `notion_search`、`notion_get_page`、`notion_get_blocks` ツールを呼び出し、Notion のコンテンツを検索・取得。スレッド単位で＋メニューから有効化
-- **アカウント認証** — Auth.js v5 + Credentials（email/password）+ オプションで Google OAuth。初回 Docker 起動時にアカウント作成が必要、以降はログイン。ユーザー毎にデータが分離
+- **アカウント認証** — Auth.js v5 + Credentials（email/password）+ オプションで Google OAuth。初回起動時にアカウント作成が必要、以降はログイン。ユーザー毎にデータが分離
 - **設定 GUI** — `.env` に書き込み、埋め込みモデルのマイグレーション以外は再起動不要
 
 ## アーキテクチャ
 
-UmansChat は Next.js 16 + React 19 のアプリケーションで、pgvector 拡張を入れた PostgreSQL 16 をバックエンドに持ち、Docker Compose により5つのサービスで構成されます。
+UmansChat は Next.js 16 + React 19 のアプリケーションで、デフォルトでは SQLite（better-sqlite3）をバックエンドに持ちます。PostgreSQL+pgvector を使う従来の Docker Compose 構成もオプションとして利用可能です。
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,7 @@ flowchart LR
     end
     subgraph Compose
         app[app<br/>Next.js 16 + Bun]
-        db[(db<br/>pgvector pg16)]
+        db[(db<br/>SQLite better-sqlite3)]
         embedder[embedder<br/>Python sentence-transformers]
         scraper[scraper<br/>Scrapling FastAPI]
         searxng[searxng<br/>メタ検索]
@@ -60,16 +60,14 @@ flowchart LR
 | サービス   | イメージ / ビルド        | 役割                                            | ポート         |
 |------------|--------------------------|-------------------------------------------------|----------------|
 | `app`      | `Dockerfile` からビルド  | Next.js アプリ（チャット UI・API・設定）         | `3001 → 3000`  |
-| `db`       | `pgvector/pgvector:pg16` | pgvector 拡張入り PostgreSQL 16                  | `5432`         |
+| `db`       | `better-sqlite3`（SQLite）  | SQLite データベース（デフォルト）。Docker 構成では `pgvector/pgvector:pg16` | `5432`（Docker 時） |
 | `embedder` | `./embedder` からビルド  | Python `sentence-transformers` HTTP embedder    | `8000`（公開） |
 | `scraper`  | `./scraper` からビルド   | Scrapling FastAPI スクレイパー + SearXNG クライアント | `8000`（公開） |
 | `searxng`  | `searxng/searxng:latest` | SearXNG メタ検索エンジン                         | `8081 → 8080`  |
 | `tor`      | `dperson/torproxy:latest`| 匿名スクレイピング用 Tor SOCKS プロキシ          | `9050`（公開） |
 
-## 必要環境
-
-- **Node.js / Bun** — Bun が主なランタイム兼パッケージマネージャ
-- **Docker**（Docker Compose 含む） — DB、スクレイパー、embedder、検索、Tor の各サービス用
+- **Node.js / Bun** — Bun が主なランタイム兼パッケージマネージャ（ローカル開発・ビルド用）
+- **Docker**（Docker Compose 含む） — 任意。スクレイパー、embedder、検索、Tor などのオプションサービスを利用する場合、または PostgreSQL+pgvector 構成を使う場合に必要。スタンドアロン Windows exe は追加インストール不要
 - **OpenAI 互換 LLM の API キー** — UmansAI、OpenAI、vLLM、Ollama など
 
 ## クイックスタート（Docker）
@@ -101,6 +99,36 @@ docker compose up -d
 
 初回起動時、データベースのマイグレーションはアプリが自動的に適用されます。また、初回は管理者アカウントの作成（ニックネーム + メールアドレス + パスワード）を求められます。以降のアクセスにはログインが必要です。ユーザー毎にスレッド・フォルダ・記憶は分離されます。初期セットアップ後に埋め込みモデルを変更する場合は [データベースマイグレーション](#データベースマイグレーション) を参照してください。
 
+## クイックスタート（スタンドアロン Windows exe）
+
+Docker を使わずに配布・実行するもう一つの方法です。Docker や Node.js、Bun をユーザー環境に用意する必要はありません。ビルド環境でのみ Bun が必要です。
+
+```bash
+# 1. 依存パッケージをインストール（ビルド環境）
+bun install
+
+# 2. 環境設定テンプレートをコピーして設定
+cp .env.example .env
+#    .env を編集し LLM_API_KEY を入力
+#    AUTH_SECRET を生成: bunx auth secret
+
+# 3. 配布フォルダをビルド
+bun run build
+bun scripts/pack-exe.ts
+#    dist/UmansChat/ に umanschat.exe と必要ファイル一式が出力されます
+```
+
+`dist/UmansChat/` フォルダをユーザーの Windows マシンにそのまま配布できます。`umanschat.exe` をダブルクリックすると：
+
+1. 同梱の SQLite データベース（`data/umanschat.db`）を初回起動時に作成し、マイグレーションを適用
+2. サーバーを起動し、ブラウザで `http://localhost:3001` を自動で開く
+3. 初回は管理者アカウントの作成を求められます
+
+**埋め込みモデルの初回ダウンロード**: スタンドアロン exe はデフォルトでローカル ONNX 埋め込み（`Xenova/all-MiniLM-L6-v2`）を使います。初回の埋め込み生成時に Hugging Face からモデルがダウンロードされるため、インターネット接続が必要です。モデルのダウンロードが完了すれば、以降のチャットはオフラインで動作します。
+
+**オプションサービスの縮退**: スタンドアロン exe にはスクレイパー、SearXNG、Tor、Python embedder は同梱されません。これらの機能を使わずにチャットは正常に動作しますが、Web 検索・スクレイピングは空の結果を返します（エラーにはなりません）。スクレイピング/検索を利用したい場合は別途 Docker で該当サービスを起動し、`.env` の `SCRAPER_URL`・`SEARXNG_URL` を公開ポートに向けてください。
+
+
 ## Cloudflare Tunnel によるパブリックアクセス（任意）
 
 ポート開放やパブリック IP なしで HTTPS 経由でアプリを公開するには、Cloudflare 名前付きトンネルを使います。リモートネットワークから Google OAuth を利用する場合に推奨します。
@@ -129,29 +157,28 @@ Next.js アプリ本体を開発する場合の手順です。
 # 1. 依存パッケージをインストール
 bun install
 
-# 2. データベース（必要に応じて他サービスも）を Docker で起動
-docker compose up -d db
+# 2. データベースを準備（SQLite は組み込み。初回起動時に data/umanschat.db が自動作成される）
+#    スクレイピング/検索などのオプションサービスを使う場合は別途 Docker で起動（後述）
 
 # 3. 環境設定テンプレートをコピーして設定
 cp .env.example .env
-#    DATABASE_URL、LLM_API_KEY、および（スクレイピング/検索を使う場合）
-#    各サービスの URL を設定
+#    LLM_API_KEY を設定。スクレイピング/検索を使う場合は各サービス URL も設定
 
-# 4. DBマイグレーションを適用（pgvector拡張 + スキーマ作成）
-bunx drizzle-kit migrate
-
-# 5. 開発サーバーを起動
+# 4. 開発サーバーを起動（predev フックが自動でマイグレーションを実行）
 bun run dev
 #    http://localhost:3000
 ```
 
-ローカル開発中にスクレイピング/検索が必要な場合は、DB とあわせて scraper / embedder / searxng / tor を起動できます。
+ローカル開発では Docker で DB コンテナを起動する必要はありません。SQLite ファイル（`data/umanschat.db`）が `bun run dev` の初回起動時に自動作成され、`predev` フックが `drizzle-kit migrate` でテーブルを作成します。
+
+ローカル開発中にスクレイピング/検索が必要な場合は、scraper / embedder / searxng / tor を Docker で起動できます。
 
 ```bash
-docker compose up -d db scraper embedder searxng tor
+docker compose up -d scraper embedder searxng tor
 ```
 
 Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCRAPER_URL`・`SEARXNG_URL`・`EMBEDDER_URL`（HTTP 埋め込みを使う場合）を、ホストに公開されたポートに向けてください。
+
 
 ## 設定
 
@@ -164,9 +191,9 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `LLM_MODEL`             | デフォルトモデル                                                  | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | モデルセレクタ用のカンマ区切りモデル一覧（OAI互換モード用。Umansモードでは無視） | —                                                    |
 | `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
-| `EMBED_MODEL`           | 埋め込みモデル名                                                  | `LiquidAI/LFM2.5-Embedding-350M`                     |
-| `EMBED_DIM`             | 埋め込み次元数                                                    | `1024`                                               |
-| `EMBED_PROVIDER`        | 埋め込みバックエンド: `local`（ONNX）または `http`（Python embedder） | `http`                                    |
+| `EMBED_MODEL`           | 埋め込みモデル名（`local` プロバイダでは `Xenova/*` モデルを使用） | `Xenova/all-MiniLM-L6-v2`                           |
+| `EMBED_DIM`             | 埋め込み次元数                                                    | `384`                                               |
+| `EMBED_PROVIDER`        | 埋め込みバックエンド: `local`（ONNX）または `http`（Python embedder） | `local`                                  |
 | `EMBEDDER_URL`          | Python embedder の URL（`EMBED_PROVIDER=http` 時に必要。Docker は自動設定） | `http://localhost:8001`                   |
 | `WEB_SEARCH_MAX_RESULTS`| チャット送信時に取得・スクレイピングする件数                       | `3`                                                  |
 | `WEB_SEARCH_MAX_ROUNDS` | 1回の回答で検索を繰り返す最大回数（1-5）。検索判定 LLM が決定したクエリのうち実行する数を制限 | `2`                                                  |
@@ -175,7 +202,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |
 | `SCRAPE_PROXY`          | Scraper がスクレイピング時に使用するプロキシ                       | —                                                    |
 | `WEB_SEARCH_MODEL`    | 検索クエリ生成と結果要約に使うモデル                              | `umans-coder`                                        |
-| `DATABASE_URL`          | PostgreSQL 接続 URL（ローカル `bun run dev` 時に使用）            | `postgres://umans:umans@localhost:5432/umanschat`    |
+| `DATABASE_URL`          | SQLite データベースファイルのパス（Docker/Postgres 構成時は PostgreSQL 接続 URL） | `data/umanschat.db`                                  |
 | `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
 | `AUTH_SECRET`           | Auth.js JWT 暗号化シークレット（必須。`bunx auth secret` で生成） | —                                                  |
 | `AUTH_TRUST_HOST`       | リバースプロキシ背後でホストヘッダーを信頼（Docker 用）            | `true`                                               |
@@ -203,7 +230,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 - **枝分かれ** — 任意のメッセージで「再生成」または「編集」を行うと兄弟ブランチが作成されます。`< 1/N >` で兄弟間を移動できます。
 - **デュアルモデルモード** — スレッド設定で「応答モード」を「デュアルモデル」に切り替え、モデルA/Bと「相互レビュー」または「会話方式」を選びます。チャットには統合された最終回答が先に表示され、A/B回答・レビュー・議論ログは「デュアルモデル詳細」の折りたたみで確認できます。1メッセージあたり複数回LLMを呼ぶため、通常モードよりコストと待ち時間が増えます。
 - **添付ファイル** — 画像（ビジョン対応モデルに送信）、PDF（テキスト抽出）、テキスト/コードファイル（各 10MB まで）を添付できます。
-- **セマンティック検索** — 全スレッドを横断して検索し、pgvector のコサイン類似度で順位付けします。
+- **セマンティック検索** — 全スレッドを横断して検索し、コサイン類似度で順位付けします。
 - **Web スクレイピング** — Web 検索が有効な場合、結果がスクレイプされ、現在の回答の RAG ソースとして取り込まれます。
 - **Tor** — 設定で Tor を切り替え、匿名スクレイピングを有効にできます。
 - **設定** — 設定パネルを開き、LLM プロバイダ/モデル、Thinking Effort、埋め込みモデル、Web 検索件数、Tor オプションを変更できます。変更は `.env` に書き込まれ、埋め込みモデルの変更（マイグレーションが必要）以外は即座に反映されます。
@@ -211,11 +238,11 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 
 ## データベースマイグレーション
 
-UmansChat は Drizzle ORM と pgvector を使用します。Docker 環境では初回起動時にマイグレーションが自動実行されます — アプリコンテナがサーバー起動前に `drizzle-kit migrate` を実行し、pgvector 拡張と全テーブルを作成します。
+UmansChat は Drizzle ORM を使用し、デフォルトで SQLite（better-sqlite3）をバックエンドにします。初回起動時に `drizzle-kit migrate` がテーブルを作成します — `bun run dev` の `predev` フック、Docker コンテナの起動エントリ、スタンドアロン exe のランチャーのいずれかが実行します。pgvector 拡張や HNSW インデックスは不要です。
 
-Docker を使わないローカル開発では、`bunx drizzle-kit migrate` で手動適用してください（[クイックスタート（ローカル開発）](#クイックスタートローカル開発) を参照）。
+Docker を使わないローカル開発では、`predev` フックが自動的に `drizzle-kit migrate` を実行するため手動適用は不要です（[クイックスタート（ローカル開発）](#クイックスタートローカル開発) を参照）。
 
-埋め込みモデルを切り替えた場合（`EMBED_MODEL` / `EMBED_DIM` を変更）、既存の `embeddings` および `page_embeddings` のベクトル列を新しい次元数で再作成する必要があります。設定 GUI のマイグレーション機能（`applyMigration`）を使ってベクトル列を削除・再作成した上で、コンテンツを再埋め込みしてください。
+埋め込みモデルを切り替えた場合（`EMBED_MODEL` / `EMBED_DIM` を変更）、既存の埋め込みデータは新しいベクトル空間と互換性がなくなります。設定 GUI のマイグレーション機能（`applyMigration`）は `memories` および `page_embeddings` テーブルの埋め込みデータをクリアします（DDL 不要 — SQLite では埋め込みは JSON text 列として保存されるため、次元数に依存しません）。クリア後、コンテンツを再埋め込みしてください。
 
 ## テスト
 

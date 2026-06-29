@@ -10,7 +10,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Rapid mode** — a per-message ⚡ toggle in the composer that skips web search, URL scraping, and memory/skill RAG (both pre-LLM retrieval and post-stream generation) for lower first-token latency; MCP/connections tools and dual-model flow stay active. Stays on across messages and threads until you click ⚡ again.
 - **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
-- **Semantic search** across all threads (pgvector cosine similarity)
+- **Semantic search** across all threads (cosine similarity)
 - **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context; view, search, edit, delete, and manually add memories from the sidebar 🧠 Memory Manager
 - **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers; URLs pasted in chat are scraped automatically and injected as context
 - **Web search** — app-level SearXNG pipeline with a dedicated search model for query generation and result summarization; triggers on volatile info, explicit requests, and unfamiliar terms/proper nouns; configurable in settings
@@ -34,7 +34,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 
 ## Architecture
 
-UmansChat is a Next.js 16 + React 19 app backed by PostgreSQL 16 with pgvector, orchestrated by Docker Compose across five services:
+UmansChat is a Next.js 16 + React 19 app backed by SQLite (better-sqlite3) by default — a file-based, embedded database with no separate server. PostgreSQL 16 with pgvector remains available as an optional Docker path. The Docker Compose setup below orchestrates the app alongside optional services:
 
 ```mermaid
 flowchart LR
@@ -43,14 +43,14 @@ flowchart LR
     end
     subgraph Compose
         app[app<br/>Next.js 16 + Bun]
-        db[(db<br/>pgvector pg16)]
+        db[(db<br/>SQLite file · or Postgres+pgvector via Docker)]
         embedder[embedder<br/>Python sentence-transformers]
         scraper[scraper<br/>Scrapling FastAPI]
         searxng[searxng<br/>meta search]
         tor[tor<br/>dperson/torproxy]
     end
     Browser --> app
-    app --> db
+    app -->|SQLite (default) · Postgres (Docker)| db
     app --> embedder
     app --> scraper
     scraper --> searxng
@@ -60,7 +60,7 @@ flowchart LR
 | Service    | Image / Build        | Role                                            | Port           |
 |------------|----------------------|-------------------------------------------------|----------------|
 | `app`      | Built from `Dockerfile` | Next.js app (chat UI, API, settings)         | `3001 → 3000`  |
-| `db`       | `pgvector/pgvector:pg16` | PostgreSQL 16 with vector extensions        | `5432`         |
+| `db` *(optional)* | `pgvector/pgvector:pg16` | PostgreSQL 16 + pgvector (optional; SQLite is the default file-based DB) | `5432`         |
 | `embedder` | Built from `./embedder` | Python `sentence-transformers` HTTP embedder | `8000` (exposed) |
 | `scraper`  | Built from `./scraper`  | Scrapling FastAPI scraper + SearXNG client    | `8000` (exposed) |
 | `searxng`  | `searxng/searxng:latest` | SearXNG meta-search engine                    | `8081 → 8080`  |
@@ -69,7 +69,7 @@ flowchart LR
 ## Requirements
 
 - **Node.js / Bun** — Bun is the primary runtime and package manager
-- **Docker** (with Docker Compose) — for the database, scraper, embedder, search, and Tor services
+- **Docker** (with Docker Compose) — optional; only needed for the optional PostgreSQL database, scraper, embedder, SearXNG search, and Tor services. The standalone exe and local-dev SQLite path need nothing extra.
 - An **OpenAI-compatible LLM API key** (UmansAI, OpenAI, vLLM, Ollama, etc.)
 
 ## Quick Start (Docker)
@@ -100,6 +100,24 @@ docker compose up -d
 
 On first run, database migrations are applied automatically by the app, and you'll be prompted to create the first admin account (nickname + email + password). Subsequent visits require login. Each user's threads, folders, and memories are isolated. If you change the embedding model after initial setup, see [Database Migrations](#database-migrations).
 
+## Quick Start (Standalone Windows exe)
+
+A no-Docker, double-clickable Windows experience. The resulting `dist/UmansChat/umanschat.exe` bundles the standalone server, a SQLite database file, the ONNX runtime, and a launcher — no Docker, Node, or Bun install required on the target machine.
+
+```bash
+# 1. Build the standalone server and assemble the distributable folder
+bun run build
+bun scripts/pack-exe.ts
+
+# 2. Run the app
+#    Double-click dist/UmansChat/umanschat.exe
+#    (or run: node dist/UmansChat/umanschat.cjs)
+```
+
+On first launch the launcher creates `data/umanschat.db`, applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
+
+> **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected.
+
 ## Public Access via Cloudflare Tunnel (Optional)
 
 To expose the app over public HTTPS without port forwarding or a public IP, use a Cloudflare named tunnel. This is the recommended way to use Google OAuth from a remote network.
@@ -128,14 +146,14 @@ For development of the Next.js app itself.
 # 1. Install dependencies
 bun install
 
-# 2. Start the database (and optionally other services) via Docker
-docker compose up -d db
+# 2. Database is file-based SQLite — no Docker db needed.
+#    data/umanschat.db is created automatically on first run.
 
 # 3. Copy the environment template and configure
 cp .env.example .env
 #    Set DATABASE_URL, LLM_API_KEY, and (for scraping/search) the service URLs
 
-# 4. Apply database migrations (pgvector extension + schema)
+# 4. Apply database migrations (creates tables on first run)
 bunx drizzle-kit migrate
 
 # 5. Run the dev server
@@ -143,10 +161,10 @@ bun run dev
 #    http://localhost:3000
 ```
 
-The scraper, embedder, searxng, and tor services can be started alongside the database when you need scraping/search during local development:
+The scraper, embedder, searxng, and tor services are optional Docker containers you can start when you need scraping/search during local development:
 
 ```bash
-docker compose up -d db scraper embedder searxng tor
+docker compose up -d scraper embedder searxng tor
 ```
 
 Point `SCRAPER_URL`, `SEARXNG_URL`, and (for HTTP embeddings) `EMBEDDER_URL` in `.env` to the host-exposed ports when running the app outside Compose.
@@ -162,9 +180,9 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
-| `EMBED_MODEL`           | Embedding model name                                               | `LiquidAI/LFM2.5-Embedding-350M`                     |
-| `EMBED_DIM`             | Embedding dimension                                                | `1024`                                               |
-| `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `http`                                               |
+| `EMBED_MODEL`           | Embedding model name (`Xenova/*` ONNX model for `local` provider)  | `Xenova/all-MiniLM-L6-v2`                            |
+| `EMBED_DIM`             | Embedding dimension (must match `EMBED_MODEL`)                     | `384`                                                |
+| `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `local`                                              |
 | `EMBEDDER_URL`          | Python embedder URL (required when `EMBED_PROVIDER=http`; Docker sets automatically) | `http://localhost:8001`     |
 | `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
 | `WEB_SEARCH_MAX_ROUNDS` | Maximum search rounds per response (1-5); caps how many of the search-decision LLM's queries are executed | `2`                                                  |
@@ -173,7 +191,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |
 | `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
 | `WEB_SEARCH_MODEL`     | Model for search query generation and result summarization        | `umans-coder`                                        |
-| `DATABASE_URL`          | PostgreSQL connection URL (used for local `bun run dev`)           | `postgres://umans:umans@localhost:5432/umanschat`    |
+| `DATABASE_URL`          | SQLite database file path (Postgres URL only for the optional Docker path) | `data/umanschat.db`                          |
 | `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
@@ -224,7 +242,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
 - **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
 - **Attachments** — attach images (sent to vision-capable models), PDFs (text extracted), or text/code files (up to 10MB each).
-- **Semantic search** — search across all threads; results are ranked by pgvector cosine similarity.
+- **Semantic search** — search across all threads; results are ranked by cosine similarity.
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
 - **Tor** — toggle Tor in settings for anonymous scraping.
 - **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
@@ -232,11 +250,11 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 
 ## Database Migrations
 
-UmansChat uses Drizzle ORM with pgvector. In the Docker setup, migrations run automatically on first startup — the app container runs `drizzle-kit migrate` before starting the server, which creates the pgvector extension and all tables.
+UmansChat uses Drizzle ORM with SQLite (better-sqlite3). In the Docker setup, migrations run automatically on first startup — the app container runs `drizzle-kit migrate` before starting the server, which creates all tables. In standalone mode, the launcher runs migrations on first launch.
 
 For local development outside Docker, apply migrations manually with `bunx drizzle-kit migrate` (see [Quick Start (Local Dev)](#quick-start-local-dev)).
 
-When you switch the embedding model (changing `EMBED_MODEL` / `EMBED_DIM`), the existing `embeddings` and `page_embeddings` vector columns must be recreated with the new dimension. Use the Settings GUI's migration action (`applyMigration`) to drop and recreate the vector columns, then re-embed your content.
+When you switch the embedding model (changing `EMBED_MODEL` / `EMBED_DIM`), the Settings GUI's migration action (`applyMigration`) clears the existing `memories` and `page_embeddings` data so they can be re-embedded with the new model. No DDL is needed — embeddings are stored as JSON text, so the column type does not depend on the dimension. Re-embed your content after the migration.
 
 ## Testing
 

@@ -27,7 +27,7 @@ import { embedText, hashContent } from "@/lib/embed";
 import { findRelevantMemories } from "@/lib/memoryStore";
 
 // findRelevantMemories の統合テスト。実 DB に記憶を INSERT し、
-// pgvector 検索 → similarity + recency top-5 が返ることを検証。
+// アプリ側 cosine 検索 → similarity + recency top-5 が返ることを検証。
 
 const createdThreadIds: string[] = [];
 const createdFolderIds: string[] = [];

@@ -1,110 +1,12 @@
 {
   "version": "7",
-  "dialect": "postgresql",
+  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
-      "version": "7",
-      "when": 1781703445526,
-      "tag": "0000_colossal_moondragon",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1781710888084,
-      "tag": "0001_clumsy_vance_astro",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1781746893978,
-      "tag": "0002_abandoned_nocturne",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1781766016914,
-      "tag": "0003_curved_namora",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1781990000000,
-      "tag": "0004_dual_model_trace",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1781970925593,
-      "tag": "0005_memories",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1782050000000,
-      "tag": "0006_default_model",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1782100000000,
-      "tag": "0007_fix_page_embeddings_dim",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1782312714408,
-      "tag": "0008_messy_sabretooth",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1782354644278,
-      "tag": "0009_freezing_bulldozer",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1782359856504,
-      "tag": "0010_majestic_roland_deschain",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1782365772094,
-      "tag": "0011_jazzy_wong",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1782370000000,
-      "tag": "0012_global_system_instruction",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1782375000000,
-      "tag": "0013_named_global_instructions",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1782380000000,
-      "tag": "0014_google_oauth_users",
+      "version": "6",
+      "when": 1782739785592,
+      "tag": "0000_dusty_invaders",
       "breakpoints": true
     }
   ]

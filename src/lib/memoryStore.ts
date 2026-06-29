@@ -1,11 +1,13 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { folders } from "@/db/schema";
+import { memories, folders } from "@/db/schema";
 import { embedText } from "@/lib/embed";
+import { cosineSimilarity } from "@/lib/vectorSearch";
 import type { MemoryKind } from "@/lib/memory";
 
 /**
- * 記憶検索 — 次回送信時に pgvector で関連記憶を検索し、similarity + recency で top-5 を返す。
+ * 記憶検索 — 次回送信時にアプリ側 cosine 検索で関連記憶を検索し、
+ * similarity + recency で top-5 を返す。
  *
  * スコープ:
  * - folderId のフォルダが memoryScope="folder" → 同一 folderId のみ検索
@@ -25,9 +27,10 @@ export type ScoredMemory = {
  * クエリ文字列 + スコープから関連記憶を検索。
  *
  * 1. embedText(query, "query") でクエリベクトル化
- * 2. pgvector で suppressed_at IS NULL、スコープフィルタで top-30 取得
- * 3. similarity > 0.3 でフィルタ
- * 4. recencyScore 降順で top-5 を返す
+ * 2. suppressed_at IS NULL、スコープフィルタで候補行を取得
+ * 3. アプリ側 cosine similarity で類似度計算
+ * 4. similarity > 0.3 でフィルタ
+ * 5. recencyScore 降順で top-5 を返す
  *
  * @param query ユーザー入力
  * @param folderId 現在のスレッドの folderId（null 可）
@@ -40,7 +43,7 @@ export async function findRelevantMemories(
   if (queryVector.length === 0) return [];
 
   // スコープ判定: folderId のフォルダが memoryScope="folder" なら同フォルダのみ
-  let scopeFolder: boolean = false;
+  let scopeFolder = false;
   let targetFolderId: string | null = null;
   if (folderId) {
     const [folder] = await db
@@ -53,47 +56,59 @@ export async function findRelevantMemories(
     }
   }
 
-  const vecLiteral = JSON.stringify(queryVector);
-  const scopeCondition = scopeFolder
-    ? sql`AND m.folder_id = ${targetFolderId}`
-    : sql``;
+  // 候補行を取得（suppressed_at IS NULL + スコープフィルタ）
+  const conditions = [isNull(memories.suppressedAt)];
+  if (scopeFolder && targetFolderId) {
+    conditions.push(eq(memories.folderId, targetFolderId));
+  }
 
-  // pgvector 検索 + recency スコアを1クエリで取得
-  const rawResults = await db.execute(sql`
-    SELECT m.id, m.thread_id, m.kind, m.content,
-           1 - (m.embedding <=> ${vecLiteral}::vector) as similarity,
-           m.importance * 0.6 + EXP(-EXTRACT(EPOCH FROM (now() - m.updated_at)) / 86400 / 14) * 0.4 as recency_score
-    FROM memories m
-    WHERE m.suppressed_at IS NULL
-      ${scopeCondition}
-    ORDER BY m.embedding <=> ${vecLiteral}::vector
-    LIMIT 30
-  `);
+  const rows = await db
+    .select({
+      id: memories.id,
+      threadId: memories.threadId,
+      kind: memories.kind,
+      content: memories.content,
+      embedding: memories.embedding,
+      importance: memories.importance,
+      updatedAt: memories.updatedAt,
+    })
+    .from(memories)
+    .where(and(...conditions));
 
-  const rows = (rawResults as { rows?: Array<{
-    id: string;
-    thread_id: string;
-    kind: MemoryKind;
-    content: string;
-    similarity: number;
-    recency_score: number;
-  }> }).rows ?? [];
+  if (rows.length === 0) return [];
 
-  const filtered = rows.filter((r) => r.similarity > 0.3);
-  if (filtered.length === 0) return [];
+  // アプリ側 cosine similarity 計算 + recency スコア
+  const scored = rows
+    .map((r) => {
+      const sim = cosineSimilarity(queryVector, r.embedding);
+      // recency: EXP(-経過日数 / 14) — 14日で e^-1 ≈ 0.37 に減衰
+      const ageDays = (Date.now() - new Date(r.updatedAt).getTime()) / 86_400_000;
+      const recency = Math.exp(-ageDays / 14);
+      const recencyScore = r.importance * 0.6 + recency * 0.4;
+      return {
+        id: r.id,
+        threadId: r.threadId,
+        kind: r.kind as MemoryKind,
+        content: r.content,
+        similarity: sim,
+        recencyScore,
+      };
+    })
+    .filter((r) => r.similarity > 0.3);
 
-  // recencyScore 降順で top-5
-  return filtered
-    .map((r) => ({
-      id: r.id,
-      threadId: r.thread_id,
-      kind: r.kind,
-      content: r.content,
-      similarity: Number(r.similarity.toFixed(3)),
-      recencyScore: Number(Number(r.recency_score).toFixed(3)),
-    }))
+  if (scored.length === 0) return [];
+
+  // similarity 降順で top-30 → recencyScore 降順で top-5
+  return scored
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 30)
     .sort((a, b) => b.recencyScore - a.recencyScore)
-    .slice(0, 5);
+    .slice(0, 5)
+    .map((r) => ({
+      ...r,
+      similarity: Number(r.similarity.toFixed(3)),
+      recencyScore: Number(r.recencyScore.toFixed(3)),
+    }));
 }
 
 /**

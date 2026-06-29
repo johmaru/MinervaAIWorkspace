@@ -1,14 +1,15 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, like, and } from "drizzle-orm";
 import { db } from "@/db";
 import { skills } from "@/db/schema";
 import { embedText } from "@/lib/embed";
+import { cosineSimilarity } from "@/lib/vectorSearch";
 
 /**
  * スキル検索・注入 — ユーザー単位の再利用可能プロンプト。
  *
  * memories がスレッド単位の時限的文脈断片であるのに対し、
  * skills はユーザー横断の恒久的な persona / behavior / knowledge。
- * pgvector で関連スキルを検索し system message として注入する。
+ * アプリ側 cosine 検索で関連スキルを検索し system message として注入する。
  * ユーザーが「〇〇スキルを使って」と指定すれば名前で直接適用。
  */
 
@@ -19,70 +20,14 @@ export type ScoredSkill = {
   similarity: number;
 };
 
-type SkillRow = {
-  id: string;
-  name: string;
-  content: string;
-  similarity: number;
-};
-
-type NamedSkillRow = {
-  id: string;
-  name: string;
-  content: string;
-};
-
-/**
- * db.execute の結果（Db 型が PgQueryResultHKT を使うため unknown になる）から
- * SkillRow 配列を型安全に抽出する。
- * pg の QueryResult は { rows: unknown[] } 形状を持ち、各行を narrows する。
- */
-function isSkillRow(v: unknown): v is SkillRow {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    "id" in v &&
-    "name" in v &&
-    "content" in v &&
-    "similarity" in v
-  );
-}
-
-function extractSkillRows(result: unknown): SkillRow[] {
-  if (typeof result !== "object" || result === null) return [];
-  if (!("rows" in result) || !Array.isArray(result.rows)) return [];
-  return result.rows.filter(isSkillRow);
-}
-
-function isNamedSkillRow(v: unknown): v is NamedSkillRow {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    "id" in v &&
-    "name" in v &&
-    "content" in v
-  );
-}
-
-function extractNamedSkillRows(result: unknown): NamedSkillRow[] {
-  if (typeof result !== "object" || result === null) return [];
-  if (!("rows" in result) || !Array.isArray(result.rows)) return [];
-  return result.rows.filter(isNamedSkillRow);
-}
-
 /**
  * クエリ文字列 + ユーザーID から関連スキルを検索。
  *
  * 1. embedText(query, "query") でクエリベクトル化
- * 2. pgvector で user_id スコープ、top-5 取得
- * 3. similarity > 0.3 でフィルタ
- *
- * skills は永続的（recency 減衰なし）、ユーザー横断（folder スコープなし）。
- * memories と比べてシンプル — similarity のみでソート。
- *
- * @param query ユーザー入力
- * @param userId スキル所有者
- * @param limit 取得上限（省略時 5）
+ * 2. ユーザーの全スキルを取得
+ * 3. アプリ側 cosine similarity で類似度計算
+ * 4. similarity > 0.3 でフィルタ
+ * 5. similarity 降順で top-limit を返す
  */
 export async function findRelevantSkills(
   query: string,
@@ -92,24 +37,30 @@ export async function findRelevantSkills(
   const queryVector = await embedText(query, "query");
   if (queryVector.length === 0) return [];
 
-  const vecLiteral = JSON.stringify(queryVector);
+  const rows = await db
+    .select({
+      id: skills.id,
+      name: skills.name,
+      content: skills.content,
+      embedding: skills.embedding,
+    })
+    .from(skills)
+    .where(eq(skills.userId, userId));
 
-  const rawResults = await db.execute(sql`
-    SELECT id, name, content,
-           1 - (embedding <=> ${vecLiteral}::vector) AS similarity
-    FROM skills
-    WHERE user_id = ${userId}
-    ORDER BY embedding <=> ${vecLiteral}::vector
-    LIMIT ${limit}
-  `);
+  if (rows.length === 0) return [];
 
-  const rows = extractSkillRows(rawResults);
   return rows
-    .filter((r) => r.similarity > 0.3)
     .map((r) => ({
       id: r.id,
       name: r.name,
       content: r.content,
+      similarity: cosineSimilarity(queryVector, r.embedding),
+    }))
+    .filter((r) => r.similarity > 0.3)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, limit)
+    .map((r) => ({
+      ...r,
       similarity: Number(r.similarity.toFixed(3)),
     }));
 }
@@ -140,16 +91,13 @@ export async function buildSkillContext({
   if (nameMatch) {
     const name = nameMatch[1].trim();
     if (name) {
-      // 名前で部分一致検索（ILIKE）。drizzle に ILIKE ヘルパーがないため
-      // raw SQL で name ILIKE '%keyword%' を実行。
+      // 名前で部分一致検索。SQLite の LIKE はデフォルトで大文字小文字を区別しない。
       const pattern = `%${name.replace(/[%_]/g, "\\$&")}%`;
-      const rawNamed = await db.execute(sql`
-        SELECT id, name, content FROM skills
-        WHERE user_id = ${userId} AND name ILIKE ${pattern}
-        LIMIT 1
-      `);
-      const namedRows = extractNamedSkillRows(rawNamed);
-      const found = namedRows[0];
+      const [found] = await db
+        .select({ id: skills.id, name: skills.name, content: skills.content })
+        .from(skills)
+        .where(and(eq(skills.userId, userId), like(skills.name, pattern)))
+        .limit(1);
       if (found) {
         namedSkill = {
           id: found.id,
