@@ -2,6 +2,7 @@
   "name": "umanschat",
   "private": true,
   "scripts": {
+    "predev": "bun run scripts/sync-env.ts && bunx drizzle-kit migrate",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

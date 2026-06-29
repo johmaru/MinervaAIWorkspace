@@ -27,6 +27,8 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/scripts ./scripts
+COPY --from=build /app/.env.example ./.env.example
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 EXPOSE 3000
 RUN chmod +x /app/docker-entrypoint.sh
