@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 
 export type SearchResult = {
   memoryId: string;
@@ -50,7 +51,7 @@ export function SearchBar({ onSelectThread }: Props) {
     setIsSearching(true);
     setShowResults(true);
     try {
-      const res = await fetch("/api/search", {
+      const res = await clientFetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q.trim() }),

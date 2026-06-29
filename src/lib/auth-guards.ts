@@ -1,4 +1,7 @@
 import { auth } from "@/auth";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export type SessionUser = {
   id: string;
@@ -15,9 +18,19 @@ export type SessionUser = {
  *
  * null を返す（throw しない）ことで、各ハンドラがレスポンス形状を制御できる。
  * auth() はリクエスト Cookie から JWT を読み取る。
+ *
+ * DB 再作成等で JWT の userId が users テーブルに存在しない場合、
+ * セッションを無効化し null を返す（各ルートが 401 → クライアントは /login へ遷移）。
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await auth();
   if (!session?.user?.id) return null;
+  const userId = session.user.id;
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row) return null;
   return session.user as SessionUser;
 }

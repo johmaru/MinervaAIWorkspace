@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 
 
@@ -99,7 +100,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
 
   const fetchTorStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/tor");
+      const res = await clientFetch("/api/tor");
       if (!res.ok) return;
       const data = (await res.json()) as {
         running: boolean;
@@ -114,7 +115,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings");
+      const res = await clientFetch("/api/settings");
       if (!res.ok) throw new Error(t("settings.fetchFailed"));
       const data = (await res.json()) as SettingsResponse;
       setSettings(data);
@@ -126,7 +127,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
 
   const fetchConnections = useCallback(async () => {
     try {
-      const res = await fetch("/api/connections");
+      const res = await clientFetch("/api/connections");
       if (!res.ok) return;
       setConnections(await res.json());
     } catch {
@@ -136,7 +137,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
 
   const fetchInstructions = useCallback(async () => {
     try {
-      const res = await fetch("/api/global-instructions");
+      const res = await clientFetch("/api/global-instructions");
       if (!res.ok) return;
       setInstructions(await res.json());
     } catch {
@@ -145,7 +146,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   }, []);
 
   const handleDisconnect = useCallback(async (id: string) => {
-    await fetch("/api/connections", {
+    await clientFetch("/api/connections", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
@@ -182,7 +183,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await clientFetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -230,7 +231,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setTorBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/tor", {
+      const res = await clientFetch("/api/tor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: torRunning ? "stop" : "start" }),
@@ -296,14 +297,14 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setInstrSaving(true);
     try {
       if (editingInstrId) {
-        const res = await fetch(`/api/global-instructions/${editingInstrId}`, {
+        const res = await clientFetch(`/api/global-instructions/${editingInstrId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, content }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } else {
-        const res = await fetch("/api/global-instructions", {
+        const res = await clientFetch("/api/global-instructions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, content }),
@@ -337,7 +338,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const handleDeleteInstruction = useCallback(
     async (id: string) => {
       try {
-        const res = await fetch(`/api/global-instructions/${id}`, { method: "DELETE" });
+        const res = await clientFetch(`/api/global-instructions/${id}`, { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         // 削除された行が active だったら選択解除
         if (form.activeInstructionId === id) update("activeInstructionId", null);

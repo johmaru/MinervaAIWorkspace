@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { clientFetch } from "@/lib/clientFetch";
 import { useI18n } from "@/components/I18nProvider";
 
 export type ThreadSummary = {
@@ -31,7 +32,7 @@ export function useThreads() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/threads");
+      const res = await clientFetch("/api/threads");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as ThreadSummary[];
       setThreads(data);
@@ -51,7 +52,7 @@ export function useThreads() {
 
   const create = useCallback(async (): Promise<ThreadSummary | null> => {
     try {
-      const res = await fetch("/api/threads", {
+      const res = await clientFetch("/api/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -68,7 +69,7 @@ export function useThreads() {
 
   const rename = useCallback(async (id: string, title: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/threads?id=${encodeURIComponent(id)}`, {
+      const res = await clientFetch(`/api/threads?id=${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
@@ -85,7 +86,7 @@ export function useThreads() {
 
   const move = useCallback(async (id: string, folderId: string | null): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/threads?id=${encodeURIComponent(id)}`, {
+      const res = await clientFetch(`/api/threads?id=${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folderId }),
@@ -103,7 +104,7 @@ export function useThreads() {
 
   const remove = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/threads/${id}`, { method: "DELETE" });
+      const res = await clientFetch(`/api/threads/${id}`, { method: "DELETE" });
       if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`);
       setThreads((prev) => prev.filter((th) => th.id !== id));
       return true;

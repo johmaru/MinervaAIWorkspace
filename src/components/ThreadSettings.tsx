@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 import { AnimatePresence, motion } from "motion/react";
 
 type Thread = {
@@ -61,7 +62,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/models");
+        const res = await clientFetch("/api/models");
         if (!res.ok) return;
         const data = (await res.json()) as {
           models: string[];
@@ -84,7 +85,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/global-instructions");
+        const res = await clientFetch("/api/global-instructions");
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled && Array.isArray(data)) setInstructions(data);

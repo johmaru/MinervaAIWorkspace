@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SourceInfo } from "@/lib/scraper";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 
 export type ChatRole = "user" | "assistant" | "system";
 export type DualTrace = {
@@ -163,7 +164,7 @@ export function useChat(threadId: string | null) {
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/threads/${threadId}`);
+        const res = await clientFetch(`/api/threads/${threadId}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as {
           thread: Thread;
@@ -255,7 +256,7 @@ export function useChat(threadId: string | null) {
     abortRef.current = ac;
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await clientFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -505,7 +506,7 @@ export function useChat(threadId: string | null) {
     }) => {
       if (!threadId) return;
       try {
-        const res = await fetch(`/api/threads?id=${encodeURIComponent(threadId)}`, {
+        const res = await clientFetch(`/api/threads?id=${encodeURIComponent(threadId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
@@ -524,7 +525,7 @@ export function useChat(threadId: string | null) {
     async (file: File) => {
       try {
         const dataUrl = await fileToDataUrl(file);
-        const res = await fetch("/api/upload", {
+        const res = await clientFetch("/api/upload", {
           method: "POST",
           body: (() => {
             const formData = new FormData();

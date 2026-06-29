@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 
 type Props = {
   onScraped?: (title: string) => void;
@@ -26,7 +27,7 @@ export function UrlInput({ onScraped }: Props) {
       setStatus("loading");
       setMessage("");
       try {
-        const res = await fetch("/api/scrape", {
+        const res = await clientFetch("/api/scrape", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: trimmed }),

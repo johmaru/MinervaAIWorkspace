@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 
 type MemoryEntry = {
   id: string;
@@ -58,7 +59,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   const fetchMemories = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/memories");
+      const res = await clientFetch("/api/memories");
       if (!res.ok) {
         setError(t("memoryViewer.error"));
         return;
@@ -76,7 +77,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     void fetchMemories();
-    void fetch("/api/threads")
+    void clientFetch("/api/threads")
       .then((res) => res.json())
       .then((rows: ThreadRow[]) => {
         const active = rows[0];
@@ -106,7 +107,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     if (!editingId) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/memories/${editingId}`, {
+      const res = await clientFetch(`/api/memories/${editingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +133,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        const res = await fetch(`/api/memories/${id}`, { method: "DELETE" });
+        const res = await clientFetch(`/api/memories/${id}`, { method: "DELETE" });
         if (!res.ok) {
           setError(t("memoryViewer.error"));
           return;
@@ -150,7 +151,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     if (!addContent.trim() || !addThreadId) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/memories", {
+      const res = await clientFetch("/api/memories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -59,3 +59,4 @@ umanschat-dev.log
 # Debug scratch
 query_vec.json
 sim_test.sql
+package-lock.json

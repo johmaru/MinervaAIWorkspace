@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { clientFetch } from "@/lib/clientFetch";
 import { useI18n } from "@/components/I18nProvider";
 
 export type FolderSummary = {
@@ -43,7 +44,7 @@ export function useFolders() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/folders");
+      const res = await clientFetch("/api/folders");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as FolderSummary[];
       setFolders(data);
@@ -64,7 +65,7 @@ export function useFolders() {
   const create = useCallback(
     async (body?: CreateBody): Promise<FolderSummary | null> => {
       try {
-        const res = await fetch("/api/folders", {
+        const res = await clientFetch("/api/folders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
@@ -84,7 +85,7 @@ export function useFolders() {
   const update = useCallback(
     async (id: string, patch: PatchBody): Promise<boolean> => {
       try {
-        const res = await fetch(`/api/folders?id=${encodeURIComponent(id)}`, {
+        const res = await clientFetch(`/api/folders?id=${encodeURIComponent(id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
@@ -104,7 +105,7 @@ export function useFolders() {
   const remove = useCallback(
     async (id: string): Promise<boolean> => {
       try {
-        const res = await fetch(`/api/folders/${id}`, { method: "DELETE" });
+        const res = await clientFetch(`/api/folders/${id}`, { method: "DELETE" });
         if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`);
         setFolders((prev) => prev.filter((f) => f.id !== id));
         return true;

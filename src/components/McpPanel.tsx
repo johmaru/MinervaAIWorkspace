@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 
 type McpServer = {
   id: string;
@@ -32,7 +33,7 @@ export function McpPanel({ selectedIds, onChange }: Props) {
 
   const fetchServers = useCallback(async () => {
     try {
-      const res = await fetch("/api/mcp-servers");
+      const res = await clientFetch("/api/mcp-servers");
       if (!res.ok) return;
       const data = await res.json();
       setServers(Array.isArray(data) ? data : []);
@@ -59,7 +60,7 @@ export function McpPanel({ selectedIds, onChange }: Props) {
         body.command = formCommand.trim();
         body.args = formArgs.trim() ? formArgs.split(/\s+/) : [];
       }
-      const res = await fetch("/api/mcp-servers", {
+      const res = await clientFetch("/api/mcp-servers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -80,7 +81,7 @@ export function McpPanel({ selectedIds, onChange }: Props) {
 
   const handleDelete = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/mcp-servers/${id}`, { method: "DELETE" });
+      const res = await clientFetch(`/api/mcp-servers/${id}`, { method: "DELETE" });
       if (res.ok) {
         onChange(selectedIds.filter((sid) => sid !== id));
         await fetchServers();

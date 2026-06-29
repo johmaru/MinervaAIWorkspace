@@ -7,6 +7,7 @@ import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
 import { McpPanel } from "@/components/McpPanel";
 import { useI18n } from "@/components/I18nProvider";
+import { clientFetch } from "@/lib/clientFetch";
 import { MotionButton, Accordion } from "@/components/ui/motion";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -43,7 +44,7 @@ export const ChatWindow = memo(function ChatWindow({
   }, [thread?.id, thread?.mcpServerIds, thread?.connectionIds]);
 
   const fetchConnections = useCallback(async () => {
-    const res = await fetch("/api/connections");
+    const res = await clientFetch("/api/connections");
     if (res.ok) setConnectionsList(await res.json());
   }, []);
 
