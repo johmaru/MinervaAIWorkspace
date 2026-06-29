@@ -138,8 +138,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     session: async ({ session, token }) => {
-      if (token?.userId)
-        session.user = { ...session.user, id: token.userId as string };
+      if (token?.userId) {
+        // DB 再作成等で JWT の userId が users テーブルに存在しない場合、
+        // session.user.id を設定せず authorized が false を返すようにする。
+        // これにより /login へのリダイレクトが発生し、再ログインを促す。
+        const [row] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.id, token.userId as string))
+          .limit(1);
+        if (row) {
+          session.user = { ...session.user, id: token.userId as string };
+        }
+      }
       return session;
     },
   },
