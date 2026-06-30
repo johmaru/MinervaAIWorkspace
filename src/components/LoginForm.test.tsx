@@ -115,14 +115,25 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
 });
 
 describe("LoginForm — Google ログインボタン", () => {
-  it("ログインモードで Google ボタンが表示される", () => {
-    render(<LoginForm />);
+  it("ログインモード + googleEnabled で Google ボタンが表示される", () => {
+    render(<LoginForm googleEnabled={true} />);
     expect(screen.getByText("auth.googleSignIn")).toBeTruthy();
     expect(screen.getByText("auth.or")).toBeTruthy();
   });
 
-  it("登録モードでは Google ボタンが非表示", () => {
+  it("googleEnabled=false では Google ボタンが非表示", () => {
+    render(<LoginForm googleEnabled={false} />);
+    expect(screen.queryByText("auth.googleSignIn")).toBeNull();
+    expect(screen.queryByText("auth.or")).toBeNull();
+  });
+
+  it("googleEnabled 未指定（デフォルト false）では Google ボタンが非表示", () => {
     render(<LoginForm />);
+    expect(screen.queryByText("auth.googleSignIn")).toBeNull();
+  });
+
+  it("登録モードでは Google ボタンが非表示", () => {
+    render(<LoginForm googleEnabled={true} />);
     // 初期状態（login）では表示
     expect(screen.getByText("auth.googleSignIn")).toBeTruthy();
     // 登録モードに切替
@@ -131,7 +142,7 @@ describe("LoginForm — Google ログインボタン", () => {
   });
 
   it("Google ボタンクリックで signInWithGoogle が呼ばれる", () => {
-    render(<LoginForm />);
+    render(<LoginForm googleEnabled={true} />);
     fireEvent.click(screen.getByText("auth.googleSignIn"));
     expect(signInMock).toHaveBeenCalledTimes(1);
     expect(signInMock).toHaveBeenCalledWith();

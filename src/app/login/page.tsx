@@ -15,8 +15,15 @@ export default async function LoginPage() {
 
   const userCount = await db.$count(users);
   const firstRun = userCount === 0;
+  const googleEnabled = !!(
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+  );
 
   return (
-    <LoginForm initialMode={firstRun ? "register" : "login"} firstRun={firstRun} />
+    <LoginForm
+      initialMode={firstRun ? "register" : "login"}
+      firstRun={firstRun}
+      googleEnabled={googleEnabled}
+    />
   );
 }

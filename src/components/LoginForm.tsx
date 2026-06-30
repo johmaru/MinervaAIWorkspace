@@ -10,9 +10,11 @@ type Mode = "login" | "register";
 export function LoginForm({
   initialMode = "login",
   firstRun = false,
+  googleEnabled = false,
 }: {
   initialMode?: Mode;
   firstRun?: boolean;
+  googleEnabled?: boolean;
 }) {
   const { t } = useI18n();
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -130,7 +132,7 @@ export function LoginForm({
             {pending ? t("common.saving") : mode === "register" ? t("auth.register") : t("auth.login")}
           </MotionButton>
         </form>
-        {mode === "login" && (
+        {mode === "login" && googleEnabled && (
           <>
             <div className="relative py-1">
               <div className="absolute inset-0 flex items-center">
