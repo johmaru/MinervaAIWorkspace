@@ -8,7 +8,7 @@
  *
  * 使用法: bun scripts/pack-exe.ts
  */
-import { existsSync, mkdirSync, cpSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -21,7 +21,7 @@ execSync("bun run build", { cwd: root, stdio: "inherit" });
 
 // dist/UmansChat/ をクリーンアップ
 if (existsSync(outDir)) {
-  cpSync(outDir, outDir, { recursive: true }); // no-op, just ensure exists
+  rmSync(outDir, { recursive: true, force: true });
 }
 mkdirSync(outDir, { recursive: true });
 

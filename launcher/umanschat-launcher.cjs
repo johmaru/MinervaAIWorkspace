@@ -19,10 +19,14 @@ const http = require("http");
 
 const PORT = process.env.PORT || "3001";
 
-// アプリルート解決: server.js と同じディレクトリを基準
-// bun build --compile でコンパイルされた場合、__dirname は一時展開先になるが、
-// server.js は同階層に配置されるため __dirname で正しい。
-const appRoot = __dirname;
+// appRoot 解決: コンパイル済み exe の場合は process.execPath のディレクトリ、
+// node/bun で直接実行の場合は __dirname を使う
+// bun build --compile でコンパイルされた exe は __dirname が一時展開先を指す可能性がある
+const isCompiled = process.execPath.endsWith("umanschat.exe") ||
+                   process.execPath.endsWith("umanschat");
+const appRoot = isCompiled
+  ? dirname(process.execPath)
+  : __dirname;
 
 // 1. data/ ディレクトリ確保
 const dataDir = join(appRoot, "data");

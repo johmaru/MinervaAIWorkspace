@@ -1,22 +1,4 @@
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    container_name: umanschat-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: umans
-      POSTGRES_PASSWORD: umans
-      POSTGRES_DB: umanschat
-    ports:
-      - "5432:5432"
-    volumes:
-      - umanschat-db:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U umans -d umanschat"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   app:
     build:
       context: .
@@ -24,8 +6,6 @@ services:
     container_name: umanschat-app
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
       embedder:
         condition: service_started
       scraper:
@@ -34,17 +14,18 @@ services:
     # 再ビルド後も保持される（イメージに焼き込まれない）
     volumes:
       - ./.env:/app/.env
+      # SQLite データ永続化: data/umanschat.db をホストに保持
+      - ./data:/app/data
       # Tor コンテナ起動/停止用: Docker socket + compose ファイルをマウント
       - /var/run/docker.sock:/var/run/docker.sock
       - ./docker-compose.yml:/app/docker-compose.yml:ro
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgres://umans:umans@db:5432/umanschat
       SCRAPER_URL: http://scraper:8000
       SEARXNG_URL: http://searxng:8080
       EMBEDDER_URL: http://embedder:8001
-      # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY は
+      # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY / DATABASE_URL は
       # .env ファイルから読み込む（GUI 書き換え対応）
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"
@@ -124,5 +105,4 @@ services:
       - TORPASSWORD=umanschat-tor-control
 
 volumes:
-  umanschat-db:
   umanschat-embedder-hf:

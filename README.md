@@ -34,7 +34,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 
 ## Architecture
 
-UmansChat is a Next.js 16 + React 19 app backed by SQLite (better-sqlite3) by default — a file-based, embedded database with no separate server. PostgreSQL 16 with pgvector remains available as an optional Docker path. The Docker Compose setup below orchestrates the app alongside optional services:
+UmansChat is a Next.js 16 + React 19 app backed by SQLite (better-sqlite3) — a file-based, embedded database with no separate server. The Docker Compose setup below orchestrates the app alongside optional services:
 
 ```mermaid
 flowchart LR
@@ -43,14 +43,14 @@ flowchart LR
     end
     subgraph Compose
         app[app<br/>Next.js 16 + Bun]
-        db[(db<br/>SQLite file · or Postgres+pgvector via Docker)]
+        db[(db<br/>SQLite better-sqlite3)]
         embedder[embedder<br/>Python sentence-transformers]
         scraper[scraper<br/>Scrapling FastAPI]
         searxng[searxng<br/>meta search]
         tor[tor<br/>dperson/torproxy]
     end
     Browser --> app
-    app -->|SQLite (default) · Postgres (Docker)| db
+    app -->|SQLite| db
     app --> embedder
     app --> scraper
     scraper --> searxng
@@ -60,7 +60,7 @@ flowchart LR
 | Service    | Image / Build        | Role                                            | Port           |
 |------------|----------------------|-------------------------------------------------|----------------|
 | `app`      | Built from `Dockerfile` | Next.js app (chat UI, API, settings)         | `3001 → 3000`  |
-| `db` *(optional)* | `pgvector/pgvector:pg16` | PostgreSQL 16 + pgvector (optional; SQLite is the default file-based DB) | `5432`         |
+| `db`       | `better-sqlite3` (SQLite) | SQLite database (file-based, embedded)         | —              |
 | `embedder` | Built from `./embedder` | Python `sentence-transformers` HTTP embedder | `8000` (exposed) |
 | `scraper`  | Built from `./scraper`  | Scrapling FastAPI scraper + SearXNG client    | `8000` (exposed) |
 | `searxng`  | `searxng/searxng:latest` | SearXNG meta-search engine                    | `8081 → 8080`  |
@@ -69,7 +69,7 @@ flowchart LR
 ## Requirements
 
 - **Node.js / Bun** — Bun is the primary runtime and package manager
-- **Docker** (with Docker Compose) — optional; only needed for the optional PostgreSQL database, scraper, embedder, SearXNG search, and Tor services. The standalone exe and local-dev SQLite path need nothing extra.
+- **Docker** (with Docker Compose) — optional; only needed for the scraper, embedder, SearXNG search, and Tor services. The standalone exe and local-dev SQLite path need nothing extra.
 - An **OpenAI-compatible LLM API key** (UmansAI, OpenAI, vLLM, Ollama, etc.)
 
 ## Quick Start (Docker)
@@ -191,7 +191,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |
 | `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
 | `WEB_SEARCH_MODEL`     | Model for search query generation and result summarization        | `umans-coder`                                        |
-| `DATABASE_URL`          | SQLite database file path (Postgres URL only for the optional Docker path) | `data/umanschat.db`                          |
+| `DATABASE_URL`          | SQLite database file path                                          | `data/umanschat.db`                          |
 | `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |

@@ -34,7 +34,7 @@
 
 ## アーキテクチャ
 
-UmansChat は Next.js 16 + React 19 のアプリケーションで、デフォルトでは SQLite（better-sqlite3）をバックエンドに持ちます。PostgreSQL+pgvector を使う従来の Docker Compose 構成もオプションとして利用可能です。
+UmansChat は Next.js 16 + React 19 のアプリケーションで、SQLite（better-sqlite3）をバックエンドに持ちます — ファイルベースの組み込みデータベースで、別サーバーは不要です。下記の Docker Compose 構成は、アプリとオプションサービスをまとめて起動します。
 
 ```mermaid
 flowchart LR
@@ -60,14 +60,14 @@ flowchart LR
 | サービス   | イメージ / ビルド        | 役割                                            | ポート         |
 |------------|--------------------------|-------------------------------------------------|----------------|
 | `app`      | `Dockerfile` からビルド  | Next.js アプリ（チャット UI・API・設定）         | `3001 → 3000`  |
-| `db`       | `better-sqlite3`（SQLite）  | SQLite データベース（デフォルト）。Docker 構成では `pgvector/pgvector:pg16` | `5432`（Docker 時） |
+| `db`       | `better-sqlite3`（SQLite）  | SQLite データベース（ファイルベース・組み込み）            | —              |
 | `embedder` | `./embedder` からビルド  | Python `sentence-transformers` HTTP embedder    | `8000`（公開） |
 | `scraper`  | `./scraper` からビルド   | Scrapling FastAPI スクレイパー + SearXNG クライアント | `8000`（公開） |
 | `searxng`  | `searxng/searxng:latest` | SearXNG メタ検索エンジン                         | `8081 → 8080`  |
 | `tor`      | `dperson/torproxy:latest`| 匿名スクレイピング用 Tor SOCKS プロキシ          | `9050`（公開） |
 
 - **Node.js / Bun** — Bun が主なランタイム兼パッケージマネージャ（ローカル開発・ビルド用）
-- **Docker**（Docker Compose 含む） — 任意。スクレイパー、embedder、検索、Tor などのオプションサービスを利用する場合、または PostgreSQL+pgvector 構成を使う場合に必要。スタンドアロン Windows exe は追加インストール不要
+- **Docker**（Docker Compose 含む） — 任意。スクレイパー、embedder、検索、Tor などのオプションサービスを利用する場合に必要。スタンドアロン Windows exe とローカル開発の SQLite パスは追加インストール不要
 - **OpenAI 互換 LLM の API キー** — UmansAI、OpenAI、vLLM、Ollama など
 
 ## クイックスタート（Docker）
@@ -202,7 +202,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |
 | `SCRAPE_PROXY`          | Scraper がスクレイピング時に使用するプロキシ                       | —                                                    |
 | `WEB_SEARCH_MODEL`    | 検索クエリ生成と結果要約に使うモデル                              | `umans-coder`                                        |
-| `DATABASE_URL`          | SQLite データベースファイルのパス（Docker/Postgres 構成時は PostgreSQL 接続 URL） | `data/umanschat.db`                                  |
+| `DATABASE_URL`          | SQLite データベースファイルのパス                                   | `data/umanschat.db`                                  |
 | `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
 | `AUTH_SECRET`           | Auth.js JWT 暗号化シークレット（必須。`bunx auth secret` で生成） | —                                                  |
 | `AUTH_TRUST_HOST`       | リバースプロキシ背後でホストヘッダーを信頼（Docker 用）            | `true`                                               |

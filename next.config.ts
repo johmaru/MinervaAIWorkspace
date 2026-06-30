@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
   compress: false,
   // スタンドアロン exe 配布用: server.js + 必要な node_modules を .next/standalone に出力。
   output: "standalone",
+  // ネイティブモジュールを外部パッケージとして扱う（バンドルせず require で読み込む）。
+  // better-sqlite3 はネイティブアドオンのため、Next.js のバンドルに含めると
+  // Collecting page data フェーズで dlopen が失敗する。
+  serverExternalPackages: ["better-sqlite3"],
   // ネイティブバイナリをトレースに含める（standalone 配布で必須）。
   outputFileTracingIncludes: {
     "/*": [
