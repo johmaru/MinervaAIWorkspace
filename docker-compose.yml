@@ -77,6 +77,15 @@ services:
       - "8001"
     environment:
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-LiquidAI/LFM2.5-Embedding-350M}
+    # GPU が利用可能な環境でのみ有効化（EMBEDDER_GPU_COUNT>=1 時）。
+    # 未設定時は count:0 で CPU フォールバック（Docker Compose v2.18+ で安全）。
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${EMBEDDER_GPU_COUNT:-0}
+              capabilities: [gpu]
     volumes:
       - umanschat-embedder-hf:/root/.cache/huggingface
 

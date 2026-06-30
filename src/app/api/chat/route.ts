@@ -8,7 +8,7 @@ import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
 import { extractUrls } from "@/lib/urlExtract";
 import { decideSearch } from "@/lib/searchDecision";
-import { probeToolSupport } from "@/lib/toolProbe";
+import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { buildSkillContext } from "@/lib/skillStore";
@@ -36,6 +36,10 @@ import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitiz
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// プロセス起動時にバックグラウンドでツールプローブを開始し、
+// 初回チャットリクエスト時の probeToolSupport 遅延（~750ms）を隠す。
+warmupToolProbe();
 
 const SEARCH_RESULT_CONTENT_SLICE = 2000;
 
@@ -124,6 +128,14 @@ export async function POST(req: Request) {
   // 優先順位: スレッド個別 systemPrompt > グローバル(スレッド上書き or ユーザー既定) > body
   const systemContent = thread.systemPrompt ?? resolvedGlobalInstruction ?? body.systemPrompt;
 
+  // ツールプローブを早期開始し、ストリーム内の並列処理とオーバーラップさせる。
+  // warmupToolProbe() がモジュール読み込み時にプローブを開始済みだが、
+  // まだ完了していない場合に備えてここでも開始（キャッシュ済みなら即座に解決）。
+  // rapid モード・dual モードでは使用しないが、プローブ自体は無害（キャッシュされる）。
+  const toolSupportPromise: Promise<ToolSupport | null> = body.rapid
+    ? Promise.resolve(null)
+    : probeToolSupport(llm, finalModel).catch(() => null);
+
   // ストリーム完了を待つ Promise。after() コールバックがリクエストコンテキスト内で
   // generateMemories を実行するため、ストリーム完了後に内容を引き渡す。
   let resolveStream!: () => void;
@@ -145,46 +157,45 @@ export async function POST(req: Request) {
       let mcpConnections: McpConnection[] = [];
 
       try {
-        const searchContextMessage = body.rapid
-          ? null
-          : await buildSearchContext({
-              content: prepared.content,
-              llm,
-              history: prepared.history,
-              send,
-              timeRange: body.timeRange,
-            });
-
-        const urlContextMessage = body.rapid
-          ? null
-          : await buildUrlContext({
-              content: prepared.content,
-              send,
-            });
-
-        let memoryMessage: Awaited<ReturnType<typeof buildMemoryContext>> = null;
-        if (!body.rapid) {
-          try {
-            memoryMessage = await buildMemoryContext({
-              content: prepared.content,
-              thread,
-            });
-          } catch (err) {
-            console.error("[chat] buildMemoryContext failed:", err);
-          }
-        }
-
-        let skillMessage: Awaited<ReturnType<typeof buildSkillContext>> = null;
-        if (!body.rapid) {
-          try {
-            skillMessage = await buildSkillContext({
-              content: prepared.content,
-              userId: user.id,
-            });
-          } catch (err) {
-            console.error("[chat] buildSkillContext failed:", err);
-          }
-        }
+        // プリストーム処理を並列実行し、first-token レイテンシを削減。
+        // 各 build* は .catch(() => null) で包み、1つの失敗が他へ波及しないよう分離。
+        // rapid モードは全スキップ（null）。
+        const [searchContextMessage, urlContextMessage, memoryMessage, skillMessage] =
+          body.rapid
+            ? [null, null, null, null]
+            : await Promise.all([
+                buildSearchContext({
+                  content: prepared.content,
+                  llm,
+                  history: prepared.history,
+                  send,
+                  timeRange: body.timeRange,
+                }).catch((err) => {
+                  console.error("[chat] buildSearchContext failed:", err);
+                  return null;
+                }),
+                buildUrlContext({
+                  content: prepared.content,
+                  send,
+                }).catch((err) => {
+                  console.error("[chat] buildUrlContext failed:", err);
+                  return null;
+                }),
+                buildMemoryContext({
+                  content: prepared.content,
+                  thread,
+                }).catch((err) => {
+                  console.error("[chat] buildMemoryContext failed:", err);
+                  return null;
+                }),
+                buildSkillContext({
+                  content: prepared.content,
+                  userId: user.id,
+                }).catch((err) => {
+                  console.error("[chat] buildSkillContext failed:", err);
+                  return null;
+                }),
+              ]);
 
         // MCP サーバー接続: スレッドで有効化されたサーバーに接続し、ツールを取得。
         // 接続失敗時はスキップし、チャットは継続（非ブロッキング）。
@@ -293,12 +304,9 @@ export async function POST(req: Request) {
             // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
             // サポート時はストリーディング中に自律的に検索/スクレイプを実行。
             // 非サポート時は decideSearch ルーター方式（buildSearchContext）にフォールバック。
-            let toolSupport: ToolSupport | null = null;
-            try {
-              toolSupport = await probeToolSupport(llm, finalModel);
-            } catch {
-              toolSupport = null;
-            }
+            // プローブは POST 本体で早期開始済み（warmupToolProbe + 早期呼び出し）。
+            // ここでは結果を待つだけ（並列処理とオーバーラップしてレイテンシ隠蔽）。
+            const toolSupport: ToolSupport | null = await toolSupportPromise;
             await streamCompletion({
               llm,
               model: finalModel,

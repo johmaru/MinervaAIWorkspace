@@ -25,6 +25,7 @@ vi.mock("@/lib/memory", () => ({
 }));
 vi.mock("@/lib/toolProbe", () => ({
   probeToolSupport: vi.fn().mockResolvedValue({ supported: false, checkedAt: new Date() }),
+  warmupToolProbe: vi.fn(),
 }));
 vi.mock("next/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/server")>();

@@ -63,6 +63,14 @@ const MEMORY_RECALL_PATTERN =
 const UNKNOWN_TERM_PATTERN =
   /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに))|(what (is|are) [A-Z])|(tell me about )|(って(良い|いい|どう|どうですか))/i;
 
+/**
+ * 明らかに検索不要なパターン: コード質問、翻訳、意見、アドバイス。
+ * 「解説」は検索した方が安心なケースがあるため含めない。
+ * EXPLICIT_SEARCH / VOLATILE_INFO / UNKNOWN_TERM のいずれにもマッチしない場合のみ適用。
+ */
+const NO_SEARCH_PATTERN =
+  /(コード|code|プログラム|program|翻訳|translate|翻して|どう思う|どう考える|意見|opinion|アドバイス|advice|アイデア|idea|ブレインストーム|brainstorm)/i;
+
 function buildUserNotice(userMessage: string, fallback: boolean): string {
   if (fallback) return FALLBACK_USER_NOTICE;
   if (/steam/i.test(userMessage)) return STEAM_USER_NOTICE;
@@ -92,7 +100,17 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
     };
   }
 
+  // 明らかに検索不要な入力（コード/翻訳/意見/アドバイス等）は LLM 判定をスキップし、
+  // 即座に needsSearch:false を返す。検索が必要な入力は従来通り LLM 判定へ。
   if (!EXPLICIT_SEARCH_PATTERN.test(normalized) && !VOLATILE_INFO_PATTERN.test(normalized)) {
+    if (NO_SEARCH_PATTERN.test(normalized)) {
+      return {
+        needsSearch: false,
+        reason: "heuristic: code/translation/opinion/advice request — no search needed",
+        userNotice: null,
+        queries: [],
+      };
+    }
     return null;
   }
 
@@ -190,6 +208,11 @@ export async function decideSearch(
   client?: OpenAI,
 ): Promise<SearchDecision> {
   const heuristicDecision = buildHeuristicDecision(userMessage);
+  // ヒューリスティックで「検索不要」が確定した場合は LLM 呼び出しをスキップ。
+  // コード質問・翻訳・意見・アドバイス等、明らかに検索不要な入力のレイテンシを削減。
+  if (heuristicDecision && !heuristicDecision.needsSearch) {
+    return heuristicDecision;
+  }
   const llm = client ?? createLLM();
   try {
     const completion = await llm.chat.completions.create({

@@ -417,4 +417,87 @@ describe("decideSearch", () => {
       expect(decision.needsSearch, `query: ${q}`).toBe(false);
     }
   });
+
+  it("コード質問はヒューリスティックで検索不要となり LLM を呼ばない", async () => {
+    // LLM が呼ばれたら即座に失敗するよう reject を設定
+    mockCreate.mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn().mockRejectedValue(new Error("LLM should not be called")),
+        },
+      },
+    });
+
+    const decision = await decideSearch("Pythonでフィボナッチ数列を計算するコードを書いて", "umans-glm-5.2", []);
+
+    expect(decision.needsSearch).toBe(false);
+    expect(decision.reason).toContain("heuristic");
+    expect(decision.queries).toEqual([]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("翻訳依頼はヒューリスティックで検索不要となり LLM を呼ばない", async () => {
+    mockCreate.mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn().mockRejectedValue(new Error("LLM should not be called")),
+        },
+      },
+    });
+
+    const decision = await decideSearch("この文章を英語に翻訳して", "umans-glm-5.2", []);
+
+    expect(decision.needsSearch).toBe(false);
+    expect(decision.queries).toEqual([]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("意見・アドバイス要求はヒューリスティックで検索不要となり LLM を呼ばない", async () => {
+    mockCreate.mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn().mockRejectedValue(new Error("LLM should not be called")),
+        },
+      },
+    });
+
+    const decision = await decideSearch("このデザインについてどう思う？アドバイスをちょうだい", "umans-glm-5.2", []);
+
+    expect(decision.needsSearch).toBe(false);
+    expect(decision.queries).toEqual([]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("英語のコード質問もヒューリスティックで検索不要となる", async () => {
+    mockCreate.mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn().mockRejectedValue(new Error("LLM should not be called")),
+        },
+      },
+    });
+
+    const decision = await decideSearch("write a program to sort an array", "umans-glm-5.2", []);
+
+    expect(decision.needsSearch).toBe(false);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("検索不要パターンでも明示的に「検索して」とあれば LLM 判定へ進む", async () => {
+    mockCreate.mockReturnValue(
+      mockClient(
+        JSON.stringify({
+          needsSearch: true,
+          reason: "explicit search requested",
+          userNotice: null,
+          queries: ["最新の Python コード事例"],
+        }),
+      ),
+    );
+
+    const decision = await decideSearch("最新の Python コードを検索して", "umans-glm-5.2", []);
+
+    expect(decision.needsSearch).toBe(true);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
 });

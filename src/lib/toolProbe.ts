@@ -1,5 +1,5 @@
 import type OpenAI from "openai";
-import { defaultModel } from "@/lib/llm";
+import { createLLM, defaultModel } from "@/lib/llm";
 
 /**
  * モデルが function calling (tool use) を安定してサポートするかの判定結果。
@@ -108,4 +108,25 @@ async function runProbe(llm: OpenAI, model: string): Promise<ToolSupport> {
   } catch {
     return { supported: false, checkedAt: new Date() };
   }
+}
+
+let warmupStarted = false;
+
+/**
+ * プロセス起動時にバックグラウンドでプローブを開始し、初回リクエストの遅延を隠す。
+ *
+ * モジュール読み込み直後は環境変数が未設定の可能性があるため、microtask 遅延で
+ * 実行する（エントリポイントでの env 読み込み後に実行させる）。
+ * warmup 失敗は無害: 初回 `probeToolSupport()` 呼び出し時に再試行される。
+ */
+export function warmupToolProbe(): void {
+  if (warmupStarted) return;
+  warmupStarted = true;
+  queueMicrotask(() => {
+    try {
+      void probeToolSupport(createLLM(), defaultModel());
+    } catch {
+      // warmup 失敗は無害（初回リクエスト時に再試行される）
+    }
+  });
 }
