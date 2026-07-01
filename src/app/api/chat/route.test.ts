@@ -470,3 +470,37 @@ describe("POST /api/chat — time_range 透過", () => {
     expect(callArgs[2]).toBe("week");
   }, 60_000);
 });
+
+describe("POST /api/chat — 検索結果0件時のステータス通知", () => {
+  itReal("searchWeb が空結果を返した場合、status イベントで通知する", async () => {
+    const id = await createThread();
+
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      needsSearch: true,
+      reason: "latest info",
+      userNotice: "最新情報を確認するね。",
+      queries: ["latest news today"],
+    });
+    vi.mocked(searchWeb).mockResolvedValueOnce({
+      query: "latest news today",
+      results: [],
+    });
+
+    const res = await POST(chatReq(id, "最新のニュース教えて"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // 検索開始の status（userNotice）が送信される
+    const statusEvents = events.filter((e) => e.event === "status");
+    expect(statusEvents.length).toBeGreaterThanOrEqual(1);
+
+    // 最後の status が「結果が見つからなかった」通知であること
+    const lastStatus = statusEvents[statusEvents.length - 1];
+    expect(lastStatus.data.label).toContain("Web検索で結果が見つかりませんでした");
+
+    // sources イベントは送信されない（結果0件なので）
+    expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
+  }, 60_000);
+});

@@ -644,7 +644,10 @@ async function buildSearchContext({
   }
 
   if (allSources.length > 0) send("sources", { sources: allSources });
-  if (allResults.length === 0) return null;
+  if (allResults.length === 0) {
+    send("status", { label: "Web検索で結果が見つかりませんでした（検索エンジンが応答していない可能性があります）。トレーニングデータで回答します。" });
+    return null;
+  }
 
   // 検索結果を検索専用モデルで要約してから system メッセージにする。
   // 要約失敗時は生 JSON にフォールバック。

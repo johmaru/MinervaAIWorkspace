@@ -275,7 +275,7 @@ class TestSearchTimeRange:
                 "/search", json={"query": "test", "max_results": 3, "time_range": "week"}
             )
         assert resp.status_code == 200
-        params = mock_get.call_args.kwargs.get("params", {})
+        params = mock_get.call_args_list[0].kwargs.get("params", {})
         assert params.get("time_range") == "week"
 
     def test_day_passed_to_searxng(self, client):
@@ -285,7 +285,7 @@ class TestSearchTimeRange:
                 "/search", json={"query": "test", "max_results": 3, "time_range": "day"}
             )
         assert resp.status_code == 200
-        params = mock_get.call_args.kwargs.get("params", {})
+        params = mock_get.call_args_list[0].kwargs.get("params", {})
         assert params.get("time_range") == "day"
 
     def test_none_omits_time_range(self, client):
@@ -327,3 +327,115 @@ class TestSearchTimeRange:
         assert resp.status_code == 200
         params = mock_get.call_args.kwargs.get("params", {})
         assert "engines" not in params
+
+class TestSearchTimeRangeRetry:
+    """time_range で0件時にフィルタなしで再試行するか検証（httpx をモック）。"""
+
+    def test_empty_with_time_range_retries_without_filter(self, client):
+        """time_range ありで0件 → time_range なしで再リクエストする"""
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {"results": []}
+
+        results_resp = MagicMock()
+        results_resp.status_code = 200
+        results_resp.json.return_value = {
+            "results": [
+                {"url": "https://example.com/news", "title": "News", "content": "Breaking news"}
+            ]
+        }
+
+        mock_get = AsyncMock(side_effect=[empty_resp, results_resp])
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5, "time_range": "year"}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 2
+
+        # 1回目: time_range=year
+        first_params = mock_get.call_args_list[0].kwargs.get("params", {})
+        assert first_params.get("time_range") == "year"
+
+        # 2回目: time_range なし
+        second_params = mock_get.call_args_list[1].kwargs.get("params", {})
+        assert "time_range" not in second_params
+
+        # 再試行の結果が返される
+        data = resp.json()
+        assert len(data["results"]) == 1
+        assert data["results"][0]["url"] == "https://example.com/news"
+
+    def test_empty_without_time_range_no_retry(self, client):
+        """time_range なしで0件 → 再試行しない"""
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {"results": []}
+
+        mock_get = AsyncMock(return_value=empty_resp)
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 1
+        data = resp.json()
+        assert data["results"] == []
+
+    def test_results_with_time_range_no_retry(self, client):
+        """time_range ありで結果あり → 再試行しない"""
+        results_resp = MagicMock()
+        results_resp.status_code = 200
+        results_resp.json.return_value = {
+            "results": [
+                {"url": "https://example.com/recent", "title": "Recent", "content": "Recent news"}
+            ]
+        }
+
+        mock_get = AsyncMock(return_value=results_resp)
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5, "time_range": "week"}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 1
+        data = resp.json()
+        assert len(data["results"]) == 1
+
+    def test_retry_failure_returns_empty(self, client):
+        """再試行も0件 → 空のまま返す"""
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {"results": []}
+
+        mock_get = AsyncMock(return_value=empty_resp)
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5, "time_range": "month"}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 2
+        data = resp.json()
+        assert data["results"] == []
+
+    def test_retry_exception_returns_empty(self, client):
+        """再試行で例外 → 空のまま返す（全体は失敗しない）"""
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {"results": []}
+
+        # 1回目は0件、2回目（再試行）は例外
+        mock_get = AsyncMock(side_effect=[empty_resp, RuntimeError("connection reset")])
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5, "time_range": "day"}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 2
+        data = resp.json()
+        assert data["results"] == []

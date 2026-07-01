@@ -142,18 +142,32 @@ async def search(req: SearchRequest):
                 f"{searxng_url}/search",
                 params=params,
             )
+
+            if resp.status_code != 200:
+                return JSONResponse(status_code=502, content={"error": f"searxng returned {resp.status_code}"})
+
+            try:
+                data = resp.json()
+            except Exception:
+                return JSONResponse(status_code=502, content={"error": "invalid json from searxng"})
+
+            results = data.get("results", [])[: req.max_results]
+
+            # time_range で0件の場合はフィルタなしで再試行（publishedDate 未設定の結果が消えるのを防ぐ）
+            if not results and time_range:
+                retry_params = {k: v for k, v in params.items() if k != "time_range"}
+                try:
+                    resp = await client.get(
+                        f"{searxng_url}/search",
+                        params=retry_params,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        results = data.get("results", [])[: req.max_results]
+                except Exception:
+                    pass  # 再試行失敗時は空のまま
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"search failed: {str(e)}"})
-
-    if resp.status_code != 200:
-        return JSONResponse(status_code=502, content={"error": f"searxng returned {resp.status_code}"})
-
-    try:
-        data = resp.json()
-    except Exception:
-        return JSONResponse(status_code=502, content={"error": "invalid json from searxng"})
-
-    results = data.get("results", [])[: req.max_results]
 
     # 各結果 URL を並列スクレイピング（失敗しても全体は失敗しない）
     scraped_results = await asyncio.gather(
