@@ -7,6 +7,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 ## Features
 
 - **Streaming chat** with SSE (token-by-token output)
+- **Parallel pre-stream processing** — search, URL, memory, and skill context build run concurrently instead of sequentially; tool probe warms up at module load; code/translation/opinion/advice requests skip the search-decision LLM round-trip via heuristic, reducing first-token latency
 - **Rapid mode** — a per-message ⚡ toggle in the composer that skips web search, URL scraping, and memory/skill RAG (both pre-LLM retrieval and post-stream generation) for lower first-token latency; MCP/connections tools and dual-model flow stay active. Stays on across messages and threads until you click ⚡ again.
 - **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
@@ -27,6 +28,7 @@ A self-hosted, streaming AI chat platform with branching conversations, semantic
 - **Model + elapsed time display** — each assistant message shows which model produced it and how long the response took
 - **Motion-based UI animations** — modal transitions, button press feedback, animated accordions, and smooth scroll
 - **Per-thread system prompt and model selection**
+- **Named global system instructions** — save multiple system prompts per account, pick one as the user default, and override per-thread; priority: thread systemPrompt > thread instruction override > user default > body prompt
 - **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
 - **Connections (Notion)** — connect your Notion account via OAuth; the LLM calls `notion_search`, `notion_get_page`, and `notion_get_blocks` tools during chat to find and read Notion content; enabled per-thread via the ＋ menu
 - **Account authentication** — Auth.js v5 with Credentials (email/password) and optional Google OAuth; first Docker launch requires account creation, then login; each user's data is isolated
@@ -103,6 +105,7 @@ On first run, database migrations are applied automatically by the app, and you'
 ## Quick Start (Standalone Windows exe)
 
 A no-Docker, double-clickable Windows experience. The resulting `dist/UmansChat/umanschat.exe` bundles the standalone server, a SQLite database file, the ONNX runtime, and a launcher — no Docker, Node, or Bun install required on the target machine.
+> **Build machine requires** Windows + [Bun](https://bun.sh) installed. The target machine needs nothing.
 
 ```bash
 # 1. Build the standalone server and assemble the distributable folder
@@ -184,6 +187,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `EMBED_DIM`             | Embedding dimension (must match `EMBED_MODEL`)                     | `384`                                                |
 | `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `local`                                              |
 | `EMBEDDER_URL`          | Python embedder URL (required when `EMBED_PROVIDER=http`; Docker sets automatically) | `http://localhost:8001`     |
+| `EMBEDDER_GPU_COUNT`    | GPU count for the Python embedder (0 = CPU fallback; nvidia only; Docker Compose only) | `0` |
 | `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
 | `WEB_SEARCH_MAX_ROUNDS` | Maximum search rounds per response (1-5); caps how many of the search-decision LLM's queries are executed | `2`                                                  |
 | `SCRAPER_URL`           | Scraper microservice URL                                           | `http://localhost:8000`                              |
@@ -246,6 +250,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
 - **Tor** — toggle Tor in settings for anonymous scraping.
 - **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
+- **Global system instructions** — open Settings → AI & Models to create, edit, and delete named system instructions. Select one as your default; it applies to all threads unless a thread overrides it. In thread settings, pick a different instruction per-thread.
 - **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories.
 
 ## Database Migrations

@@ -7,6 +7,22 @@ echo "[entrypoint] Syncing .env with .env.example..."
 node --experimental-strip-types /app/scripts/sync-env.ts || {
   echo "[entrypoint] WARNING: env sync failed. Continuing with existing .env."
 }
+# Resolve DATABASE_URL to an absolute path so the standalone server
+# (which calls process.chdir to /app/.next/standalone/) opens the same
+# file that migrations wrote to. The app runtime and migrations must
+# share one SQLite file regardless of CWD.
+case "$DATABASE_URL" in
+  /*) ;;  # already absolute — pass through
+  *)
+    # :memory:, empty, or relative → resolve against /app
+    if [ -z "$DATABASE_URL" ] || [ "$DATABASE_URL" = ":memory:" ]; then
+      export DATABASE_URL="/app/data/umanschat.db"
+    else
+      export DATABASE_URL="/app/$DATABASE_URL"
+    fi
+    ;;
+esac
+mkdir -p "$(dirname "$DATABASE_URL")"
 
 # Run database migrations (creates all tables + indexes).
 # drizzle-kit migrate reads drizzle.config.ts which uses DATABASE_URL from env.

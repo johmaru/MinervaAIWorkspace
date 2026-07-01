@@ -32,6 +32,12 @@ const appRoot = isCompiled
 const dataDir = join(appRoot, "data");
 mkdirSync(dataDir, { recursive: true });
 
+// DATABASE_URL の絶対パス（.env 同期後に解決）。マイグレーションと
+// サーバー起動で同じ SQLite ファイルを開くために共有する。
+// server.js は process.chdir(__dirname) を呼ぶため、相対パスだと
+// 異なるファイルを開いてしまう。絶対パスなら CWD に依存しない。
+let dbPath = null;
+
 // 2. .env 同期: .env.example のキーを .env に追記（既存キーは変更しない）
 function syncEnv() {
   const examplePath = join(appRoot, ".env.example");
@@ -69,6 +75,23 @@ function syncEnv() {
   }
 }
 
+// .env の DATABASE_URL を絶対パスで解決（デフォルト: data/umanschat.db）。
+// server.js が process.chdir(__dirname) で CWD を変えるため、
+// 相対パスのままではマイグレーション先と異なるファイルを開いてしまう。
+// appRoot 基準で絶対パスにすることで CWD に依存せず同一ファイルを保証する。
+function resolveDbPath() {
+  let dbUrl = `data/umanschat.db`;
+  const envPath = join(appRoot, ".env");
+  if (existsSync(envPath)) {
+    const envRaw = readFileSync(envPath, "utf8");
+    const m = envRaw.match(/^DATABASE_URL=(.+)$/m);
+    if (m) dbUrl = m[1].trim().replace(/^["']|["']$/g, "");
+  }
+  // :memory: は絶対パスにせずそのまま返す（インメモリ DB）
+  if (dbUrl === ":memory:") return dbUrl;
+  return resolve(appRoot, dbUrl);
+}
+
 // 3. マイグレーション実行: drizzle-orm の migrator をプログラム的に使用
 function runMigrations() {
   try {
@@ -76,15 +99,8 @@ function runMigrations() {
     const { drizzle } = require("drizzle-orm/better-sqlite3");
     const { migrate } = require("drizzle-orm/better-sqlite3/migrator");
 
-    // .env から DATABASE_URL を読む（デフォルト: data/umanschat.db）
-    let dbUrl = `data/umanschat.db`;
-    const envPath = join(appRoot, ".env");
-    if (existsSync(envPath)) {
-      const envRaw = readFileSync(envPath, "utf8");
-      const m = envRaw.match(/^DATABASE_URL=(.+)$/m);
-      if (m) dbUrl = m[1].trim().replace(/^["']|["']$/g, "");
-    }
-    const dbPath = resolve(appRoot, dbUrl);
+    // モジュールスコープの dbPath（resolveDbPath で .env 同期後に解決済み）を使用
+    if (!dbPath) dbPath = resolveDbPath();
     mkdirSync(dirname(dbPath), { recursive: true });
 
     const sqlite = new Database(dbPath);
@@ -135,16 +151,20 @@ function waitForServer(host, port, timeoutMs = 30000) {
 // ── メイン処理 ──
 console.log("[launcher] UmansChat starting...");
 syncEnv();
+dbPath = resolveDbPath();
+mkdirSync(dirname(dbPath), { recursive: true });
 runMigrations();
 
 // 5. スタンドアロンサーバー起動
 // process.execPath: bun build --compile の場合は Bun ランタイム、
 // node で実行の場合は node。
-// server.js は Node 互換なので、どちらでも動作する。
 const serverPath = join(appRoot, "server.js");
 const child = spawn(process.execPath, [serverPath], {
   cwd: appRoot,
-  env: { ...process.env, PORT },
+  // DATABASE_URL を絶対パスで渡す: server.js は process.chdir(__dirname)
+  // で CWD を変更するため、相対パスだとマイグレーション先と異なる
+  // SQLite ファイルを開いてしまう。絶対パスなら CWD に依存しない。
+  env: { ...process.env, PORT, DATABASE_URL: dbPath },
   stdio: "inherit",
 });
 

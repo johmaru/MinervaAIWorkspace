@@ -38,6 +38,11 @@ RUN apt-get update && \
       -o /usr/local/lib/docker/cli-plugins/docker-compose && \
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 COPY --from=build /app/.next ./.next
+# Next.js standalone server.js は __dirname/.next/static と __dirname/public から
+# 静的ファイル（CSS/JS/フォント）を配信する。standalone 出力にはこれらが含まれない
+# ため明示的にコピーする（公式手順: cp -r .next/static .next/standalone/.next/）
+COPY --from=build /app/.next/static ./.next/standalone/.next/static
+COPY --from=build /app/public ./.next/standalone/public
 COPY --from=build /app/public ./public
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/drizzle ./drizzle
