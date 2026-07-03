@@ -26,3 +26,12 @@ try {
 } catch {
   // .env が無い場合はスキップ（CI で env 直書きの場合など）
 }
+
+// ホストからテスト実行時、Docker 内部サービス名をホスト到達可能なポートへ上書き。
+// Docker 内 (本番) は docker-compose.yml の environment で上書きされるため影響なし。
+if (process.env.EMBEDDER_URL?.includes("embedder:")) {
+  process.env.EMBEDDER_URL = "http://localhost:8001";
+}
+if (process.env.SEARXNG_URL?.includes("searxng:")) {
+  process.env.SEARXNG_URL = "http://localhost:8081";
+}

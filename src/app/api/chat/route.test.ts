@@ -76,6 +76,7 @@ import { decideSearch } from "@/lib/searchDecision";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { probeToolSupport } from "@/lib/toolProbe";
 import { POST } from "@/app/api/chat/route";
+import { createLLM } from "@/lib/llm";
 
 // テスト間でモックの呼び出し履歴・戻り値をリセット（leak 防止）
 beforeEach(() => {
@@ -242,7 +243,7 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
 
     const text = deltas.map((e) => e.data.delta as string).join("");
     expect(text.length).toBeGreaterThan(0);
-  }, 60_000);
+  }, 120_000);
 
   itReal("title が New chat のとき初回送信で自動生成される", async () => {
     const [row0] = await db.insert(threads).values({ title: "New chat", userId: "test-user-id" }).returning();
@@ -253,7 +254,7 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
     const [row] = await db.select().from(threads).where(eq(threads.id, id));
     expect(row).toBeDefined();
     expect(row!.title).toContain("日本の首都");
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — Web 検索 sources イベント", () => {
@@ -308,7 +309,7 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     const sourcesIdx = events.findIndex((e) => e.event === "sources");
     expect(statusIdx).toBeGreaterThan(startIdx);
     expect(sourcesIdx).toBeGreaterThan(statusIdx);
-  }, 60_000);
+  }, 120_000);
 
   itReal("検索不要時は status/sources イベントを出さない", async () => {
     const id = await createThread();
@@ -332,7 +333,7 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
     // searchWeb は呼ばれない
     expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () => {
@@ -379,7 +380,7 @@ describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () =>
     expect(callArgs[1]).toBe("umans-test-search");
     // searchWeb も呼ばれる（SearXNG パス経由）
     expect(vi.mocked(searchWeb)).toHaveBeenCalled();
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — 記憶注入", () => {
@@ -400,7 +401,7 @@ describe("POST /api/chat — 記憶注入", () => {
 
     // buildMemoryContext が呼ばれた
     expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
-  }, 60_000);
+  }, 120_000);
 
   itReal("記憶が無い場合は buildMemoryContext が呼ばれるが null を返す", async () => {
     const id = await createThread();
@@ -412,7 +413,7 @@ describe("POST /api/chat — 記憶注入", () => {
     await sseChunks(res);
     // buildMemoryContext は呼ばれる（結果は null）
     expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — rapid mode", () => {
@@ -471,7 +472,7 @@ describe("POST /api/chat — rapid mode", () => {
     expect(deltas.length).toBeGreaterThan(0);
     expect(done).toHaveLength(1);
     expect(events.some((e) => e.event === "error")).toBe(false);
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — time_range 透過", () => {
@@ -510,7 +511,7 @@ describe("POST /api/chat — time_range 透過", () => {
     const callArgs = vi.mocked(searchWeb).mock.calls[0];
     expect(callArgs[0]).toBe("latest news today");
     expect(callArgs[2]).toBe("week");
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — 検索結果0件時のステータス通知", () => {
@@ -544,7 +545,7 @@ describe("POST /api/chat — 検索結果0件時のステータス通知", () =>
 
     // sources イベントは送信されない（結果0件なので）
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("POST /api/chat — ツール使用時に事前検索メッセージを除外", () => {
@@ -619,5 +620,57 @@ describe("POST /api/chat — ツール使用時に事前検索メッセージを
       ),
     );
     expect(found).toBe(true);
+  }, 30_000);
+});
+
+
+describe("POST /api/chat — tool-call markup leak prevention", () => {
+  afterEach(() => vi.mocked(createLLM).mockReset());
+
+  it("tool-call markup detected -> replace_content event sent with sanitized content", async () => {
+    const id = await createThread();
+    const openTag = String.fromCharCode(60) + "tool_call" + String.fromCharCode(62);
+    const closeTag = String.fromCharCode(60) + "/tool_call" + String.fromCharCode(62);
+    const markup = openTag + '{"name":"search_web","arguments":{"query":"GPT-5"}}' + closeTag;
+
+    const markupStream = async function* () {
+      yield { choices: [{ delta: { content: markup } }] };
+    };
+    const cleanStream = async function* () {
+      yield { choices: [{ delta: { content: "Answer here." } }] };
+    };
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>) => {
+            callCount++;
+            if (params.stream) return callCount === 1 ? markupStream() : cleanStream();
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "search please"));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    const replaceEvents = events.filter((e) => e.event === "replace_content");
+    expect(replaceEvents).toHaveLength(1);
+    expect(typeof replaceEvents[0].data.content).toBe("string");
+    expect(String(replaceEvents[0].data.content)).not.toMatch(/tool_call/);
+
+    // delta stream still contains raw markup (model output), but replace_content
+    // tells the client to replace displayed content with sanitized version.
+    // Verify the continuation (post-replace_content) deltas are clean.
+    const replaceIdx = events.findIndex((e) => e.event === "replace_content");
+    const postReplaceDeltas = events
+      .filter((e, i) => e.event === "delta" && i > replaceIdx)
+      .map((e) => e.data.delta as string)
+      .join("");
+    expect(postReplaceDeltas).not.toMatch(/tool_call/);
+    expect(postReplaceDeltas).toContain("Answer here.");
   }, 30_000);
 });

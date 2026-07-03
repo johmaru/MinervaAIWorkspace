@@ -157,6 +157,7 @@ export async function POST(req: Request) {
       let mcpConnections: McpConnection[] = [];
 
       try {
+        send("start", { userMessageId: prepared.userMessage.id });
         // プリストーム処理を並列実行し、first-token レイテンシを削減。
         // 各 build* は .catch(() => null) で包み、1つの失敗が他へ波及しないよう分離。
         // rapid モードは全スキップ（null）。
@@ -348,7 +349,9 @@ export async function POST(req: Request) {
         if (hasToolCallMarkup(assistantContent)) {
           send("status", { label: "検索結果に基づいて回答を生成しています。" });
           assistantContent = sanitizeToolCallMarkup(assistantContent);
-
+          // クライアントの表示内容をサニタイズ後の内容で置換。
+          // ストリーミング中に送信された tool-call マークアップを UI から除去する。
+          send("replace_content", { content: assistantContent });
           const continuationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
             ...finalMessages,
             { role: "assistant" as const, content: assistantContent },

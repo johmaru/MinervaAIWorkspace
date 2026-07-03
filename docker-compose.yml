@@ -73,8 +73,8 @@ services:
       dockerfile: Dockerfile
     container_name: umanschat-embedder
     restart: unless-stopped
-    expose:
-      - "8001"
+    ports:
+      - "8001:8001"
     environment:
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-LiquidAI/LFM2.5-Embedding-350M}
     # GPU が利用可能な環境でのみ有効化（EMBEDDER_GPU_COUNT>=1 時）。

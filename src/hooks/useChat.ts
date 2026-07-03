@@ -83,6 +83,7 @@ type RawAttachment = {
 
 type SseData = {
   delta?: string;
+  content?: string;
   message?: string;
   userMessageId?: string;
   assistantMessageId?: string;
@@ -332,6 +333,16 @@ export function useChat(threadId: string | null) {
               byIdRef.current.set(assistantId, {
                 ...existing,
                 content: existing.content + event.data.delta,
+                statusLabel: undefined,
+              });
+              setMessages(buildChain(assistantId));
+            }
+          } else if (event.event === "replace_content" && typeof event.data?.content === "string") {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                content: event.data.content,
                 statusLabel: undefined,
               });
               setMessages(buildChain(assistantId));
