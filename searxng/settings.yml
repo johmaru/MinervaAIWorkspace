@@ -17,13 +17,32 @@ use_default_settings:
       # karmasearch は 403 (access denied) で常に失敗するため除外。
       - karmasearch
       - karmasearch videos
-      # DuckDuckGo は CAPTCHA で常に失敗するため除外。
+      # DuckDuckGo (旧エンジン) は CAPTCHA で常に失敗するため除外。
+      # 注意: "duckduckgo web" は別エンジンで正常動作するため下で有効化する。
       - duckduckgo
       # wikidata は 403 で初期化失敗するため除外。
       - wikidata
       # ahmia / torch は Tor onion サービス用で通常検索では不要。
       - ahmia
       - torch
+      # Google は IndexError (list index out of range) で常に失敗するため除外。
+      # SearXNG の google.py が Google の HTML 構造変更に未対応。
+      - google
+      - google images
+      - google news
+      - google videos
+
+# デフォルト無効エンジンのうち、動作確認済みのものを明示的に有効化。
+# use_default_settings は全エンジンのデフォルト状態を読み込むが、
+# mojeek / bing / duckduckgo web はデフォルト disabled=true なので
+# ここで disabled: false で上書きする。
+engines:
+  - name: mojeek
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo web
+    disabled: false
 
 search:
   formats:
@@ -40,3 +59,6 @@ server:
 
 outgoing:
   using_tor_proxy: false
+  # エンジンタイムアウト: デフォルト 3.0s では Wikipedia 等が頻発タイムアウト。
+  # 10s に延ばしてネットワーク変動に耐える。
+  request_timeout: 10.0
