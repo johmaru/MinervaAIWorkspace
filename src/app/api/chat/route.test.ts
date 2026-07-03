@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
-import { folders, threads } from "@/db/schema";
+import { folders, threads, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 // searchWeb / upsertPage / decideSearch をモック: SearXNG/DB/LLM副作用なしで sources イベントを検証
@@ -27,24 +27,60 @@ vi.mock("@/lib/toolProbe", () => ({
   probeToolSupport: vi.fn().mockResolvedValue({ supported: false, checkedAt: new Date() }),
   warmupToolProbe: vi.fn(),
 }));
-vi.mock("next/server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/server")>();
+vi.mock("@/lib/auth-guards", () => ({
+  // テスト用の固定ユーザー。createThread はこの userId でスレッドを作成する。
+  getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id", name: "tester", email: "t@example.com" }),
+}));
+vi.mock("next/server", () => ({
+  // route.ts は next/server から after() のみをインポートする。
+  // importOriginal() は next-auth が next/server (ESM) を解決できず
+  // Next 16 で失敗するため、ファクトリで最小モックを返す。
+  after: () => {},
+}));
+
+// LLM クライアント: createLLM のみ上書き可能にする。それ以外は実装を維持し、
+// itReal テストが実 API を叩けるようにする。createLLM は unit test で差し替える。
+// vi.mock は hoist されるため、モック内で参照する変数は vi.hoisted で囲む。
+const { capturedMessages, fakeLlm, useFakeLlm } = vi.hoisted(() => {
+  const captured: Record<string, unknown>[][] = [];
+  const stream = async function* () {
+    yield { choices: [{ delta: { content: "OK" } }] };
+  };
+  const fake = {
+    chat: {
+      completions: {
+        create: vi.fn(async (params: Record<string, unknown>) => {
+          captured.push(params.messages as Record<string, unknown>[]);
+          if (params.stream) {
+            return stream();
+          }
+          return { choices: [{ message: { content: "summary" } }] };
+        }),
+      },
+    },
+  };
+  // unit test なら true にして fakeLlm を使う。itReal なら false で実装に戻す。
+  let useFake = false;
+  return { capturedMessages: captured, fakeLlm: fake, useFakeLlm: { get: () => useFake, set: (v: boolean) => (useFake = v) } };
+});
+vi.mock("@/lib/llm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/llm")>();
   return {
     ...actual,
-    // after() はリクエストスコープ外で呼ばれるとエラーになるため、
-    // テストでは no-op にする（generateMemories は別途モック済み）。
-    after: () => {},
+    createLLM: vi.fn(() => (useFakeLlm.get() ? fakeLlm : actual.createLLM())),
   };
 });
 
 import { searchWeb } from "@/lib/scraper";
 import { decideSearch } from "@/lib/searchDecision";
 import { buildMemoryContext } from "@/lib/memoryStore";
+import { probeToolSupport } from "@/lib/toolProbe";
 import { POST } from "@/app/api/chat/route";
 
 // テスト間でモックの呼び出し履歴・戻り値をリセット（leak 防止）
 beforeEach(() => {
   vi.mocked(searchWeb).mockReset();
+  capturedMessages.length = 0;
   vi.mocked(decideSearch).mockReset();
   vi.mocked(buildMemoryContext).mockReset();
   // デフォルト: 検索不要（通常チャットのテストで実 LLM ルーターを呼ばない）
@@ -68,6 +104,11 @@ const itReal = hasCreds ? it : it.skip;
 const createdIds: string[] = [];
 const createdFolderIds: string[] = [];
 
+beforeAll(async () => {
+  // threads.userId は users.id を参照するため、テストユーザーを事前作成。
+  await db.insert(users).values({ id: "test-user-id", nickname: "tester", email: "t@example.com" }).onConflictDoNothing();
+});
+
 afterAll(async () => {
   for (const id of createdIds) {
     await db.delete(threads).where(eq(threads.id, id));
@@ -75,10 +116,11 @@ afterAll(async () => {
   for (const id of createdFolderIds) {
     await db.delete(folders).where(eq(folders.id, id));
   }
+  await db.delete(users).where(eq(users.id, "test-user-id"));
 });
 
 async function createThread(): Promise<string> {
-  const [row] = await db.insert(threads).values({ title: "chat route test" }).returning();
+  const [row] = await db.insert(threads).values({ title: "chat route test", userId: "test-user-id" }).returning();
   createdIds.push(row.id);
   return row.id;
 }
@@ -203,7 +245,7 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
   }, 60_000);
 
   itReal("title が New chat のとき初回送信で自動生成される", async () => {
-    const [row0] = await db.insert(threads).values({ title: "New chat" }).returning();
+    const [row0] = await db.insert(threads).values({ title: "New chat", userId: "test-user-id" }).returning();
     createdIds.push(row0.id);
     const id = row0.id;
     await POST(chatReq(id, "日本の首都は？")).then((r) => r.text());
@@ -503,4 +545,79 @@ describe("POST /api/chat — 検索結果0件時のステータス通知", () =>
     // sources イベントは送信されない（結果0件なので）
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
   }, 60_000);
+});
+
+describe("POST /api/chat — ツール使用時に事前検索メッセージを除外", () => {
+  // ツール使用モードでは buildSearchContext の「検索完了・再検索禁止」system メッセージが
+  // LLM のツール呼び出し結果の参照を阻害するため、effectiveMessages から除外される。
+  // ツール非使用モードでは従来通り searchContextMessage が LLM に渡される。
+
+  beforeAll(() => useFakeLlm.set(true));
+  afterAll(() => useFakeLlm.set(false));
+
+  const searchDecided = {
+    needsSearch: true,
+    reason: "latest info",
+    userNotice: "最新情報を確認するね。",
+    queries: ["GPT-5.6 benchmark"],
+  };
+  const searchHit = {
+    query: "GPT-5.6 benchmark",
+    results: [
+      {
+        url: "https://note.com/example/gpt56",
+        title: "GPT-5.6 benchmark",
+        snippet: "GPT-5.6 scores",
+        scraped: true,
+        content: "GPT-5.6 benchmark results.",
+        scrapeTitle: "GPT-5.6 benchmark",
+        raw_content: "GPT-5.6 scores",
+      },
+    ],
+  };
+
+  it("ツール対応モデル → LLM の messages に「検索完了」メッセージが含まれない", async () => {
+    const id = await createThread();
+    vi.mocked(decideSearch).mockResolvedValueOnce(searchDecided);
+    vi.mocked(searchWeb).mockResolvedValueOnce(searchHit);
+    vi.mocked(probeToolSupport).mockResolvedValueOnce({
+      supported: true,
+      checkedAt: new Date(),
+    });
+
+    const res = await POST(chatReq(id, "GPT-5.6ってベンチマーク出てる？"));
+    expect(res.status).toBe(200);
+    await sseChunks(res);
+
+    // LLM に渡された全呼び出しの messages から「検索完了・再検索禁止」を探す
+    const forbidden = "Web search has already been completed";
+    const found = capturedMessages.some((msgs) =>
+      msgs.some(
+        (m) => typeof m.content === "string" && m.content.includes(forbidden),
+      ),
+    );
+    expect(found).toBe(false);
+  }, 30_000);
+
+  it("ツール非対応モデル → LLM の messages に「検索完了」メッセージが含まれる", async () => {
+    const id = await createThread();
+    vi.mocked(decideSearch).mockResolvedValueOnce(searchDecided);
+    vi.mocked(searchWeb).mockResolvedValueOnce(searchHit);
+    vi.mocked(probeToolSupport).mockResolvedValueOnce({
+      supported: false,
+      checkedAt: new Date(),
+    });
+
+    const res = await POST(chatReq(id, "GPT-5.6ってベンチマーク出てる？"));
+    expect(res.status).toBe(200);
+    await sseChunks(res);
+
+    const forbidden = "Web search has already been completed";
+    const found = capturedMessages.some((msgs) =>
+      msgs.some(
+        (m) => typeof m.content === "string" && m.content.includes(forbidden),
+      ),
+    );
+    expect(found).toBe(true);
+  }, 30_000);
 });

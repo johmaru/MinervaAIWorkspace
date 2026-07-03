@@ -307,10 +307,23 @@ export async function POST(req: Request) {
             // プローブは POST 本体で早期開始済み（warmupToolProbe + 早期呼び出し）。
             // ここでは結果を待つだけ（並列処理とオーバーラップしてレイテンシ隠蔽）。
             const toolSupport: ToolSupport | null = await toolSupportPromise;
+            // ツール使用モード時は事前検索のsystemメッセージを除外:
+            // 「検索完了・再検索禁止」メッセージがLLMのツール呼び出し結果の参照を阻害するため。
+            const effectiveMessages = toolSupport?.supported
+              ? buildFinalMessages({
+                  systemContent,
+                  history: prepared.history,
+                  content: prepared.content,
+                  searchContextMessage: null,
+                  urlContextMessage,
+                  skillMessage,
+                  memoryMessage,
+                })
+              : finalMessages;
             await streamCompletion({
               llm,
               model: finalModel,
-              messages: finalMessages,
+              messages: effectiveMessages,
               onDelta: (delta) => {
                 assistantContent += delta;
                 send("delta", { delta });
@@ -646,7 +659,14 @@ async function buildSearchContext({
   if (allSources.length > 0) send("sources", { sources: allSources });
   if (allResults.length === 0) {
     send("status", { label: "Web検索で結果が見つかりませんでした（検索エンジンが応答していない可能性があります）。トレーニングデータで回答します。" });
-    return null;
+    // このメッセージは tool 非対応モデルにのみ到達する（tool 対応モデルは
+    // effectiveMessages で searchContextMessage が除外され、自律的に検索する）。
+    // 検索失敗を伝えてトレーニングデータで回答させ、情報が取得できなかったことを
+    // 明示させる。null を返すと検索未実行として扱われ、情報欠落の認知も消える。
+    return {
+      role: "system",
+      content: "Web search was attempted but returned no results. Answer from your training data and acknowledge that you could not retrieve current information.",
+    };
   }
 
   // 検索結果を検索専用モデルで要約してから system メッセージにする。

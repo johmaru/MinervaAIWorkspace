@@ -6,6 +6,12 @@ export default defineConfig({
   resolve: {
     // vite-tsconfig-paths プラグイン不要（Vite ネイティブで tsconfig paths を解決）。
     tsconfigPaths: true,
+    // Next 16 は next/server を next/server.js として解決する必要があるが、
+    // next-auth 5.0.0-beta が bare "next/server" を要求し ESM 解決に失敗する。
+    // テスト時のみエイリアスで .js 形式へ正規化する。
+    alias: {
+      "next/server": "next/server.js",
+    },
   },
   test: {
     environment: "jsdom",
@@ -20,5 +26,13 @@ export default defineConfig({
     // sharp / @xenova/transformers の native module は forks pool で
     // worker クラッシュを起こすため threads pool を使う。
     pool: "threads",
+    // next-auth は bare "next/server" を import するが Next 16 は exports で
+    // "next/server.js" を要求する。alias は Vite が変換するモジュールにのみ効くため、
+    // next-auth を SSR 変換対象にして alias を適用可能にする。
+    server: {
+      deps: {
+        inline: ["next-auth"],
+      },
+    },
   },
 });
