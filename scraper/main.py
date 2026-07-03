@@ -25,6 +25,9 @@ app = FastAPI()
 
 MAX_CONTENT_LENGTH = 50000
 FETCH_TIMEOUT = 30  # Scrapling のデフォルト
+SEARXNG_SAFE_LIMIT = int(os.environ.get("SEARXNG_SAFE_LIMIT", "5"))
+SCRAPE_BATCH_SIZE = 2
+SCRAPE_BATCH_DELAY = 0.5  # seconds between scrape batches
 
 
 def is_safe_host(hostname: str) -> bool:
@@ -132,69 +135,86 @@ async def search(req: SearchRequest):
         return JSONResponse(status_code=400, content={"error": "query is required"})
 
     searxng_url = os.environ.get("SEARXNG_URL", "http://searxng:8080")
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
-            params = {"q": req.query, "format": "json"}
-            if time_range:
-                params["time_range"] = time_range
-            resp = await client.get(
-                f"{searxng_url}/search",
-                params=params,
-            )
+    time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
 
+    async def _fetch_page(client: httpx.AsyncClient, page_params: dict) -> list[dict]:
+        """SearXNG にページネーションで問い合わせ、SAFE_LIMIT 件ずつ取得して
+        max_results 件になるまで蓄積する。各ページ間に wait を入れる。"""
+        accumulated: list[dict] = []
+        remaining = req.max_results
+        pageno = 1
+        while remaining > 0:
+            p = {**page_params, "pageno": pageno}
+            resp = await client.get(f"{searxng_url}/search", params=p)
             if resp.status_code != 200:
-                return JSONResponse(status_code=502, content={"error": f"searxng returned {resp.status_code}"})
-
+                break
             try:
                 data = resp.json()
             except Exception:
-                return JSONResponse(status_code=502, content={"error": "invalid json from searxng"})
+                break
+            page_results = data.get("results", [])
+            want = min(SEARXNG_SAFE_LIMIT, remaining)
+            batch = page_results[:want]
+            if not batch:
+                break
+            accumulated.extend(batch)
+            remaining -= len(batch)
+            pageno += 1
+            # ページが要求件数に満たない = SearXNG の結果が尽きた → 追加リクエストしない
+            if len(batch) < want:
+                break
+            if remaining > 0:
+                await asyncio.sleep(SCRAPE_BATCH_DELAY)
+        return accumulated[: req.max_results]
 
-            results = data.get("results", [])[: req.max_results]
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            params = {"q": req.query, "format": "json"}
+            if time_range:
+                params["time_range"] = time_range
+
+            results = await _fetch_page(client, params)
 
             # time_range で0件の場合はフィルタなしで再試行（publishedDate 未設定の結果が消えるのを防ぐ）
             if not results and time_range:
                 retry_params = {k: v for k, v in params.items() if k != "time_range"}
                 try:
-                    resp = await client.get(
-                        f"{searxng_url}/search",
-                        params=retry_params,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        results = data.get("results", [])[: req.max_results]
+                    results = await _fetch_page(client, retry_params)
                 except Exception:
                     pass  # 再試行失敗時は空のまま
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"search failed: {str(e)}"})
 
-    # 各結果 URL を並列スクレイピング（失敗しても全体は失敗しない）
-    scraped_results = await asyncio.gather(
-        *(scrape_url_safe(r.get("url", "")) for r in results if r.get("url")),
-        return_exceptions=True,
-    )
-
+    # スクレイピングを SCRAPE_BATCH_SIZE 件同時バッチで実行（対象サイトへの
+    # レート制限/BAN 回避）。バッチ間に SCRAPE_BATCH_DELAY 秒 wait。
     scraped: list[dict] = []
-    scrape_iter = iter(scraped_results)
-    for r in results:
-        url = r.get("url", "")
-        entry = {
-            "url": url,
-            "title": r.get("title", ""),
-            "snippet": (r.get("content", "") or "")[:200],
-            "scraped": False,
-            "content": "",
-            "scrape_title": "",
-            "raw_content": (r.get("content", "") or "")[:1000],  # SearXNG の content 全文(スクレイピング失敗時のフォールバック)
-        }
-        if url:
-            scraped_r = next(scrape_iter, None)
-            if isinstance(scraped_r, dict) and scraped_r.get("content"):
-                entry["scraped"] = True
-                entry["content"] = scraped_r["content"][:5000]
-                entry["scrape_title"] = scraped_r.get("title", "")
-        scraped.append(entry)
+    for i in range(0, len(results), SCRAPE_BATCH_SIZE):
+        batch = results[i : i + SCRAPE_BATCH_SIZE]
+        batch_results = await asyncio.gather(
+            *(scrape_url_safe(r.get("url", "")) for r in batch if r.get("url")),
+            return_exceptions=True,
+        )
+        scrape_iter = iter(batch_results)
+        for r in batch:
+            url = r.get("url", "")
+            entry = {
+                "url": url,
+                "title": r.get("title", ""),
+                "snippet": (r.get("content", "") or "")[:200],
+                "scraped": False,
+                "content": "",
+                "scrape_title": "",
+                "raw_content": (r.get("content", "") or "")[:1000],  # SearXNG の content 全文(スクレイピング失敗時のフォールバック)
+            }
+            if url:
+                scraped_r = next(scrape_iter, None)
+                if isinstance(scraped_r, dict) and scraped_r.get("content"):
+                    entry["scraped"] = True
+                    entry["content"] = scraped_r["content"][:5000]
+                    entry["scrape_title"] = scraped_r.get("title", "")
+            scraped.append(entry)
+        if i + SCRAPE_BATCH_SIZE < len(results):
+            await asyncio.sleep(SCRAPE_BATCH_DELAY)
 
     return {"query": req.query, "results": scraped}
 

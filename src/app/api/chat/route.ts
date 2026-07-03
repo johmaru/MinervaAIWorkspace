@@ -1007,6 +1007,7 @@ async function streamCompletion({
       : await getDefaultReasoningEffort(model);
 
   const useTools = toolSupport?.supported === true && send !== undefined;
+  const searchMaxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
 
   let currentMessages = messagesForModel;
   let rounds = 0;
@@ -1124,7 +1125,7 @@ async function streamCompletion({
       } else if (tc.name === "search_web" && parsedArgs.query) {
         send?.("status", { label: "Webで検索しています。" });
         try {
-          const response = await searchWeb(parsedArgs.query, 3, timeRange);
+          const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange);
           for (const r of response.results) {
             sources.push({
               url: r.url,

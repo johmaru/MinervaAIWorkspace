@@ -10,7 +10,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app, extract_text, is_safe_host, parse_robots_txt, scrape_url_safe
+from main import (
+    SCRAPE_BATCH_DELAY,
+    SCRAPE_BATCH_SIZE,
+    SEARXNG_SAFE_LIMIT,
+    app,
+    extract_text,
+    is_safe_host,
+    parse_robots_txt,
+    scrape_url_safe,
+)
 from scrapling.parser import Adaptor
 
 
@@ -437,5 +446,200 @@ class TestSearchTimeRangeRetry:
 
         assert resp.status_code == 200
         assert mock_get.await_count == 2
+        data = resp.json()
+        assert data["results"] == []
+
+
+
+class TestSearchPagination:
+    """SearXNG への問い合わせが SEARXNG_SAFE_LIMIT 件ずつページネーションで
+    分割されるか検証（httpx をモック）。"""
+
+    @staticmethod
+    def _make_results(n: int, prefix: str = "https://example.com/r") -> list[dict]:
+        return [
+            {"url": f"{prefix}{i}", "title": f"Result {i}", "content": f"content {i}"}
+            for i in range(n)
+        ]
+
+    def test_max_results_within_safe_limit_single_request(self, client):
+        """max_results <= SAFE_LIMIT なら1回のリクエストで完了"""
+        results_resp = MagicMock()
+        results_resp.status_code = 200
+        results_resp.json.return_value = {"results": self._make_results(5)}
+
+        mock_get = AsyncMock(return_value=results_resp)
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", AsyncMock(return_value={})
+        ):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 1
+        # pageno=1
+        params = mock_get.call_args_list[0].kwargs.get("params", {})
+        assert params.get("pageno") == 1
+
+    def test_max_results_exceeds_safe_limit_paginates(self, client):
+        """max_results=8, SAFE_LIMIT=5 → 2回リクエスト（pageno=1 で5件, pageno=2 で3件）"""
+        page1 = MagicMock()
+        page1.status_code = 200
+        page1.json.return_value = {"results": self._make_results(5)}
+
+        page2 = MagicMock()
+        page2.status_code = 200
+        page2.json.return_value = {"results": self._make_results(3, prefix="https://example.com/p2_")}
+
+        mock_get = AsyncMock(side_effect=[page1, page2])
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", AsyncMock(return_value={})
+        ):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 8}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 2
+        first_params = mock_get.call_args_list[0].kwargs.get("params", {})
+        second_params = mock_get.call_args_list[1].kwargs.get("params", {})
+        assert first_params.get("pageno") == 1
+        assert second_params.get("pageno") == 2
+        # 8件すべて返却
+        data = resp.json()
+        assert len(data["results"]) == 8
+
+    def test_pagination_stops_when_page_returns_empty(self, client):
+        """ページが空を返したら追加リクエストを行わない"""
+        page1 = MagicMock()
+        page1.status_code = 200
+        page1.json.return_value = {"results": self._make_results(5)}
+
+        empty_page = MagicMock()
+        empty_page.status_code = 200
+        empty_page.json.return_value = {"results": []}
+
+        mock_get = AsyncMock(side_effect=[page1, empty_page])
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", AsyncMock(return_value={})
+        ):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 15}
+            )
+
+        assert resp.status_code == 200
+        # page1 で5件、page2 が空で停止 → 2回
+        assert mock_get.await_count == 2
+        data = resp.json()
+        assert len(data["results"]) == 5
+
+    def test_pagination_stops_on_non_200(self, client):
+        """SearXNG が非200を返したら追加リクエストを行わない"""
+        page1 = MagicMock()
+        page1.status_code = 200
+        page1.json.return_value = {"results": self._make_results(5)}
+
+        error_page = MagicMock()
+        error_page.status_code = 503
+
+        mock_get = AsyncMock(side_effect=[page1, error_page])
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", AsyncMock(return_value={})
+        ):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 15}
+            )
+
+        assert resp.status_code == 200
+        assert mock_get.await_count == 2
+        data = resp.json()
+        assert len(data["results"]) == 5
+
+
+class TestBatchScraping:
+    """スクレイピングが SCRAPE_BATCH_SIZE 件同時バッチで実行され、
+    バッチ間に wait が入るか検証。"""
+
+    @staticmethod
+    def _make_results(n: int) -> list[dict]:
+        return [
+            {"url": f"https://example.com/page{i}", "title": f"Page {i}", "content": f"c{i}"}
+            for i in range(n)
+        ]
+
+    def test_batch_count_for_seven_results(self, client):
+        """max_results=7, BATCH_SIZE=2 → scrape_url_safe は7回呼ばれる（4バッチ: 2+2+2+1）"""
+        searxng_resp = MagicMock()
+        searxng_resp.status_code = 200
+        searxng_resp.json.return_value = {"results": self._make_results(7)}
+
+        mock_get = AsyncMock(return_value=searxng_resp)
+        mock_scrape = AsyncMock(side_effect=lambda url: {"url": url, "title": "t", "content": "x"})
+
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", mock_scrape
+        ), patch("main.asyncio.sleep", AsyncMock()) as mock_sleep:
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 7}
+            )
+
+        assert resp.status_code == 200
+        # SearXNG は SAFE_LIMIT=5 なので2ページ（5+2）= 2回 + scrape 間の sleep
+        # scrape_url_safe は結果7件全てに対して1回ずつ = 7回
+        assert mock_scrape.await_count == 7
+        data = resp.json()
+        assert len(data["results"]) == 7
+        # 全件スクレイピング成功
+        assert all(r["scraped"] for r in data["results"])
+        # バッチ間 sleep は結果7件 / バッチ2 = 4バッチ → 3回のバッチ間 wait
+        # (SearXNG ページネーションの wait も asyncio.sleep なので合計はそれ以上)
+        assert mock_sleep.await_count >= 3
+
+    def test_batch_delay_between_scrape_batches(self, client):
+        """バッチ間に SCRAPE_BATCH_DELAY が渡されるか検証"""
+        searxng_resp = MagicMock()
+        searxng_resp.status_code = 200
+        searxng_resp.json.return_value = {"results": self._make_results(5)}
+
+        mock_get = AsyncMock(return_value=searxng_resp)
+        mock_scrape = AsyncMock(return_value={})
+
+        sleep_delays: list[float] = []
+
+        async def _record_sleep(delay):
+            sleep_delays.append(delay)
+
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", mock_scrape
+        ), patch("main.asyncio.sleep", AsyncMock(side_effect=_record_sleep)):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5}
+            )
+
+        assert resp.status_code == 200
+        # 5件 / バッチ2 = 3バッチ → 2回のバッチ間 wait (SCRAPE_BATCH_DELAY)
+        # ページネーションは SAFE_LIMIT=5 なので1ページで完了 → wait なし
+        # スクレイプバッチ間の wait だけ SCRAPE_BATCH_DELAY が渡る
+        assert SCRAPE_BATCH_DELAY in sleep_delays
+
+    def test_empty_results_no_scrape_calls(self, client):
+        """結果0件 → scrape_url_safe は呼ばれない"""
+        empty_resp = MagicMock()
+        empty_resp.status_code = 200
+        empty_resp.json.return_value = {"results": []}
+
+        mock_get = AsyncMock(return_value=empty_resp)
+        mock_scrape = AsyncMock(return_value={})
+
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", mock_scrape
+        ):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 5}
+            )
+
+        assert resp.status_code == 200
+        assert mock_scrape.await_count == 0
         data = resp.json()
         assert data["results"] == []
