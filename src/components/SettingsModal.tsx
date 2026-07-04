@@ -569,10 +569,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               </label>
               <input
                 type="text"
-                value={form.webSearchModel ?? "umans-coder"}
+                value={form.webSearchModel ?? "umans-qwen3.6-35b-a3b"}
                 onChange={(e) => update("webSearchModel", e.target.value)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-                placeholder="umans-coder"
+                placeholder="umans-qwen3.6-35b-a3b"
               />
               <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
             </div>

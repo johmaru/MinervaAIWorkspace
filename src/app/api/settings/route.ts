@@ -8,6 +8,7 @@ import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
 import { resetToolProbeCache } from "@/lib/toolProbe";
 import { getSessionUser } from "@/lib/auth-guards";
+import { resetEmbedPipeline } from "@/lib/embed";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -292,6 +293,32 @@ export async function POST(req: Request) {
     if (llmChanged) {
       resetUmansModelsCache();
       resetToolProbeCache();
+    }
+    // Embedding 関連設定が変更された場合は transformers.js パイプラインキャッシュを無効化
+    // （EMBED_MODEL 変更で異なるモデルをロードする必要があるため）
+    const embedChanged = ["EMBED_MODEL", "EMBED_DIM", "EMBED_PROVIDER"].some(
+      (k) => k in updates,
+    );
+    if (embedChanged) {
+      resetEmbedPipeline();
+    }
+    // scraper の設定を動的更新（SCRAPE_PROXY / SCRAPE_TIMEOUT 変更時）
+    // scraper コンテナは compose 起動時に環境変数が固定されるため、
+    // /config エンドポイント経由でプロセス内変数を書き換えて即時反映する
+    const scraperChanged = ["SCRAPE_PROXY", "SCRAPE_TIMEOUT"].some((k) => k in updates);
+    if (scraperChanged) {
+      const scraperBase = process.env.SCRAPER_URL || "http://localhost:8000";
+      fetch(`${scraperBase}/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scrape_proxy: process.env.SCRAPE_PROXY ?? "",
+          scrape_timeout: Number(process.env.SCRAPE_TIMEOUT) || 30,
+        }),
+      }).catch(() => {
+        // scraper が一時的にダウンしても .env / process.env は更新済み。
+        // 次回起動時に compose が .env から読み込むため永続化は保証される
+      });
     }
   } catch (err) {
     return Response.json(

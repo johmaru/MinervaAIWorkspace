@@ -73,17 +73,17 @@ describe("sync-env", () => {
     expect(result).toContain("SECOND=2");
   });
 
-  it("treats commented-out keys as unset and appends them", () => {
-    // .env にコメントアウト行として存在 → ^KEY= にマッチしない → 新規扱いで追記
-    writeFileSync(envPath, "# COMMENTED=value\n", "utf8");
-    writeFileSync(examplePath, "COMMENTED=value\n", "utf8");
+  it("treats commented-out keys as existing and does not append them", () => {
+    // .env にコメントアウト行として存在 → ^# KEY= にマッチ → 既存扱いで追記しない
+    // （env_file / dotenv は最後の定義が勝つため、重複追記はユーザー設定を上書きする）
+    writeFileSync(examplePath, "COMMENTED=hello\n", "utf8");
+    writeFileSync(envPath, "# COMMENTED=old\n", "utf8");
 
     const added = syncEnv(examplePath, envPath, fixedNow);
 
-    expect(added).toEqual(["COMMENTED"]);
+    expect(added).toEqual([]);
     const result = readFileSync(envPath, "utf8");
-    expect(result).toContain("# COMMENTED=value");
-    expect(result).toContain("COMMENTED=value");
+    expect(result).toBe("# COMMENTED=old\n");
   });
 
   it("creates .env when it does not exist", () => {

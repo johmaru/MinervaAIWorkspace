@@ -34,12 +34,14 @@ function parseExample(raw: string): Map<string, string> {
 }
 
 /**
- * .env に既にキーが存在するか（`^KEY=` m フラグ）を判定。
- * コメントアウト行（`# KEY=`）はマッチしないため新規扱いとなる（意図的）。
+ * .env に既にキーが存在するかを判定。
+ * `^KEY=` （アクティブな定義）も `^# KEY=` （コメントアウトされた定義）も
+ * 既存扱いとする。ユーザーが意図的にコメントアウトしたキーに .env.example の
+ * デフォルト値が重複追記されるのを防ぐ（env_file / dotenv は最後の定義が勝つため）。
  */
 function hasKey(envContent: string, key: string): boolean {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^${escaped}=`, "m").test(envContent);
+  return new RegExp(`^(#\\s*)?${escaped}=`, "m").test(envContent);
 }
 
 /** sync-env の本体。戻り値は追記したキーのリスト（テスト用）。 */

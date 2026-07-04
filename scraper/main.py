@@ -31,6 +31,10 @@ SEARXNG_SAFE_LIMIT = int(os.environ.get("SEARXNG_SAFE_LIMIT", "5"))
 SCRAPE_BATCH_SIZE = 2
 SCRAPE_BATCH_DELAY = 0.5  # seconds between scrape batches
 
+# 実行時に /config エンドポイントで上書き可能な設定
+# （起動時は compose environment / os.environ で初期化）
+_runtime_scrape_proxy: str | None = os.environ.get("SCRAPE_PROXY") or None
+_runtime_scrape_timeout: int = SCRAPE_FETCH_TIMEOUT
 # URL 単位のスクレイプキャッシュ（プロセス内、TTL 300s）。
 # /search の1リクエスト内で複数クエリが同じ URL をスクレイピングするのを防ぐ。
 _SCRAPE_CACHE: dict[str, tuple[float, dict]] = {}
@@ -97,7 +101,7 @@ async def scrape(req: ScrapeRequest):
             normalized,
             stealthy_headers=True,
             impersonate="chrome",
-            timeout=SCRAPE_FETCH_TIMEOUT,
+            timeout=_runtime_scrape_timeout,
             retries=3,
             retry_delay=2,
         )
@@ -230,6 +234,33 @@ async def search(req: SearchRequest):
     return {"query": req.query, "results": scraped}
 
 
+class ConfigRequest(BaseModel):
+    scrape_proxy: str | None = None
+    scrape_timeout: int | None = None
+
+
+@app.post("/config")
+async def update_config(req: ConfigRequest):
+    """app コンテナから scraper の実行時設定を動的更新。
+
+    SCRAPE_PROXY / SCRAPE_TIMEOUT は compose 起動時に固定されるため、
+    このエンドポイントでプロセス内変数を書き換えて即時反映する。
+    os.environ も同期し、次回起動時の整合性を保つ。
+    """
+    global _runtime_scrape_proxy, _runtime_scrape_timeout
+    if req.scrape_proxy is not None:
+        _runtime_scrape_proxy = req.scrape_proxy or None
+        os.environ["SCRAPE_PROXY"] = req.scrape_proxy
+    if req.scrape_timeout is not None:
+        _runtime_scrape_timeout = int(req.scrape_timeout)
+        os.environ["SCRAPE_TIMEOUT"] = str(req.scrape_timeout)
+    return {
+        "ok": True,
+        "scrape_proxy": _runtime_scrape_proxy,
+        "scrape_timeout": _runtime_scrape_timeout,
+    }
+
+
 async def scrape_url_safe(url: str) -> dict:
     """既存のスクレイプロジックを再利用して URL を取得。失敗時は空 dict。
 
@@ -255,7 +286,7 @@ async def scrape_url_safe(url: str) -> dict:
         print(f"[search-timing] scrape-url url={normalized} duration=0ms ok=true cached=true", flush=True)
         return cached[1]
 
-    proxy = os.environ.get("SCRAPE_PROXY") or None
+    proxy = _runtime_scrape_proxy
     retries = 1 if proxy else 2
     t_fetch = time.monotonic()
     try:
@@ -263,7 +294,7 @@ async def scrape_url_safe(url: str) -> dict:
             normalized,
             stealthy_headers=True,
             impersonate="chrome",
-            timeout=SCRAPE_FETCH_TIMEOUT,
+            timeout=_runtime_scrape_timeout,
             retries=retries,
             retry_delay=1,
             proxy=proxy,
