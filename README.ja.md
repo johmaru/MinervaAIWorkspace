@@ -204,7 +204,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `SEARXNG_URL`           | SearXNG の URL                                                    | `http://localhost:8080`                              |
 | `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |
 | `SCRAPE_PROXY`          | Scraper がスクレイピング時に使用するプロキシ                       | —                                                    |
-| `WEB_SEARCH_MODEL`    | 検索クエリ生成と結果要約に使うモデル                              | `umans-coder`                                        |
+| `WEB_SEARCH_MODEL`    | 検索クエリ生成と結果要約に使うモデル                              | `umans-qwen3.6-35b-a3b`                              |
 | `DATABASE_URL`          | SQLite データベースファイルのパス                                   | `data/umanschat.db`                                  |
 | `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
 | `AUTH_SECRET`           | Auth.js JWT 暗号化シークレット（必須。`bunx auth secret` で生成） | —                                                  |

@@ -108,7 +108,7 @@ export async function GET(req: Request) {
     dbVectorDim: getEmbedDim(),
     dbPageEmbeddingsDim: getEmbedDim(),
     // Web 検索
-    webSearchModel: process.env.WEB_SEARCH_MODEL || "umans-coder",
+    webSearchModel: process.env.WEB_SEARCH_MODEL || "umans-qwen3.6-35b-a3b",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
     webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2,
     scraperUrl: process.env.SCRAPER_URL || "http://localhost:8000",

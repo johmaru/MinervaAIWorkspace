@@ -194,7 +194,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `SEARXNG_URL`           | SearXNG URL                                                        | `http://localhost:8080`                              |
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |
 | `SCRAPE_PROXY`           | Proxy used by the scraper when scraping                            | —                                                    |
-| `WEB_SEARCH_MODEL`     | Model for search query generation and result summarization        | `umans-coder`                                        |
+| `WEB_SEARCH_MODEL`     | Model for search query generation and result summarization        | `umans-qwen3.6-35b-a3b`                              |
 | `DATABASE_URL`          | SQLite database file path                                          | `data/umanschat.db`                          |
 | `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
