@@ -1048,7 +1048,11 @@ async function streamCompletion({
       model,
       messages: currentMessages,
       stream: true,
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      ...(useToolsThisRound
+        ? { reasoning_effort: "none" as const }
+        : reasoningEffort
+          ? { reasoning_effort: reasoningEffort }
+          : {}),
       ...(useToolsThisRound
         ? { tools: [...STREAM_TOOLS, ...(extraTools ?? [])], tool_choice: "auto" }
         : {}),
