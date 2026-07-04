@@ -220,6 +220,9 @@ export async function decideSearch(
       messages: buildMessages(userMessage, history),
       // response_format は使わない: GLM-5.2 で不安定（空内容/タイムアウト）。
       // プロンプトで "Return only JSON" を強調し、フェンス除去でパースする。
+      // 検索判定は単純なJSON出力タスクなので思考トークンを無効化し、
+      // Qwen3.6 の medium 思考モードによるレイテンシ増加を防ぐ。
+      reasoning_effort: "none",
     });
     const parsed = parseDecision(completion.choices[0]?.message?.content);
     if (parsed) {
