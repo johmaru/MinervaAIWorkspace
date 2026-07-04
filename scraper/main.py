@@ -12,6 +12,7 @@ import ipaddress
 import os
 import re
 import socket
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -25,9 +26,15 @@ app = FastAPI()
 
 MAX_CONTENT_LENGTH = 50000
 FETCH_TIMEOUT = 30  # Scrapling のデフォルト
+SCRAPE_FETCH_TIMEOUT = int(os.environ.get("SCRAPE_TIMEOUT", str(FETCH_TIMEOUT)))
 SEARXNG_SAFE_LIMIT = int(os.environ.get("SEARXNG_SAFE_LIMIT", "5"))
 SCRAPE_BATCH_SIZE = 2
 SCRAPE_BATCH_DELAY = 0.5  # seconds between scrape batches
+
+# URL 単位のスクレイプキャッシュ（プロセス内、TTL 300s）。
+# /search の1リクエスト内で複数クエリが同じ URL をスクレイピングするのを防ぐ。
+_SCRAPE_CACHE: dict[str, tuple[float, dict]] = {}
+_SCRAPE_CACHE_TTL = 300.0  # seconds
 
 
 def is_safe_host(hostname: str) -> bool:
@@ -85,13 +92,12 @@ async def scrape(req: ScrapeRequest):
     # robots.txt チェック
     if not await is_allowed(normalized):
         return JSONResponse(status_code=403, content={"error": "disallowed by robots.txt"})
-
     try:
         page = await AsyncFetcher.get(
             normalized,
             stealthy_headers=True,
             impersonate="chrome",
-            timeout=FETCH_TIMEOUT,
+            timeout=SCRAPE_FETCH_TIMEOUT,
             retries=3,
             retry_delay=2,
         )
@@ -168,6 +174,7 @@ async def search(req: SearchRequest):
         return accumulated[: req.max_results]
 
     try:
+        t_searxng = time.monotonic()
         async with httpx.AsyncClient(timeout=20) as client:
             params = {"q": req.query, "format": "json"}
             if time_range:
@@ -182,11 +189,14 @@ async def search(req: SearchRequest):
                     results = await _fetch_page(client, retry_params)
                 except Exception:
                     pass  # 再試行失敗時は空のまま
+        print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results={len(results)}", flush=True)
     except Exception as e:
+        print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results=0 (error)", flush=True)
         return JSONResponse(status_code=502, content={"error": f"search failed: {str(e)}"})
 
     # スクレイピングを SCRAPE_BATCH_SIZE 件同時バッチで実行（対象サイトへの
     # レート制限/BAN 回避）。バッチ間に SCRAPE_BATCH_DELAY 秒 wait。
+    t_scrape = time.monotonic()
     scraped: list[dict] = []
     for i in range(0, len(results), SCRAPE_BATCH_SIZE):
         batch = results[i : i + SCRAPE_BATCH_SIZE]
@@ -215,6 +225,7 @@ async def search(req: SearchRequest):
             scraped.append(entry)
         if i + SCRAPE_BATCH_SIZE < len(results):
             await asyncio.sleep(SCRAPE_BATCH_DELAY)
+    print(f"[search-timing] scrape-all duration={(time.monotonic() - t_scrape) * 1000:.0f}ms batched={len(results)}", flush=True)
 
     return {"query": req.query, "results": scraped}
 
@@ -237,27 +248,41 @@ async def scrape_url_safe(url: str) -> dict:
     if not is_safe_host(parsed.hostname or ""):
         return {}
 
+    # キャッシュチェック（プロセス内、TTL 300s）
+    now = time.monotonic()
+    cached = _SCRAPE_CACHE.get(normalized)
+    if cached and (now - cached[0]) < _SCRAPE_CACHE_TTL:
+        print(f"[search-timing] scrape-url url={normalized} duration=0ms ok=true cached=true", flush=True)
+        return cached[1]
+
     proxy = os.environ.get("SCRAPE_PROXY") or None
+    retries = 1 if proxy else 2
+    t_fetch = time.monotonic()
     try:
         page = await AsyncFetcher.get(
             normalized,
             stealthy_headers=True,
             impersonate="chrome",
-            timeout=FETCH_TIMEOUT,
-            retries=2,
+            timeout=SCRAPE_FETCH_TIMEOUT,
+            retries=retries,
             retry_delay=1,
             proxy=proxy,
         )
     except Exception:
+        print(f"[search-timing] scrape-url url={normalized} duration={(time.monotonic() - t_fetch) * 1000:.0f}ms ok=false", flush=True)
         return {}
     if page.status != 200:
+        print(f"[search-timing] scrape-url url={normalized} duration={(time.monotonic() - t_fetch) * 1000:.0f}ms ok=false status={page.status}", flush=True)
         return {}
+    print(f"[search-timing] scrape-url url={normalized} duration={(time.monotonic() - t_fetch) * 1000:.0f}ms ok=true", flush=True)
 
     title = extract_title(page)
     content = extract_text(page)
     if not content:
         return {}
-    return {"url": normalized, "title": title, "content": content}
+    result = {"url": normalized, "title": title, "content": content}
+    _SCRAPE_CACHE[normalized] = (time.monotonic(), result)
+    return result
 
 
 def extract_title(page) -> str:

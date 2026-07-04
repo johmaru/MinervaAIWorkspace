@@ -1,5 +1,13 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/db", () => ({
+  db: {
+    select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(() => []) })) })),
+  },
+}));
+vi.mock("@/db/schema", () => ({ pages: {} }));
+vi.mock("@/lib/pageStore", () => ({ upsertPage: vi.fn().mockResolvedValue("id") }));
+vi.mock("@/lib/embed", () => ({ hashContent: vi.fn().mockReturnValue("hash") }));
 import { normalizeUrl, scrapeUrl, searchWeb } from "@/lib/scraper";
 
 describe("normalizeUrl", () => {

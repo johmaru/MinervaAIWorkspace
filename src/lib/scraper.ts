@@ -6,6 +6,11 @@
  * - Docker Compose: http://scraper:8000
  * - ローカル開発: http://localhost:8000
  */
+import { db } from "@/db";
+import { pages } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { hashContent } from "@/lib/embed";
+import { upsertPage } from "@/lib/pageStore";
 
 export type ScrapeResult = {
   url: string;
@@ -19,6 +24,7 @@ export type ScrapeResult = {
  * タイムアウトは microservice 側の Scrapling timeout(30s) + リトライ3回(各2s遅延) + 余裕で 45s。
  */
 export async function scrapeUrl(url: string): Promise<ScrapeResult> {
+  const t0 = Date.now();
   const base = process.env.SCRAPER_URL || "http://localhost:8000";
   const res = await fetch(`${base}/scrape`, {
     method: "POST",
@@ -30,8 +36,10 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {
       error?: string;
     };
+    console.log(`[search-timing] scrapeUrl url=${url} duration=${Date.now() - t0}ms ok=false`);
     throw new Error(data.error || `scraper returned ${res.status}`);
   }
+  console.log(`[search-timing] scrapeUrl url=${url} duration=${Date.now() - t0}ms ok=true`);
   return (await res.json()) as ScrapeResult;
 }
 
@@ -71,6 +79,7 @@ export async function searchWeb(
   maxResults = 5,
   timeRange?: "day" | "week" | "month" | "year",
 ): Promise<WebSearchResponse> {
+  const t0 = Date.now();
   const base = process.env.SCRAPER_URL || "http://localhost:8000";
   const res = await fetch(`${base}/search`, {
     method: "POST",
@@ -81,9 +90,33 @@ export async function searchWeb(
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {
       error?: string;
     };
+    console.log(`[search-timing] searchWeb query=${query} duration=${Date.now() - t0}ms ok=false`);
     throw new Error(data.error || `search failed (${res.status})`);
   }
-  return (await res.json()) as WebSearchResponse;
+  const response = (await res.json()) as WebSearchResponse;
+
+  // DB キャッシュで本文を補完: scraped=false または content 空の結果を pages テーブルで補完
+  for (const r of response.results) {
+    if (!r.scraped || !r.content) {
+      const urlHash = hashContent(r.url);
+      const [existing] = await db.select().from(pages).where(eq(pages.urlHash, urlHash));
+      if (existing && existing.content) {
+        r.scraped = true;
+        r.content = existing.content;
+        r.scrapeTitle = existing.title || r.title;
+      }
+    }
+  }
+
+  // 新規スクレイプ成功分を DB に保存（非同期、エラー無視、embed 走る）
+  for (const r of response.results) {
+    if (r.scraped && r.content) {
+      upsertPage(r.url, r.scrapeTitle || r.title, r.content).catch(() => {});
+    }
+  }
+
+  console.log(`[search-timing] searchWeb query=${query} duration=${Date.now() - t0}ms results=${response.results.length}`);
+  return response;
 }
 
 /**
