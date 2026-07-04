@@ -694,11 +694,12 @@ async function buildSearchContext({
 
   // 検索結果を検索専用モデルで要約してから system メッセージにする。
   // 要約失敗時は生 JSON にフォールバック。
+  // max_tokens で出力を制限し、要約の生成時間を抑える。
   const summarizeMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     {
       role: "system",
       content:
-        "Summarize the following web search results into a concise, factual briefing. Preserve key facts, numbers, dates, and source URLs. Do not add speculation. Answer in the user's language.",
+        "Summarize the web search results into a concise factual briefing (max 500 words). Preserve key facts, numbers, dates, and source URLs. Do not add speculation. Answer in the user's language.",
     },
     {
       role: "user",
@@ -709,7 +710,7 @@ async function buildSearchContext({
   let summary = "";
   const tSummarize = Date.now();
   try {
-    summary = await completeText(llm, searchModel, summarizeMessages);
+    summary = await completeText(llm, searchModel, summarizeMessages, { maxTokens: 800 });
   } catch {
     // 要約失敗時は生 JSON を使う
   }
@@ -944,16 +945,17 @@ function buildSynthesisMessages(
     { role: "user", content: "Give the final answer based on the dual-model trace." },
   ];
 }
-
 async function completeText(
   llm: OpenAI,
   model: string,
   messagesForModel: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  options?: { maxTokens?: number },
 ): Promise<string> {
   const completion = await llm.chat.completions.create({
     model,
     messages: messagesForModel,
     stream: false,
+    ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
   });
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
