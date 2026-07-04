@@ -710,7 +710,7 @@ async function buildSearchContext({
   let summary = "";
   const tSummarize = Date.now();
   try {
-    summary = await completeText(llm, searchModel, summarizeMessages, { maxTokens: 800 });
+    summary = await completeText(llm, searchModel, summarizeMessages, { maxTokens: 800, reasoningEffort: "none" });
   } catch {
     // 要約失敗時は生 JSON を使う
   }
@@ -949,13 +949,14 @@ async function completeText(
   llm: OpenAI,
   model: string,
   messagesForModel: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-  options?: { maxTokens?: number },
+  options?: { maxTokens?: number; reasoningEffort?: OpenAI.ReasoningEffort | null },
 ): Promise<string> {
   const completion = await llm.chat.completions.create({
     model,
     messages: messagesForModel,
     stream: false,
     ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    ...(options?.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
   });
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
