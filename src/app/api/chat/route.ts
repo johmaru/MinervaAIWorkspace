@@ -622,7 +622,9 @@ async function buildSearchContext({
   send: StreamSend;
   timeRange?: "day" | "week" | "month" | "year";
 }): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam | null> {
+  const tTotal = Date.now();
   const searchModel = defaultSearchModel();
+  const tDecide = Date.now();
   const decision = await decideSearch(
     content,
     searchModel,
@@ -630,8 +632,12 @@ async function buildSearchContext({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content })),
   );
+  console.log(`[search-timing] decideSearch duration=${Date.now() - tDecide}ms needsSearch=${decision.needsSearch} queries=${decision.queries.length}`);
 
-  if (!decision.needsSearch || decision.queries.length === 0) return null;
+  if (!decision.needsSearch || decision.queries.length === 0) {
+    console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (no search)`);
+    return null;
+  }
 
   send("status", { label: decision.userNotice ?? "最新情報を確認するね。" });
 
@@ -640,22 +646,35 @@ async function buildSearchContext({
   const allSources: SourceInfo[] = [];
   const allResults: { url: string; title: string; snippet: string; content: string }[] = [];
 
-  for (const query of decision.queries.slice(0, maxRounds)) {
-    try {
-      const response = await searchWeb(query, maxResults, timeRange);
-      for (const r of response.results) {
-        allSources.push({ url: r.url, title: r.scrapeTitle || r.title, snippet: r.snippet });
-        allResults.push({
-          url: r.url,
-          title: r.scrapeTitle || r.title,
-          snippet: r.snippet,
-          content: r.scraped
-            ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)
-            : r.raw_content || r.snippet,
-        });
+  const queries = decision.queries.slice(0, maxRounds);
+  // クエリを並列実行してレイテンシを短縮（直列だと最大 maxRounds 倍かかる）
+  const tParallel = Date.now();
+  const queryResults = await Promise.all(
+    queries.map(async (query, qi) => {
+      const tQuery = Date.now();
+      try {
+        const response = await searchWeb(query, maxResults, timeRange);
+        console.log(`[search-timing] query ${qi + 1}/${queries.length} duration=${Date.now() - tQuery}ms results=${response.results.length}`);
+        return response;
+      } catch {
+        console.log(`[search-timing] query ${qi + 1}/${queries.length} duration=${Date.now() - tQuery}ms results=0 (error)`);
+        return null;
       }
-    } catch {
-      // 個別クエリ失敗は無視して次へ
+    }),
+  );
+  console.log(`[search-timing] all queries parallel duration=${Date.now() - tParallel}ms count=${queries.length}`);
+  for (const response of queryResults) {
+    if (!response) continue;
+    for (const r of response.results) {
+      allSources.push({ url: r.url, title: r.scrapeTitle || r.title, snippet: r.snippet });
+      allResults.push({
+        url: r.url,
+        title: r.scrapeTitle || r.title,
+        snippet: r.snippet,
+        content: r.scraped
+          ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)
+          : r.raw_content || r.snippet,
+      });
     }
   }
 
@@ -666,6 +685,7 @@ async function buildSearchContext({
     // effectiveMessages で searchContextMessage が除外され、自律的に検索する）。
     // 検索失敗を伝えてトレーニングデータで回答させ、情報が取得できなかったことを
     // 明示させる。null を返すと検索未実行として扱われ、情報欠落の認知も消える。
+    console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (no results)`);
     return {
       role: "system",
       content: "Web search was attempted but returned no results. Answer from your training data and acknowledge that you could not retrieve current information.",
@@ -687,13 +707,16 @@ async function buildSearchContext({
   ];
 
   let summary = "";
+  const tSummarize = Date.now();
   try {
     summary = await completeText(llm, searchModel, summarizeMessages);
   } catch {
     // 要約失敗時は生 JSON を使う
   }
+  console.log(`[search-timing] summarize duration=${Date.now() - tSummarize}ms chars=${summary.length}`);
   const contextContent = summary || JSON.stringify(allResults, null, 2);
 
+  console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms`);
   return {
     role: "system",
     content: `Web search has already been completed. The results are provided below. Do NOT attempt to search or scrape again — do not output any tool-call commands. Answer the user's question directly using only these results.\n\nWeb search results:\n${contextContent}`,
@@ -1111,6 +1134,7 @@ async function streamCompletion({
 
       if (tc.name === "scrape_webpage" && parsedArgs.url) {
         send?.("status", { label: "URLの内容を取得しています。" });
+        const tTool = Date.now();
         try {
           const result = await scrapeUrl(parsedArgs.url);
           sources.push({
@@ -1122,8 +1146,10 @@ async function streamCompletion({
         } catch {
           toolContent = `Failed to scrape ${parsedArgs.url}`;
         }
+        console.log(`[search-timing] tool scrape_webpage round=${rounds} duration=${Date.now() - tTool}ms`);
       } else if (tc.name === "search_web" && parsedArgs.query) {
         send?.("status", { label: "Webで検索しています。" });
+        const tTool = Date.now();
         try {
           const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange);
           for (const r of response.results) {
@@ -1143,6 +1169,7 @@ async function streamCompletion({
         } catch {
           toolContent = `Search failed for: ${parsedArgs.query}`;
         }
+        console.log(`[search-timing] tool search_web round=${rounds} duration=${Date.now() - tTool}ms`);
       } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
         // MCP ツール: 関数名形式 "{serverName}__{toolName}"
         const parsed = parseMcpToolFunctionName(tc.name);
