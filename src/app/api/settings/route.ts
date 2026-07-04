@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
@@ -77,6 +77,29 @@ export { EMBED_MODEL_BASE };
  */
 function getEmbedDim(): number {
   return Number(process.env.EMBED_DIM) || 1024;
+}
+
+/**
+ * .env ファイルのパスを解決する。
+ *
+ * Next.js standalone サーバーは process.chdir で /app/.next/standalone に移動
+ * するため、process.cwd() が /app と異なる。Docker では .env は /app/.env として
+ * ボリュームマウントされるが、cwd ベースで resolve すると /app/.next/standalone/.env
+ * （イメージレイヤ内の一時ファイル）に書き込んでしまい、再ビルドで失われる。
+ *
+ * cwd から親方向へ遡って既存の .env を探し、見つからなければ cwd 直下を返す
+ * （ローカル dev や新規作成時のフォールバック）。
+ */
+function resolveEnvPath(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    const candidate = resolve(dir, ".env");
+    if (existsSync(candidate)) return candidate;
+    const parent = resolve(dir, "..");
+    if (parent === dir) break; // ルート到達
+    dir = parent;
+  }
+  return resolve(process.cwd(), ".env");
 }
 
 
@@ -236,7 +259,7 @@ export async function POST(req: Request) {
 
   // .env に全設定を保存
   try {
-    const envPath = resolve(process.cwd(), ".env");
+    const envPath = resolveEnvPath();
     let envContent = "";
     try {
       envContent = readFileSync(envPath, "utf8");

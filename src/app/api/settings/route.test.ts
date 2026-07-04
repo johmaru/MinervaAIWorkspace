@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // POST ハンドラのキャッシュ無効化を検証するため、依存をモック化。
 // vi.hoisted で宣言した変数を vi.mock factory 内で使う（hoisting safe）。
-const { readFileSyncMock, writeFileSyncMock } = vi.hoisted(() => ({
+const { readFileSyncMock, writeFileSyncMock, existsSyncMock } = vi.hoisted(() => ({
   readFileSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  existsSyncMock: vi.fn(() => true),
 }));
 const { resetEmbedPipelineMock } = vi.hoisted(() => ({
   resetEmbedPipelineMock: vi.fn(),
@@ -13,10 +14,10 @@ const { resetEmbedPipelineMock } = vi.hoisted(() => ({
 const { fetchMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
 }));
-
 vi.mock("node:fs", () => ({
   readFileSync: readFileSyncMock,
   writeFileSync: writeFileSyncMock,
+  existsSync: existsSyncMock,
 }));
 vi.mock("@/lib/auth-guards", () => ({
   getSessionUser: vi.fn().mockResolvedValue({ id: "user-1", email: "t@t" }),
@@ -121,6 +122,7 @@ describe("POST /api/settings — Embedding 設定変更時のキャッシュ無�
   afterEach(() => {
     readFileSyncMock.mockReset();
     writeFileSyncMock.mockReset();
+    existsSyncMock.mockClear();
     resetEmbedPipelineMock.mockClear();
     fetchMock.mockReset();
     vi.unstubAllGlobals();
@@ -195,6 +197,7 @@ describe("POST /api/settings — scraper /config 動的更新", () => {
   afterEach(() => {
     readFileSyncMock.mockReset();
     writeFileSyncMock.mockReset();
+    existsSyncMock.mockClear();
     fetchMock.mockReset();
     vi.unstubAllGlobals();
     if (origScrapeProxy === undefined) delete process.env.SCRAPE_PROXY;
