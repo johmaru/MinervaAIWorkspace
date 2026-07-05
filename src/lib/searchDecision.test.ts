@@ -5,6 +5,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mockCreate = vi.fn();
 vi.mock("@/lib/llm", () => ({
   createLLM: () => mockCreate(),
+  buildDisableReasoningParams: () => Promise.resolve({ reasoning_effort: "none" }),
 }));
 
 import { decideSearch } from "@/lib/searchDecision";

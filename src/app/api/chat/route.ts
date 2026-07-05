@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels } from "@/lib/llm";
+import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
@@ -710,7 +710,7 @@ async function buildSearchContext({
   let summary = "";
   const tSummarize = Date.now();
   try {
-    summary = await completeText(llm, searchModel, summarizeMessages, { maxTokens: 800, reasoningEffort: "none" });
+    summary = await completeText(llm, searchModel, summarizeMessages, { maxTokens: 800, disableThinking: true });
   } catch {
     // 要約失敗時は生 JSON を使う
   }
@@ -949,15 +949,17 @@ async function completeText(
   llm: OpenAI,
   model: string,
   messagesForModel: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-  options?: { maxTokens?: number; reasoningEffort?: OpenAI.ReasoningEffort | null },
+  options?: { maxTokens?: number; reasoningEffort?: OpenAI.ReasoningEffort | null; disableThinking?: boolean },
 ): Promise<string> {
+  const disableParams = options?.disableThinking ? await buildDisableReasoningParams(model) : {};
   const completion = await llm.chat.completions.create({
     model,
     messages: messagesForModel,
     stream: false,
     ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
     ...(options?.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
-  });
+    ...disableParams,
+  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
 
@@ -1031,6 +1033,7 @@ async function streamCompletion({
     thinkingEffort && validLevels.includes(thinkingEffort)
       ? thinkingEffort
       : await getDefaultReasoningEffort(model);
+  const disableReasoningParams = await buildDisableReasoningParams(model);
 
   const useTools = toolSupport?.supported === true && send !== undefined;
   const searchMaxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
@@ -1049,7 +1052,7 @@ async function streamCompletion({
       messages: currentMessages,
       stream: true,
       ...(useToolsThisRound
-        ? { reasoning_effort: "none" as const }
+        ? disableReasoningParams
         : reasoningEffort
           ? { reasoning_effort: reasoningEffort }
           : {}),

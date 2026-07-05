@@ -65,16 +65,17 @@ export async function availableModels(): Promise<string[]> {
 export type ReasoningConfig = {
   levels: string[];
   defaultLevel: string | null;
+  canDisable: boolean;
 };
 
 export const MODEL_REASONING: Record<string, ReasoningConfig> = {
-  "umans-kimi-k2.6": { levels: [], defaultLevel: null },
-  "umans-kimi-k2.7": { levels: [], defaultLevel: null },
-  "umans-glm-5.1": { levels: ["none", "medium"], defaultLevel: "medium" },
-  "umans-glm-5.2": { levels: ["none", "high", "max"], defaultLevel: "high" },
-  "umans-coder": { levels: [], defaultLevel: null },
-  "umans-flash": { levels: ["none", "low", "medium", "high"], defaultLevel: "medium" },
-  "umans-qwen3.6-35b-a3b": { levels: ["none", "low", "medium", "high"], defaultLevel: "medium" },
+  "umans-kimi-k2.6": { levels: [], defaultLevel: null, canDisable: false },
+  "umans-kimi-k2.7": { levels: [], defaultLevel: null, canDisable: false },
+  "umans-glm-5.1": { levels: ["none", "medium"], defaultLevel: "medium", canDisable: true },
+  "umans-glm-5.2": { levels: ["none", "high", "max"], defaultLevel: "high", canDisable: true },
+  "umans-coder": { levels: [], defaultLevel: null, canDisable: false },
+  "umans-flash": { levels: ["none", "low", "medium", "high"], defaultLevel: "medium", canDisable: true },
+  "umans-qwen3.6-35b-a3b": { levels: ["none", "low", "medium", "high"], defaultLevel: "medium", canDisable: true },
 };
 
 /**
@@ -83,7 +84,7 @@ export const MODEL_REASONING: Record<string, ReasoningConfig> = {
 export type UmansModelInfo = {
   id: string;
   displayName: string;
-  reasoning: { levels: string[]; defaultLevel: string | null };
+  reasoning: { levels: string[]; defaultLevel: string | null; canDisable: boolean };
   deprecated: boolean;
   replacement?: string;
 };
@@ -134,7 +135,7 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
         name: string;
         display_name?: string;
         capabilities?: {
-          reasoning?: { levels?: string[]; default_level?: string | null };
+          reasoning?: { levels?: string[]; default_level?: string | null; can_disable?: boolean };
         };
         deprecation?: { replacement?: string } | null;
       }
@@ -145,6 +146,7 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
       reasoning: {
         levels: m.capabilities?.reasoning?.levels ?? [],
         defaultLevel: m.capabilities?.reasoning?.default_level ?? null,
+        canDisable: m.capabilities?.reasoning?.can_disable ?? false,
       },
       deprecated: Boolean(m.deprecation),
       replacement: m.deprecation?.replacement,
@@ -185,6 +187,43 @@ export async function getDefaultReasoningEffort(model: string): Promise<string |
     if (found) return found.reasoning.defaultLevel;
   }
   return MODEL_REASONING[model]?.defaultLevel ?? null;
+}
+
+/**
+ * 指定モデルが enable_thinking: false で思考を完全OFFできるか。
+ * Umansモード時は API 由外の can_disable フラグを優先。
+ */
+export async function canDisableThinking(model: string): Promise<boolean> {
+  if (isUmansProvider()) {
+    const models = await getUmansModels();
+    const found = models.find((m) => m.id === model);
+    if (found) return found.reasoning.canDisable;
+  }
+  return MODEL_REASONING[model]?.canDisable ?? false;
+}
+
+/**
+ * 推論を無効化するためのリクエストパラメータを構築。
+ * 優先順位:
+ * 1. canDisable: true → enable_thinking: false（GLM-5.2 は levels に none を含むが
+ *    reasoning_effort: "none" が無視されるため、enable_thinking を優先）
+ * 2. levels に "none" を含む → reasoning_effort: "none"
+ * 3. どちらも不可 → 空オブジェクト（制御不能）
+ *
+ * 戻り型を Record<string, unknown> に緩和し、呼び出し元の as キャストで
+ * ChatCompletionCreateParams* 型に合わせる（enable_thinking は SDK 型に非存在）。
+ */
+export async function buildDisableReasoningParams(
+  model: string,
+): Promise<Record<string, unknown>> {
+  if (await canDisableThinking(model)) {
+    return { enable_thinking: false };
+  }
+  const levels = await getReasoningLevels(model);
+  if (levels.includes("none")) {
+    return { reasoning_effort: "none" };
+  }
+  return {};
 }
 
 /** モデル id → display_name のマッピング。OAIモード時は空オブジェクト。 */

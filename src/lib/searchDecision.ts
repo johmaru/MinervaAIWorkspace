@@ -1,5 +1,5 @@
 import type OpenAI from "openai";
-import { createLLM } from "@/lib/llm";
+import { createLLM, buildDisableReasoningParams } from "@/lib/llm";
 
 /**
  * 検索判定ルーターの結果。
@@ -215,6 +215,7 @@ export async function decideSearch(
   }
   const llm = client ?? createLLM();
   try {
+    const disableParams = await buildDisableReasoningParams(model);
     const completion = await llm.chat.completions.create({
       model,
       messages: buildMessages(userMessage, history),
@@ -222,8 +223,10 @@ export async function decideSearch(
       // プロンプトで "Return only JSON" を強調し、フェンス除去でパースする。
       // 検索判定は単純なJSON出力タスクなので思考トークンを無効化し、
       // Qwen3.6 の medium 思考モードによるレイテンシ増加を防ぐ。
-      reasoning_effort: "none",
-    });
+      // canDisable モデルは enable_thinking: false で完全OFF、それ以外は
+      // reasoning_effort: "none" で思考を抑制（buildDisableReasoningParams が自動選択）。
+      ...disableParams,
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
     const parsed = parseDecision(completion.choices[0]?.message?.content);
     if (parsed) {
       if (!parsed.needsSearch && heuristicDecision) return heuristicDecision;
