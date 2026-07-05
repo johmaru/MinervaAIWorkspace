@@ -23,6 +23,12 @@ case "$DATABASE_URL" in
     ;;
 esac
 mkdir -p "$(dirname "$DATABASE_URL")"
+# Remove stale WAL/SHM sidecars from the old WAL-mode setup. With
+# journal_mode=DELETE these are unused; a leftover -shm (especially a
+# truncated 3-byte one from bind-mount mmap corruption) can confuse the
+# first open. Runs on every start; a no-op after the first restart.
+DB_DIR="$(dirname "$DATABASE_URL")"
+rm -f "$DB_DIR"/*.db-wal "$DB_DIR"/*.db-shm 2>/dev/null || true
 
 # Run database migrations (creates all tables + indexes).
 # drizzle-kit migrate reads drizzle.config.ts which uses DATABASE_URL from env.

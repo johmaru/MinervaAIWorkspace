@@ -25,7 +25,7 @@ ENV NODE_ENV=production
 # node:22-slim (Debian Bookworm) は docker-cli を公式リポジトリに持たないため、
 # Docker の apt ソースを追加してインストールする。
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg sqlite3 && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
     chmod a+r /etc/apt/keyrings/docker.asc && \
