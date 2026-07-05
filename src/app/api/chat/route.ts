@@ -629,6 +629,7 @@ async function buildSearchContext({
     content,
     searchModel,
     history
+      .slice(-6)
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content })),
   );
@@ -642,7 +643,7 @@ async function buildSearchContext({
   send("status", { label: decision.userNotice ?? "最新情報を確認するね。" });
 
   const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
-  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2));
+  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 1));
   const allSources: SourceInfo[] = [];
   const allResults: { url: string; title: string; snippet: string; content: string }[] = [];
 
@@ -665,7 +666,7 @@ async function buildSearchContext({
   console.log(`[search-timing] all queries parallel duration=${Date.now() - tParallel}ms count=${queries.length}`);
   for (const response of queryResults) {
     if (!response) continue;
-    for (const r of response.results) {
+    for (const r of response.results.slice(0, maxResults)) {
       allSources.push({ url: r.url, title: r.scrapeTitle || r.title, snippet: r.snippet });
       allResults.push({
         url: r.url,
@@ -692,30 +693,11 @@ async function buildSearchContext({
     };
   }
 
-  // 検索結果を検索専用モデルで要約してから system メッセージにする。
-  // 要約失敗時は生 JSON にフォールバック。
-  // max_tokens で出力を制限し、要約の生成時間を抑える。
-  const summarizeMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    {
-      role: "system",
-      content:
-        "Summarize the web search results into a concise factual briefing (max 500 words). Preserve key facts, numbers, dates, and source URLs. Do not add speculation. Answer in the user's language.",
-    },
-    {
-      role: "user",
-      content: `User question: ${content}\n\nSearch results:\n${JSON.stringify(allResults, null, 2)}`,
-    },
-  ];
-
-  let summary = "";
+  // 要約ステップは廃止: 生検索結果をそのまま system メッセージに埋め込む。
+  // 各結果の content は SEARCH_RESULT_CONTENT_SLICE で切ってあるため、生 JSON でも十分短い。
   const tSummarize = Date.now();
-  try {
-    summary = await completeText(llm, searchModel, summarizeMessages, { maxTokens: 800, disableThinking: true });
-  } catch {
-    // 要約失敗時は生 JSON を使う
-  }
-  console.log(`[search-timing] summarize duration=${Date.now() - tSummarize}ms chars=${summary.length}`);
-  const contextContent = summary || JSON.stringify(allResults, null, 2);
+  const contextContent = JSON.stringify(allResults, null, 2);
+  console.log(`[search-timing] skip-summarize duration=${Date.now() - tSummarize}ms chars=${contextContent.length}`);
 
   console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms`);
   return {
