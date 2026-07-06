@@ -8,6 +8,8 @@ import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
 import { extractUrls } from "@/lib/urlExtract";
 import { decideSearch } from "@/lib/searchDecision";
+import { searchWikipedia } from "@/lib/wikipedia";
+import type { WikipediaResult } from "@/lib/wikipedia";
 import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildMemoryContext } from "@/lib/memoryStore";
@@ -652,12 +654,41 @@ async function buildSearchContext({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content })),
   );
-  console.log(`[search-timing] decideSearch duration=${Date.now() - tDecide}ms needsSearch=${decision.needsSearch} queries=${decision.queries.length}`);
+  console.log(`[search-timing] decideSearch duration=${Date.now() - tDecide}ms searchLevel=${decision.searchLevel} queries=${decision.queries.length}`);
 
-  if (!decision.needsSearch || decision.queries.length === 0) {
+  if (decision.searchLevel === "none" || decision.queries.length === 0) {
     console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (no search)`);
     return null;
   }
+
+  // wiki レベル: Wikipedia REST API で軽量参照（SearXNG/スクレイパー不使用）。
+  // 記事が見つからない場合はトレーニングデータで回答（フル Web 検索にはフォールバックしない）。
+  if (decision.searchLevel === "wiki") {
+    const tWiki = Date.now();
+    const wikiResults = await Promise.all(
+      decision.queries.slice(0, 1).map((q) => searchWikipedia(q).catch(() => null)),
+    );
+    const valid = wikiResults.filter((r): r is WikipediaResult => r !== null);
+    console.log(`[search-timing] wikipedia lookup duration=${Date.now() - tWiki}ms found=${valid.length}`);
+    if (valid.length === 0) {
+      send("status", { label: "Wikipediaに該当記事が見つかりませんでした。知識で回答します。" });
+      console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (wiki miss)`);
+      return {
+        role: "system",
+        content: "Wikipedia lookup was attempted but no article was found. Answer from your training data and acknowledge the limitation.",
+      };
+    }
+    send("sources", { sources: valid.map((r) => ({ url: r.url, title: r.title, snippet: r.description })) });
+    const contextContent = valid
+      .map((r) => `Title: ${r.title}\nDescription: ${r.description}\nURL: ${r.url}\nExtract: ${r.extract}`)
+      .join("\n\n");
+    console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (wiki hit)`);
+    return {
+      role: "system",
+      content: `Wikipedia lookup has been completed. Use this to answer the user's question directly. Do NOT attempt to search or scrape again.\n\nWikipedia results:\n${contextContent}`,
+    };
+  }
+
 
   send("status", { label: decision.userNotice ?? "最新情報を確認するね。" });
 
@@ -1002,6 +1033,20 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_wikipedia",
+      description: "Look up a Wikipedia article for a concept, person, place, or term. Use this for factual information about named entities when you don't need real-time data. Faster than search_web.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query (entity name or term)" },
+        },
+        required: ["query"],
+      },
+    },
+  },
 ];
 
 const MAX_TOOL_ROUNDS = 3;
@@ -1184,6 +1229,21 @@ async function streamCompletion({
           toolContent = `Search failed for: ${parsedArgs.query}`;
         }
         console.log(`[search-timing] tool search_web round=${rounds} duration=${Date.now() - tTool}ms`);
+      } else if (tc.name === "search_wikipedia" && parsedArgs.query) {
+        send?.("status", { label: "Wikipediaで調べています。" });
+        const tTool = Date.now();
+        try {
+          const result = await searchWikipedia(parsedArgs.query);
+          if (result) {
+            sources.push({ url: result.url, title: result.title, snippet: result.description });
+            toolContent = `<${result.url}>\n${result.title}\n${result.description}\n${result.extract}`;
+          } else {
+            toolContent = "No Wikipedia article found.";
+          }
+        } catch {
+          toolContent = `Wikipedia lookup failed for: ${parsedArgs.query}`;
+        }
+        console.log(`[search-timing] tool search_wikipedia round=${rounds} duration=${Date.now() - tTool}ms`);
       } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
         // MCP ツール: 関数名形式 "{serverName}__{toolName}"
         const parsed = parseMcpToolFunctionName(tc.name);

@@ -31,11 +31,11 @@ beforeEach(() => {
 });
 
 describe("decideSearch", () => {
-  it("needsSearch:true + queries をパースする", async () => {
+  it("searchLevel:web + queries をパースする", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: true,
+          searchLevel: "web",
           reason: "latest reviews needed",
           userNotice: "Steamの評価は変わるので、最新のレビュー状況を確認するね。",
           queries: ["Project Motor Racing 2.0 Steam review", "PMR 2.0 評価"],
@@ -45,7 +45,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("PMR2.0の評価は？", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.reason).toBe("latest reviews needed");
     expect(decision.userNotice).toBe("最新の評価やレビューをWebで確認します。");
     expect(decision.queries).toEqual([
@@ -54,11 +54,11 @@ describe("decideSearch", () => {
     ]);
   });
 
-  it("needsSearch:false の場合は空 queries を返す", async () => {
+  it("searchLevel:none の場合は空 queries を返す", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: false,
+          searchLevel: "none",
           reason: "stable knowledge",
           userNotice: null,
           queries: [],
@@ -72,7 +72,7 @@ describe("decideSearch", () => {
       [],
     );
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
     expect(decision.userNotice).toBeNull();
   });
@@ -81,7 +81,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: false,
+          searchLevel: "none",
           reason: "stable knowledge",
           userNotice: null,
           queries: [],
@@ -95,7 +95,7 @@ describe("decideSearch", () => {
       [],
     );
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.reason).toContain("heuristic");
     expect(decision.userNotice).toBe(
       "検索判定を定型ルールで補完し、Webで最新情報を確認します。",
@@ -108,7 +108,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: true,
+          searchLevel: "web",
           reason: "current evaluation",
           userNotice: "GLM5.2の評価は新しく出ている情報に変わるから、最新の状況を調べるね。",
           queries: ["GLM5.2 評価 最新"],
@@ -118,7 +118,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("GLM5.2の評価どうなってる？", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe("最新の評価やレビューをWebで確認します。");
   });
 
@@ -126,7 +126,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: true,
+          searchLevel: "web",
           reason: "steam status",
           userNotice: "Steamを確認するね",
           queries: ["Project Motor Racing 2.0 Steam"],
@@ -136,41 +136,41 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("Project Motor Racing 2.0はSteamで配信されてる？", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe("Steamの最新情報をWebで確認します。");
   });
 
   it("markdown コードフェンス付き JSON をパースする", async () => {
     mockCreate.mockReturnValue(
       mockClient(
-        '```json\n{"needsSearch": true, "reason": "need search", "userNotice": "確認するね", "queries": ["latest news"]}\n```',
+        '```json\n{"searchLevel": "web", "reason": "need search", "userNotice": "確認するね", "queries": ["latest news"]}\n```',
       ),
     );
 
     const decision = await decideSearch("最新ニュース", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.queries).toEqual(["latest news"]);
     expect(decision.userNotice).toBe("最新の情報をWebで確認します。");
   });
 
   it("フェンス無しのプレーン JSON もパースする", async () => {
     mockCreate.mockReturnValue(
-      mockClient('{"needsSearch": false, "reason": "ok", "userNotice": null, "queries": []}'),
+      mockClient('{"searchLevel": "none", "reason": "ok", "userNotice": null, "queries": []}'),
     );
 
     const decision = await decideSearch("hi", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("ok");
   });
 
-  it("LLM が不正 JSON を返した場合は needsSearch:false でフォールバック", async () => {
+  it("LLM が不正 JSON を返した場合は searchLevel:none でフォールバック", async () => {
     mockCreate.mockReturnValue(mockClient("this is not json"));
 
     const decision = await decideSearch("hi", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
     expect(decision.queries).toEqual([]);
   });
@@ -184,14 +184,14 @@ describe("decideSearch", () => {
       [],
     );
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe(
       "検索判定を定型ルールで補完し、Webで最新情報を確認します。",
     );
     expect(decision.queries[0]).toContain("Project Motor Racing 2.0");
   });
 
-  it("LLM 呼び出しが reject した場合は needsSearch:false でフォールバック", async () => {
+  it("LLM 呼び出しが reject した場合は searchLevel:none でフォールバック", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -202,7 +202,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("hi", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
     expect(decision.queries).toEqual([]);
   });
@@ -222,7 +222,7 @@ describe("decideSearch", () => {
       [],
     );
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe(
       "検索判定を定型ルールで補完し、Webで最新情報を確認します。",
     );
@@ -233,7 +233,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: true,
+          searchLevel: "web",
           reason: "need search",
           userNotice: "確認するね",
           queries: ["valid query", "", "  ", 123, null, "another valid"],
@@ -243,7 +243,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("最新ニュース", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.queries).toEqual(["valid query", "another valid"]);
   });
 
@@ -251,7 +251,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: true,
+          searchLevel: "web",
           reason: "need search",
           userNotice: "   ",
           queries: ["q"],
@@ -261,7 +261,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("最新ニュース", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe("最新の情報をWebで確認します。");
   });
 
@@ -270,7 +270,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("hi", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
   });
 
@@ -279,7 +279,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("hi", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
   });
 
@@ -289,7 +289,7 @@ describe("decideSearch", () => {
         {
           message: {
             content: JSON.stringify({
-              needsSearch: false,
+              searchLevel: "none",
               reason: "stable",
               userNotice: null,
               queries: [],
@@ -317,7 +317,7 @@ describe("decideSearch", () => {
 
   it("response_format を使わず通常 completion で呼ぶ", async () => {
     const create = vi.fn().mockResolvedValue({
-      choices: [{ message: { content: JSON.stringify({ needsSearch: false, reason: "ok", userNotice: null, queries: [] }) } }],
+      choices: [{ message: { content: JSON.stringify({ searchLevel: "none", reason: "ok", userNotice: null, queries: [] }) } }],
     });
     mockCreate.mockReturnValue({ chat: { completions: { create } } });
 
@@ -331,7 +331,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: false,
+          searchLevel: "none",
           reason: "asking about past conversation",
           userNotice: null,
           queries: [],
@@ -341,7 +341,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("最近何の話しした？", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
   });
 
@@ -356,7 +356,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("前に何を話したか覚えてる？", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
     expect(decision.queries).toEqual([]);
   });
@@ -365,7 +365,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: false,
+          searchLevel: "none",
           reason: "recall question",
           userNotice: null,
           queries: [],
@@ -375,14 +375,14 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("what did we talk about last time?", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
   });
 
   it("記憶呼び出し質問の英語バリエーションを網羅的に検索抑制する", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: false,
+          searchLevel: "none",
           reason: "recall question",
           userNotice: null,
           queries: [],
@@ -407,7 +407,7 @@ describe("decideSearch", () => {
       mockCreate.mockReturnValue(
         mockClient(
           JSON.stringify({
-            needsSearch: false,
+            searchLevel: "none",
             reason: "recall question",
             userNotice: null,
             queries: [],
@@ -415,7 +415,7 @@ describe("decideSearch", () => {
         ),
       );
       const decision = await decideSearch(q, "umans-glm-5.2", []);
-      expect(decision.needsSearch, `query: ${q}`).toBe(false);
+      expect(decision.searchLevel, `query: ${q}`).toBe("none");
     }
   });
 
@@ -431,7 +431,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("Pythonでフィボナッチ数列を計算するコードを書いて", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toContain("heuristic");
     expect(decision.queries).toEqual([]);
     expect(mockCreate).not.toHaveBeenCalled();
@@ -448,7 +448,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("この文章を英語に翻訳して", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
     expect(mockCreate).not.toHaveBeenCalled();
   });
@@ -464,7 +464,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("このデザインについてどう思う？アドバイスをちょうだい", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
     expect(mockCreate).not.toHaveBeenCalled();
   });
@@ -480,7 +480,7 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("write a program to sort an array", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(false);
+    expect(decision.searchLevel).toBe("none");
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
@@ -488,7 +488,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
-          needsSearch: true,
+          searchLevel: "web",
           reason: "explicit search requested",
           userNotice: null,
           queries: ["最新の Python コード事例"],
@@ -498,7 +498,46 @@ describe("decideSearch", () => {
 
     const decision = await decideSearch("最新の Python コードを検索して", "umans-glm-5.2", []);
 
-    expect(decision.needsSearch).toBe(true);
+    expect(decision.searchLevel).toBe("web");
     expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("UNKNOWN_TERM ヒューリスティック（Xって何）は searchLevel:wiki となる", async () => {
+    // LLM が呼ばれたら即座に失敗するよう reject を設定
+    mockCreate.mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn().mockRejectedValue(new Error("LLM should not be called")),
+        },
+      },
+    });
+
+    const decision = await decideSearch("マグナ・カルタって何？", "umans-glm-5.2", []);
+
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("Wikipediaで調べます。");
+    expect(decision.queries).toEqual(["マグナ・カルタって何？"]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("LLM が searchLevel:wiki を返した場合パースする", async () => {
+    mockCreate.mockReturnValue(
+      mockClient(
+        JSON.stringify({
+          searchLevel: "wiki",
+          reason: "named entity lookup",
+          userNotice: "Wikipediaで調べます。",
+          queries: ["マグナ・カルタ"],
+        }),
+      ),
+    );
+
+    const decision = await decideSearch("マグナ・カルタについて教えて", "umans-glm-5.2", []);
+
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.queries).toEqual(["マグナ・カルタ"]);
+    // ヒューリスティックが null（パターン非マッチ）の場合 LLM が wiki を返す。
+    // normalizeDecisionNotice は buildUserNotice で再計算するが、UNKNOWN_TERM_PATTERN
+    // 非マッチのため DEFAULT_USER_NOTICE になる（プラン想定: wiki 専用分岐なし）。
   });
 });

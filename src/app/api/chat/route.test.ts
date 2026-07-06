@@ -17,6 +17,9 @@ vi.mock("@/lib/pageStore", () => ({
 vi.mock("@/lib/searchDecision", () => ({
   decideSearch: vi.fn(),
 }));
+vi.mock("@/lib/wikipedia", () => ({
+  searchWikipedia: vi.fn(),
+}));
 vi.mock("@/lib/memoryStore", () => ({
   buildMemoryContext: vi.fn(),
 }));
@@ -73,6 +76,7 @@ vi.mock("@/lib/llm", async (importOriginal) => {
 
 import { searchWeb } from "@/lib/scraper";
 import { decideSearch } from "@/lib/searchDecision";
+import { searchWikipedia } from "@/lib/wikipedia";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { probeToolSupport } from "@/lib/toolProbe";
 import { POST } from "@/app/api/chat/route";
@@ -81,12 +85,13 @@ import { createLLM } from "@/lib/llm";
 // テスト間でモックの呼び出し履歴・戻り値をリセット（leak 防止）
 beforeEach(() => {
   vi.mocked(searchWeb).mockReset();
+  vi.mocked(searchWikipedia).mockReset();
   capturedMessages.length = 0;
   vi.mocked(decideSearch).mockReset();
   vi.mocked(buildMemoryContext).mockReset();
   // デフォルト: 検索不要（通常チャットのテストで実 LLM ルーターを呼ばない）
   vi.mocked(decideSearch).mockResolvedValue({
-    needsSearch: false,
+    searchLevel: "none",
     reason: "default mock",
     userNotice: null,
     queries: [],
@@ -261,9 +266,9 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
   itReal("検索判定 → status → sources の順でイベントを送信", async () => {
     const id = await createThread();
 
-    // 検索判定ルーターをモック: needsSearch:true でクエリを返す
+    // 検索判定ルーターをモック: searchLevel:"web" でクエリを返す
     vi.mocked(decideSearch).mockResolvedValueOnce({
-      needsSearch: true,
+      searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
       queries: ["python programming language"],
@@ -314,9 +319,9 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
   itReal("検索不要時は status/sources イベントを出さない", async () => {
     const id = await createThread();
 
-    // 検索判定ルーターをモック: needsSearch:false
+    // 検索判定ルーターをモック: searchLevel:"none"
     vi.mocked(decideSearch).mockResolvedValueOnce({
-      needsSearch: false,
+      searchLevel: "none",
       reason: "stable knowledge",
       userNotice: null,
       queries: [],
@@ -348,7 +353,7 @@ describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () =>
     process.env.WEB_SEARCH_MODEL = "umans-test-search";
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
-      needsSearch: true,
+      searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
       queries: ["test query"],
@@ -422,7 +427,7 @@ describe("POST /api/chat — rapid mode", () => {
 
     // 検索が必要な設定にしておき、rapid でスキップされることを検証
     vi.mocked(decideSearch).mockResolvedValueOnce({
-      needsSearch: true,
+      searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
       queries: ["python programming language"],
@@ -479,9 +484,9 @@ describe("POST /api/chat — time_range 透過", () => {
   itReal("body.timeRange が searchWeb の第3引数に渡される", async () => {
     const id = await createThread();
 
-    // 検索判定ルーターをモック: needsSearch:true でクエリ1件
+    // 検索判定ルーターをモック: searchLevel:"web" でクエリ1件
     vi.mocked(decideSearch).mockResolvedValueOnce({
-      needsSearch: true,
+      searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
       queries: ["latest news today"],
@@ -519,7 +524,7 @@ describe("POST /api/chat — 検索結果0件時のステータス通知", () =>
     const id = await createThread();
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
-      needsSearch: true,
+      searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
       queries: ["latest news today"],
@@ -557,7 +562,7 @@ describe("POST /api/chat — ツール使用時に事前検索メッセージを
   afterAll(() => useFakeLlm.set(false));
 
   const searchDecided = {
-    needsSearch: true,
+    searchLevel: "web",
     reason: "latest info",
     userNotice: "最新情報を確認するね。",
     queries: ["GPT-5.6 benchmark"],
@@ -672,5 +677,74 @@ describe("POST /api/chat — tool-call markup leak prevention", () => {
       .join("");
     expect(postReplaceDeltas).not.toMatch(/tool_call/);
     expect(postReplaceDeltas).toContain("Answer here.");
+  }, 30_000);
+});
+
+describe("POST /api/chat — searchLevel:wiki で Wikipedia 参照", () => {
+  beforeAll(() => useFakeLlm.set(true));
+  afterAll(() => useFakeLlm.set(false));
+
+  it("searchLevel:wiki → searchWikipedia が呼ばれ searchWeb は呼ばれない", async () => {
+    const id = await createThread();
+
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      searchLevel: "wiki",
+      reason: "named entity lookup",
+      userNotice: "Wikipediaで調べます。",
+      queries: ["マグナ・カルタ"],
+    });
+    vi.mocked(searchWikipedia).mockResolvedValueOnce({
+      title: "マグナ・カルタ",
+      description: "イギリスの法律文書",
+      extract: "マグナ・カルタ（大憲章）は1215年に成立した文書。",
+      url: "https://ja.wikipedia.org/wiki/マグナ・カルタ",
+      lang: "ja",
+    });
+
+    const res = await POST(chatReq(id, "マグナ・カルタとは？"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // searchWikipedia が呼ばれる
+    expect(vi.mocked(searchWikipedia)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(searchWikipedia).mock.calls[0][0]).toBe("マグナ・カルタ");
+    // searchWeb は呼ばれない（フル Web 検索パスに入らない）
+    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
+
+    // sources イベントで Wikipedia URL が送信される
+    const sources = events.filter((e) => e.event === "sources");
+    expect(sources).toHaveLength(1);
+    const srcs = sources[0].data.sources as Array<{ url: string }>;
+    expect(srcs[0].url).toBe("https://ja.wikipedia.org/wiki/マグナ・カルタ");
+  }, 30_000);
+
+  it("searchLevel:wiki で Wikipedia に記事が無い → searchWeb は呼ばず知識で回答", async () => {
+    const id = await createThread();
+
+    vi.mocked(decideSearch).mockResolvedValueOnce({
+      searchLevel: "wiki",
+      reason: "named entity lookup",
+      userNotice: "Wikipediaで調べます。",
+      queries: ["存在しない架空の概念XYZ"],
+    });
+    vi.mocked(searchWikipedia).mockResolvedValueOnce(null);
+
+    const res = await POST(chatReq(id, "存在しない架空の概念XYZとは？"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // searchWikipedia は呼ばれるが結果 null
+    expect(vi.mocked(searchWikipedia)).toHaveBeenCalledTimes(1);
+    // searchWeb にはフォールバックしない
+    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
+    // sources イベントは送信されない（記事なし）
+    expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
+    // 「記事が見つからなかった」status 通知が出る
+    const statusEvents = events.filter((e) => e.event === "status");
+    expect(statusEvents.some((e) => e.data.label.includes("Wikipediaに該当記事が見つかりません"))).toBe(true);
   }, 30_000);
 });

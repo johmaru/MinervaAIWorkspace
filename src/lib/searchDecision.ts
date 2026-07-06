@@ -6,7 +6,7 @@ import { createLLM, buildDisableReasoningParams } from "@/lib/llm";
  * LLM にツールを持たせず、アプリ側で検索要否を判定するために使う。
  */
 export type SearchDecision = {
-  needsSearch: boolean;
+  searchLevel: "none" | "wiki" | "web";
   reason: string;
   /** ユーザーへ一言断りとして表示する短い文。検索不要時は null。 */
   userNotice: string | null;
@@ -15,36 +15,42 @@ export type SearchDecision = {
 };
 
 const SYSTEM_PROMPT = `You are a search decision router.
-Decide whether the user's message requires web search before answering.
+Decide the search level for the user's message: "none", "wiki", or "web".
 Do not answer the user. Return only valid JSON.
 
-Use web search when:
+Use "wiki" when:
+- the user asks about a named entity, historical figure, concept, or term you are uncertain about
+- the user asks "what is X", "Xって何", "Xとは", "tell me about X" about a named entity
+- the answer is stable factual/encyclopedic knowledge, not current/volatile info
+- Generate 1 query (the entity/term name)
+
+Use "web" when:
 - the user asks for latest/current/recent information
 - prices, schedules, reviews, ratings, patches, release dates, laws, sports, news, products, or online population may have changed
 - the user explicitly asks to look up/search/check/verify
 - the answer depends on a specific website's current state
 - the user mentions a specific product name, tool name, library, framework, or proper noun that may be unfamiliar or recently emerged (e.g. "omp", "Paseo", "Bun", "tRPC")
-- the user asks "what is X", "Xって何", "Xとは", "tell me about X" about a named entity
+- Generate 2 to 3 precise search queries in the user's language. Use different phrasings or aspects of the question for each query (e.g. a direct question, a keyword-focused query, and a variant with synonyms). This improves result coverage across search engines.
 
-Do not use web search when:
+Use "none" when:
 - the user asks for explanation, translation, coding help, general advice, brainstorming, or opinions
-- the answer can be given from stable knowledge
+- the answer can be given from stable knowledge you are confident about
 - the user is asking about provided text/code/logs
 - the user asks about past conversations, memories, or what was previously discussed
 - the entity is a well-known general concept that the model confidently knows (e.g. "what is Python", "what is HTTP") — only search when uncertain
 
-If search is needed, create 2 to 3 precise search queries in the user's language.
-Use different phrasings or aspects of the question for each query (e.g. a direct question, a keyword-focused query, and a variant with synonyms). This improves result coverage across search engines.
-The userNotice should be a SHORT status-style sentence in the user's language (e.g. "最新の情報をWebで確認します。"). If no search needed, set userNotice to null.
+If both "wiki" and "web" seem applicable, choose "web".
+
+The userNotice should be a SHORT status-style sentence in the user's language (e.g. "最新の情報をWebで確認します。"). If search level is "none", set userNotice to null.
 
 Return JSON:
-{"needsSearch": boolean, "reason": string, "userNotice": string | null, "queries": string[]}`;
+{"searchLevel": "none" | "wiki" | "web", "reason": string, "userNotice": string | null, "queries": string[]}`;
 
 const FALLBACK_USER_NOTICE = "検索判定を定型ルールで補完し、Webで最新情報を確認します。";
 const DEFAULT_USER_NOTICE = "最新の情報をWebで確認します。";
 const REVIEW_USER_NOTICE = "最新の評価やレビューをWebで確認します。";
 const STEAM_USER_NOTICE = "Steamの最新情報をWebで確認します。";
-const UNKNOWN_TERM_NOTICE = "未知の語についてWebで調べます。";
+const UNKNOWN_TERM_NOTICE = "Wikipediaで調べます。";
 
 const EXPLICIT_SEARCH_PATTERN =
   /(web\s*search|search\s+the\s+web|look\s+up|verify|check\s+online|web検索|検索して|検索し|調べて|確認して|見て|最新|現在|直近|最近|いま|今日|latest|current|recent|today|up[- ]?to[- ]?date)/i;
@@ -93,7 +99,7 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
   // 記憶呼び出し質問は上で除外済み。
   if (UNKNOWN_TERM_PATTERN.test(normalized)) {
     return {
-      needsSearch: true,
+      searchLevel: "wiki",
       reason: "heuristic: user asks about an unfamiliar named entity or term",
       userNotice: UNKNOWN_TERM_NOTICE,
       queries: [normalized],
@@ -101,11 +107,11 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
   }
 
   // 明らかに検索不要な入力（コード/翻訳/意見/アドバイス等）は LLM 判定をスキップし、
-  // 即座に needsSearch:false を返す。検索が必要な入力は従来通り LLM 判定へ。
+  // 即座に searchLevel:"none" を返す。検索が必要な入力は従来通り LLM 判定へ。
   if (!EXPLICIT_SEARCH_PATTERN.test(normalized) && !VOLATILE_INFO_PATTERN.test(normalized)) {
     if (NO_SEARCH_PATTERN.test(normalized)) {
       return {
-        needsSearch: false,
+        searchLevel: "none",
         reason: "heuristic: code/translation/opinion/advice request — no search needed",
         userNotice: null,
         queries: [],
@@ -123,7 +129,7 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
   }
 
   return {
-    needsSearch: true,
+    searchLevel: "web",
     reason: "heuristic: user requested current or volatile information",
     userNotice: buildUserNotice(normalized, true),
     queries: [queryParts.join(" ")],
@@ -131,7 +137,7 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
 }
 
 function normalizeDecisionNotice(decision: SearchDecision, userMessage: string): SearchDecision {
-  if (!decision.needsSearch) return decision;
+  if (decision.searchLevel === "none") return decision;
   return {
     ...decision,
     userNotice: buildUserNotice(userMessage, false),
@@ -154,7 +160,7 @@ function parseDecision(raw: string | null | undefined): SearchDecision | null {
   try {
     const parsed = JSON.parse(stripped) as Partial<SearchDecision>;
     return {
-      needsSearch: Boolean(parsed.needsSearch),
+      searchLevel: parsed.searchLevel === "wiki" ? "wiki" : parsed.searchLevel === "web" ? "web" : "none",
       reason: typeof parsed.reason === "string" ? parsed.reason : "",
       userNotice:
         typeof parsed.userNotice === "string" && parsed.userNotice.trim()
@@ -194,7 +200,7 @@ function buildMessages(
  * （空内容やタイムアウトが発生する）ため、response_format を使わず通常の
  * completion で JSON を取得し、markdown コードフェンスを除去してパースする。
  *
- * LLM エラー・JSON パース失敗時は needsSearch: false でフォールバック（通常チャット）。
+ * LLM エラー・JSON パース失敗時は searchLevel: "none" でフォールバック（通常チャット）。
  *
  * @param userMessage 最新のユーザー発言
  * @param model LLM モデル id
@@ -208,9 +214,11 @@ export async function decideSearch(
   client?: OpenAI,
 ): Promise<SearchDecision> {
   const heuristicDecision = buildHeuristicDecision(userMessage);
-  // ヒューリスティックで「検索不要」が確定した場合は LLM 呼び出しをスキップ。
-  // コード質問・翻訳・意見・アドバイス等、明らかに検索不要な入力のレイテンシを削減。
-  if (heuristicDecision && !heuristicDecision.needsSearch) {
+  // ヒューリスティックで「検索不要」または「Wikipedia参照」が確定した場合は LLM 呼び出しをスキップ。
+  // コード質問・翻訳・意見・アドバイス等（none）は即座に通常チャットへ。
+  // 未知概念・固有名詞（wiki）は Wikipedia 参照が軽量・確定的なため LLM ルーターを経由しない。
+  // 明示的検索要求・最新情報要求（web）はクエリ精錬のため LLM ルーターへ進む。
+  if (heuristicDecision && (heuristicDecision.searchLevel === "none" || heuristicDecision.searchLevel === "wiki")) {
     return heuristicDecision;
   }
   const llm = client ?? createLLM();
@@ -229,13 +237,13 @@ export async function decideSearch(
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
     const parsed = parseDecision(completion.choices[0]?.message?.content);
     if (parsed) {
-      if (!parsed.needsSearch && heuristicDecision) return heuristicDecision;
+      if (parsed.searchLevel === "none" && heuristicDecision) return heuristicDecision;
       return normalizeDecisionNotice(parsed, userMessage);
     }
 
     // パース失敗時でも、明示的に最新/検索/評価を求める入力は検索へ倒す。
     return heuristicDecision ?? {
-      needsSearch: false,
+      searchLevel: "none",
       reason: "router failed",
       userNotice: null,
       queries: [],
@@ -243,7 +251,7 @@ export async function decideSearch(
   } catch {
     // LLM エラー時でも、明示的に最新/検索/評価を求める入力は検索へ倒す。
     return heuristicDecision ?? {
-      needsSearch: false,
+      searchLevel: "none",
       reason: "router failed",
       userNotice: null,
       queries: [],
