@@ -1,6 +1,20 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hashContent, embedText } from "@/lib/embed";
+
+// transformers.js のモデルロード（ネットワーク / ファイル I/O 依存）をモック。
+// local プロバイダのテストがモデル未ダウンロード環境で失敗するのを防ぐ。
+// vi.mock は hoist されるため、モック内で参照する変数は vi.hoisted で囲む。
+const { fakePipeline } = vi.hoisted(() => ({
+  fakePipeline: vi.fn(async (texts: string[]) => ({
+    data: new Float32Array(texts.length * 3),
+    tolist: () => [Array.from({ length: 3 }, () => 0.5)],
+  })),
+}));
+vi.mock("@xenova/transformers", () => ({
+  pipeline: () => fakePipeline,
+  env: { backends: { onnx: { wasm: { wasmPaths: "" } } } },
+}));
+import { hashContent, embedText, resetEmbedPipeline } from "@/lib/embed";
 
 describe("embed — hashContent", () => {
   it("同じ入力には同じハッシュを返す", () => {
@@ -29,12 +43,14 @@ describe("embed — プロバイダ切替", () => {
   const originalEmbedderUrl = process.env.EMBEDDER_URL;
 
   afterEach(() => {
-    // テスト間の env / fetch 汚染を除去
+    // テスト間の env / fetch / pipeline キャッシュをクリア
     global.fetch = originalFetch;
     if (originalProvider === undefined) delete process.env.EMBED_PROVIDER;
     else process.env.EMBED_PROVIDER = originalProvider;
     if (originalEmbedderUrl === undefined) delete process.env.EMBEDDER_URL;
     else process.env.EMBEDDER_URL = originalEmbedderUrl;
+    fakePipeline.mockClear();
+    resetEmbedPipeline();
     vi.restoreAllMocks();
   });
 
@@ -102,5 +118,37 @@ describe("embed — プロバイダ切替", () => {
     const vec = await embedText("hello", "query");
     expect(vec).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("resetEmbedPipeline", () => {
+  const originalEmbedModel = process.env.EMBED_MODEL;
+  const originalEmbedDim = process.env.EMBED_DIM;
+
+  afterEach(() => {
+    if (originalEmbedModel === undefined) delete process.env.EMBED_MODEL;
+    else process.env.EMBED_MODEL = originalEmbedModel;
+    if (originalEmbedDim === undefined) delete process.env.EMBED_DIM;
+    else process.env.EMBED_DIM = originalEmbedDim;
+    resetEmbedPipeline();
+  });
+
+  it("EMBED_MODEL 変更後に新しいモデルでパイプラインを再ロードする", async () => {
+    // local プロバイダを明示的に指定（http だとパイプラインを使わない）
+    delete process.env.EMBED_PROVIDER;
+    // 1回目のロードでパイプラインをキャッシュ
+    process.env.EMBED_MODEL = "old-model";
+    resetEmbedPipeline();
+    await embedText("hello");
+    expect(fakePipeline).toHaveBeenCalledTimes(1);
+
+    // resetEmbedPipeline 後に再度 embedText を呼ぶとパイプラインが再ロードされる
+    resetEmbedPipeline();
+    await embedText("world");
+    expect(fakePipeline).toHaveBeenCalledTimes(2);
+  });
+
+  it("パイプライン未ロード状態で呼んでも安全", () => {
+    expect(() => resetEmbedPipeline()).not.toThrow();
   });
 });
