@@ -43,7 +43,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("PMR2.0の評価は？", "umans-glm-5.2", []);
+    const decision = await decideSearch("PMR2.0の評価は？", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.reason).toBe("latest reviews needed");
@@ -66,11 +66,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch(
-      "Pythonのリスト内包表記の使い方を教えて",
-      "umans-glm-5.2",
-      [],
-    );
+    const decision = await decideSearch("Pythonのリスト内包表記の使い方を教えて", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
@@ -89,11 +85,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch(
-      "Project Motor Racing 2.0のSteamでの評価はどうなってる？最新のレビュー状況を教えて",
-      "umans-glm-5.2",
-      [],
-    );
+    const decision = await decideSearch("Project Motor Racing 2.0のSteamでの評価はどうなってる？最新のレビュー状況を教えて", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.reason).toContain("heuristic");
@@ -116,7 +108,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("GLM5.2の評価どうなってる？", "umans-glm-5.2", []);
+    const decision = await decideSearch("GLM5.2の評価どうなってる？", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe("最新の評価やレビューをWebで確認します。");
@@ -134,7 +126,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("Project Motor Racing 2.0はSteamで配信されてる？", "umans-glm-5.2", []);
+    const decision = await decideSearch("Project Motor Racing 2.0はSteamで配信されてる？", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe("Steamの最新情報をWebで確認します。");
@@ -147,7 +139,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("最新ニュース", "umans-glm-5.2", []);
+    const decision = await decideSearch("最新ニュース", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.queries).toEqual(["latest news"]);
@@ -159,7 +151,7 @@ describe("decideSearch", () => {
       mockClient('{"searchLevel": "none", "reason": "ok", "userNotice": null, "queries": []}'),
     );
 
-    const decision = await decideSearch("hi", "umans-glm-5.2", []);
+    const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("ok");
@@ -168,7 +160,7 @@ describe("decideSearch", () => {
   it("LLM が不正 JSON を返した場合は searchLevel:none でフォールバック", async () => {
     mockCreate.mockReturnValue(mockClient("this is not json"));
 
-    const decision = await decideSearch("hi", "umans-glm-5.2", []);
+    const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
@@ -178,11 +170,7 @@ describe("decideSearch", () => {
   it("LLM が不正 JSON を返しても明示的な検索要求なら検索へ倒す", async () => {
     mockCreate.mockReturnValue(mockClient("this is not json"));
 
-    const decision = await decideSearch(
-      "Project Motor Racing 2.0 Steam 最新レビューを調べて",
-      "umans-glm-5.2",
-      [],
-    );
+    const decision = await decideSearch("Project Motor Racing 2.0 Steam 最新レビューを調べて", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe(
@@ -200,7 +188,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("hi", "umans-glm-5.2", []);
+    const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
@@ -216,11 +204,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch(
-      "この商品の現在の価格を確認して",
-      "umans-glm-5.2",
-      [],
-    );
+    const decision = await decideSearch("この商品の現在の価格を確認して", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe(
@@ -241,7 +225,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("最新ニュース", "umans-glm-5.2", []);
+    const decision = await decideSearch("最新ニュース", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.queries).toEqual(["valid query", "another valid"]);
@@ -259,7 +243,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("最新ニュース", "umans-glm-5.2", []);
+    const decision = await decideSearch("最新ニュース", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(decision.userNotice).toBe("最新の情報をWebで確認します。");
@@ -268,7 +252,7 @@ describe("decideSearch", () => {
   it("content が null の場合はフォールバック", async () => {
     mockCreate.mockReturnValue(mockClient(null));
 
-    const decision = await decideSearch("hi", "umans-glm-5.2", []);
+    const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
@@ -277,7 +261,7 @@ describe("decideSearch", () => {
   it("content が空文字の場合はフォールバック", async () => {
     mockCreate.mockReturnValue(mockClient(""));
 
-    const decision = await decideSearch("hi", "umans-glm-5.2", []);
+    const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
@@ -300,7 +284,7 @@ describe("decideSearch", () => {
     });
     mockCreate.mockReturnValue({ chat: { completions: { create } } });
 
-    await decideSearch("follow up", "umans-glm-5.2", [
+    await decideSearch("follow up", "umans-glm-5.2", "ja", [
       { role: "user", content: "前の質問" },
       { role: "assistant", content: "前の回答" },
     ]);
@@ -321,7 +305,7 @@ describe("decideSearch", () => {
     });
     mockCreate.mockReturnValue({ chat: { completions: { create } } });
 
-    await decideSearch("hi", "umans-glm-5.2", []);
+    await decideSearch("hi", "umans-glm-5.2", "ja", []);
 
     const params = create.mock.calls[0][0] as { response_format?: unknown };
     expect(params.response_format).toBeUndefined();
@@ -339,7 +323,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("最近何の話しした？", "umans-glm-5.2", []);
+    const decision = await decideSearch("最近何の話しした？", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
@@ -354,7 +338,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("前に何を話したか覚えてる？", "umans-glm-5.2", []);
+    const decision = await decideSearch("前に何を話したか覚えてる？", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toBe("router failed");
@@ -373,7 +357,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("what did we talk about last time?", "umans-glm-5.2", []);
+    const decision = await decideSearch("what did we talk about last time?", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
   });
@@ -414,7 +398,7 @@ describe("decideSearch", () => {
           }),
         ),
       );
-      const decision = await decideSearch(q, "umans-glm-5.2", []);
+      const decision = await decideSearch(q, "umans-glm-5.2", "ja", []);
       expect(decision.searchLevel, `query: ${q}`).toBe("none");
     }
   });
@@ -429,7 +413,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("Pythonでフィボナッチ数列を計算するコードを書いて", "umans-glm-5.2", []);
+    const decision = await decideSearch("Pythonでフィボナッチ数列を計算するコードを書いて", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.reason).toContain("heuristic");
@@ -446,7 +430,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("この文章を英語に翻訳して", "umans-glm-5.2", []);
+    const decision = await decideSearch("この文章を英語に翻訳して", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
@@ -462,7 +446,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("このデザインについてどう思う？アドバイスをちょうだい", "umans-glm-5.2", []);
+    const decision = await decideSearch("このデザインについてどう思う？アドバイスをちょうだい", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(decision.queries).toEqual([]);
@@ -478,7 +462,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("write a program to sort an array", "umans-glm-5.2", []);
+    const decision = await decideSearch("write a program to sort an array", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("none");
     expect(mockCreate).not.toHaveBeenCalled();
@@ -496,7 +480,7 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("最新の Python コードを検索して", "umans-glm-5.2", []);
+    const decision = await decideSearch("最新の Python コードを検索して", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
     expect(mockCreate).toHaveBeenCalledTimes(1);
@@ -512,7 +496,7 @@ describe("decideSearch", () => {
       },
     });
 
-    const decision = await decideSearch("マグナ・カルタって何？", "umans-glm-5.2", []);
+    const decision = await decideSearch("マグナ・カルタって何？", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.userNotice).toBe("Wikipediaで調べます。");
@@ -526,7 +510,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
-    const decision = await decideSearch("欠地王ジョンって性格悪かったの？", "umans-glm-5.2", []);
+    const decision = await decideSearch("欠地王ジョンって性格悪かったの？", "umans-glm-5.2", "ja", []);
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.userNotice).toBe("Wikipediaで調べます。");
     expect(decision.queries).toEqual(["欠地王ジョンって性格悪かったの？"]);
@@ -537,7 +521,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
-    const decision = await decideSearch("織田信長ってどんな人だった？", "umans-glm-5.2", []);
+    const decision = await decideSearch("織田信長ってどんな人だった？", "umans-glm-5.2", "ja", []);
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.userNotice).toBe("Wikipediaで調べます。");
     expect(mockCreate).not.toHaveBeenCalled();
@@ -547,7 +531,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
-    const decision = await decideSearch("ソクラテスって本当にいたの？", "umans-glm-5.2", []);
+    const decision = await decideSearch("ソクラテスって本当にいたの？", "umans-glm-5.2", "ja", []);
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.userNotice).toBe("Wikipediaで調べます。");
     expect(mockCreate).not.toHaveBeenCalled();
@@ -557,7 +541,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
-    const decision = await decideSearch("シャーロック・ホームズって実在する？", "umans-glm-5.2", []);
+    const decision = await decideSearch("シャーロック・ホームズって実在する？", "umans-glm-5.2", "ja", []);
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.userNotice).toBe("Wikipediaで調べます。");
     expect(mockCreate).not.toHaveBeenCalled();
@@ -567,7 +551,7 @@ describe("decideSearch", () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
-    const decision = await decideSearch("ジョン王って誰？", "umans-glm-5.2", []);
+    const decision = await decideSearch("ジョン王って誰？", "umans-glm-5.2", "ja", []);
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.userNotice).toBe("Wikipediaで調べます。");
     expect(mockCreate).not.toHaveBeenCalled();
@@ -585,12 +569,34 @@ describe("decideSearch", () => {
       ),
     );
 
-    const decision = await decideSearch("マグナ・カルタについて教えて", "umans-glm-5.2", []);
+    const decision = await decideSearch("マグナ・カルタについて教えて", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.queries).toEqual(["マグナ・カルタ"]);
     // ヒューリスティックが null（パターン非マッチ）の場合 LLM が wiki を返す。
     // normalizeDecisionNotice は buildUserNotice で再計算するが、UNKNOWN_TERM_PATTERN
     // 非マッチのため DEFAULT_USER_NOTICE になる（プラン想定: wiki 専用分岐なし）。
+  });
+
+  // --- English locale: ヒューリスティックパターン拡張の検証 ---
+  it("en: \"who was Socrates\" は wiki 判定となり LLM を呼ばない", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("who was Socrates", "umans-glm-5.2", "en", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("I'll look it up on Wikipedia.");
+    expect(decision.queries).toEqual(["who was Socrates"]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("en: \"was King John really a bad person\" は wiki 判定となり LLM を呼ばない", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("was King John really a bad person", "umans-glm-5.2", "en", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("I'll look it up on Wikipedia.");
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 });

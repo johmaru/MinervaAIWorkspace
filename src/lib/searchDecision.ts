@@ -1,5 +1,7 @@
 import type OpenAI from "openai";
 import { createLLM, buildDisableReasoningParams } from "@/lib/llm";
+import type { Locale } from "@/lib/i18n/types";
+import { t } from "@/lib/i18n";
 
 /**
  * 検索判定ルーターの結果。
@@ -48,11 +50,6 @@ The userNotice should be a SHORT status-style sentence in the user's language (e
 Return JSON:
 {"searchLevel": "none" | "wiki" | "web", "reason": string, "userNotice": string | null, "queries": string[]}`;
 
-const FALLBACK_USER_NOTICE = "検索判定を定型ルールで補完し、Webで最新情報を確認します。";
-const DEFAULT_USER_NOTICE = "最新の情報をWebで確認します。";
-const REVIEW_USER_NOTICE = "最新の評価やレビューをWebで確認します。";
-const STEAM_USER_NOTICE = "Steamの最新情報をWebで確認します。";
-const UNKNOWN_TERM_NOTICE = "Wikipediaで調べます。";
 
 const EXPLICIT_SEARCH_PATTERN =
   /(web\s*search|search\s+the\s+web|look\s+up|verify|check\s+online|web検索|検索して|検索し|調べて|確認して|見て|最新|現在|直近|最近|いま|今日|latest|current|recent|today|up[- ]?to[- ]?date)/i;
@@ -69,7 +66,7 @@ const MEMORY_RECALL_PATTERN =
  * MEMORY_RECALL_PATTERN が優先される（記憶呼び出し質問は検索しない）。
  */
 const UNKNOWN_TERM_PATTERN =
-  /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに|誰|だれ|何者|どんな|どういう|どうやって|なぜ|なんで|本当[に]?|ほんと[に]?|良い|いい|どう|どうですか|性格|人柄|人物|生涯|経歴|生い立ち|特徴|エピソード|実在))|(what (is|are) [A-Z])|(tell me about )/i
+  /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに|誰|だれ|何者|どんな|どういう|どうやって|なぜ|なんで|本当[に]?|ほんと[に]?|良い|いい|どう|どうですか|性格|人柄|人物|生涯|経歴|生い立ち|特徴|エピソード|実在))|(what (is|are|was|were) [A-Z])|(who (is|was|were) [A-Z])|(tell me about )|(was .{0,30} (really|actually|truly))|(did .{0,30} really (exist|live|do|happen))/i
 
 /**
  * 明らかに検索不要なパターン: コード質問、翻訳、意見、アドバイス。
@@ -79,17 +76,17 @@ const UNKNOWN_TERM_PATTERN =
 const NO_SEARCH_PATTERN =
   /(コード|code|プログラム|program|翻訳|translate|翻して|どう思う|どう考える|意見|opinion|アドバイス|advice|アイデア|idea|ブレインストーム|brainstorm)/i;
 
-function buildUserNotice(userMessage: string, fallback: boolean): string {
-  if (fallback) return FALLBACK_USER_NOTICE;
-  if (/steam/i.test(userMessage)) return STEAM_USER_NOTICE;
+function buildUserNotice(userMessage: string, fallback: boolean, locale: Locale): string {
+  if (fallback) return t(locale, "chat.noticeSearchFallback");
+  if (/steam/i.test(userMessage)) return t(locale, "chat.noticeSearchSteam");
   if (/(レビュー|評価|評判|口コミ|ratings?|reviews?)/i.test(userMessage)) {
-    return REVIEW_USER_NOTICE;
+    return t(locale, "chat.noticeSearchReview");
   }
-  if (UNKNOWN_TERM_PATTERN.test(userMessage)) return UNKNOWN_TERM_NOTICE;
-  return DEFAULT_USER_NOTICE;
+  if (UNKNOWN_TERM_PATTERN.test(userMessage)) return t(locale, "chat.noticeSearchWiki");
+  return t(locale, "chat.noticeSearchDefault");
 }
 
-function buildHeuristicDecision(userMessage: string): SearchDecision | null {
+function buildHeuristicDecision(userMessage: string, locale: Locale): SearchDecision | null {
   const normalized = userMessage.replace(/\s+/g, " ").trim();
   if (!normalized) return null;
 
@@ -103,7 +100,7 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
     return {
       searchLevel: "wiki",
       reason: "heuristic: user asks about an unfamiliar named entity or term",
-      userNotice: UNKNOWN_TERM_NOTICE,
+      userNotice: t(locale, "chat.noticeSearchWiki"),
       queries: [normalized],
     };
   }
@@ -133,16 +130,16 @@ function buildHeuristicDecision(userMessage: string): SearchDecision | null {
   return {
     searchLevel: "web",
     reason: "heuristic: user requested current or volatile information",
-    userNotice: buildUserNotice(normalized, true),
+    userNotice: buildUserNotice(normalized, true, locale),
     queries: [queryParts.join(" ")],
   };
 }
 
-function normalizeDecisionNotice(decision: SearchDecision, userMessage: string): SearchDecision {
+function normalizeDecisionNotice(decision: SearchDecision, userMessage: string, locale: Locale): SearchDecision {
   if (decision.searchLevel === "none") return decision;
   return {
     ...decision,
-    userNotice: buildUserNotice(userMessage, false),
+    userNotice: buildUserNotice(userMessage, false, locale),
   };
 }
 
@@ -206,16 +203,18 @@ function buildMessages(
  *
  * @param userMessage 最新のユーザー発言
  * @param model LLM モデル id
+ * @param locale ユーザーのロケール（通知文言の i18n 化に使用）
  * @param history 過去メッセージ（role は "user" | "assistant"）
  * @param client テスト注入用。未指定時は createLLM()
  */
 export async function decideSearch(
   userMessage: string,
   model: string,
+  locale: Locale,
   history: { role: string; content: string }[],
   client?: OpenAI,
 ): Promise<SearchDecision> {
-  const heuristicDecision = buildHeuristicDecision(userMessage);
+  const heuristicDecision = buildHeuristicDecision(userMessage, locale);
   // ヒューリスティックで「検索不要」または「Wikipedia参照」が確定した場合は LLM 呼び出しをスキップ。
   // コード質問・翻訳・意見・アドバイス等（none）は即座に通常チャットへ。
   // 未知概念・固有名詞（wiki）は Wikipedia 参照が軽量・確定的なため LLM ルーターを経由しない。
@@ -240,7 +239,7 @@ export async function decideSearch(
     const parsed = parseDecision(completion.choices[0]?.message?.content);
     if (parsed) {
       if (parsed.searchLevel === "none" && heuristicDecision) return heuristicDecision;
-      return normalizeDecisionNotice(parsed, userMessage);
+      return normalizeDecisionNotice(parsed, userMessage, locale);
     }
 
     // パース失敗時でも、明示的に最新/検索/評価を求める入力は検索へ倒す。

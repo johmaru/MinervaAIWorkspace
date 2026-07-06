@@ -4,6 +4,7 @@ import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDef
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n/types";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
 import { extractUrls } from "@/lib/urlExtract";
@@ -190,6 +191,7 @@ export async function POST(req: Request) {
                   history: prepared.history,
                   send,
                   timeRange: body.timeRange,
+                  locale,
                 }).catch((err) => {
                   console.error("[chat] buildSearchContext failed:", err);
                   return null;
@@ -302,6 +304,7 @@ export async function POST(req: Request) {
               send("thinking", { delta });
             },
             timeRange: body.timeRange,
+            locale,
           });
         } else {
           if (body.rapid) {
@@ -320,6 +323,7 @@ export async function POST(req: Request) {
                 send("thinking", { delta });
               },
               timeRange: body.timeRange,
+              locale,
             });
           } else {
             // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
@@ -358,8 +362,8 @@ export async function POST(req: Request) {
               send,
               extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
               mcpConnections,
-              connectionRows,
               timeRange: body.timeRange,
+              locale,
             });
           }
         }
@@ -399,6 +403,7 @@ export async function POST(req: Request) {
               send("thinking", { delta });
             },
             timeRange: body.timeRange,
+            locale,
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;
@@ -636,12 +641,14 @@ async function buildSearchContext({
   history,
   send,
   timeRange,
+  locale,
 }: {
   content: string;
   llm: OpenAI;
   history: DbMessage[];
   send: StreamSend;
   timeRange?: "day" | "week" | "month" | "year";
+  locale: Locale;
 }): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam | null> {
   const tTotal = Date.now();
   const searchModel = defaultSearchModel();
@@ -649,6 +656,7 @@ async function buildSearchContext({
   const decision = await decideSearch(
     content,
     searchModel,
+    locale,
     history
       .slice(-6)
       .filter((m) => m.role === "user" || m.role === "assistant")
@@ -671,7 +679,7 @@ async function buildSearchContext({
     const valid = wikiResults.filter((r): r is WikipediaResult => r !== null);
     console.log(`[search-timing] wikipedia lookup duration=${Date.now() - tWiki}ms found=${valid.length}`);
     if (valid.length === 0) {
-      send("status", { label: "Wikipediaに該当記事が見つかりませんでした。知識で回答します。" });
+      send("status", { label: t(locale, "chat.statusWikiMiss") });
       console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (wiki miss)`);
       return {
         role: "system",
@@ -690,7 +698,7 @@ async function buildSearchContext({
   }
 
 
-  send("status", { label: decision.userNotice ?? "最新情報を確認するね。" });
+  send("status", { label: decision.userNotice ?? t(locale, "chat.statusSearchFallback") });
 
   const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
   const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 1));
@@ -731,7 +739,7 @@ async function buildSearchContext({
 
   if (allSources.length > 0) send("sources", { sources: allSources });
   if (allResults.length === 0) {
-    send("status", { label: "Web検索で結果が見つかりませんでした（検索エンジンが応答していない可能性があります）。トレーニングデータで回答します。" });
+    send("status", { label: t(locale, "chat.statusWebEmpty") });
     // このメッセージは tool 非対応モデルにのみ到達する（tool 対応モデルは
     // effectiveMessages で searchContextMessage が除外され、自律的に検索する）。
     // 検索失敗を伝えてトレーニングデータで回答させ、情報が取得できなかったことを
@@ -1063,6 +1071,7 @@ async function streamCompletion({
   mcpConnections,
   connectionRows,
   timeRange,
+  locale,
 }: {
   llm: OpenAI;
   model: string;
@@ -1075,6 +1084,7 @@ async function streamCompletion({
   mcpConnections?: McpConnection[];
   connectionRows?: ConnectionRow[];
   timeRange?: "day" | "week" | "month" | "year";
+  locale: Locale;
 }) {
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
@@ -1230,7 +1240,7 @@ async function streamCompletion({
         }
         console.log(`[search-timing] tool search_web round=${rounds} duration=${Date.now() - tTool}ms`);
       } else if (tc.name === "search_wikipedia" && parsedArgs.query) {
-        send?.("status", { label: "Wikipediaで調べています。" });
+        send?.("status", { label: t(locale, "chat.statusWikiLooking") });
         const tTool = Date.now();
         try {
           const result = await searchWikipedia(parsedArgs.query);
