@@ -159,9 +159,51 @@ When adding a rule, place it in the most relevant existing section when possible
 After editing, check for duplication, contradiction, or overly specific rules that should be generalized.
 If the instruction is ambiguous, ask whether it should be stored as a project rule before editing AGENTS.md.
 
+
+## Skill Creation After Implementation
+開発中にハマったことやミスしたことがあったら、すべての実装が終わった後に、それ専用のスキルを作成するか既存のスキルを編集して記録すること。
+スキルはローカルの `.agents/skills` ディレクトリ（`C:\Users\Johma_sub\UmansChat-Unofficial\.agents\skills`）に配置する。
+これにより、同じ問題に再び遭遇したときの診断時間を短縮する。
+
 ## Documentation Sync
 Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.
 Do not update README files for purely internal refactors, small visual polish, typo fixes, or implementation details that users do not need to know.
 Keep both README files aligned. The English and Japanese versions should not drift in meaning.
 When README updates are needed, include them in the same commit as the related implementation unless explicitly asked to split them.
 
+# Homepage Design Direction
+
+Design the homepage to feel cool, calm, technical, and mature.
+
+The visual style should be:
+- modern but not flashy
+- elegant but not luxury-brand-like
+- technical but not cyberpunk
+- calm, readable, and trustworthy
+- suitable for a low-level / embedded / FPGA-oriented engineer portfolio
+
+Avoid:
+- excessive gradients
+- loud neon colours
+- overused startup landing page sections
+- huge empty hero sections with vague slogans
+- gimmicky animations
+- random decorative blobs
+- overly cute UI
+- corporate template feeling
+
+Prefer:
+- dark or neutral background
+- subtle borders
+- restrained accent colour
+- clean typography
+- strong spacing
+- card-based sections
+- code/terminal-inspired details used lightly
+- clear hierarchy
+- responsive layout
+- small tasteful motion only when useful
+
+Use Tailwind CSS utilities.
+Prefer existing project theme tokens over hardcoded colours.
+Keep the design consistent across desktop and mobile.
