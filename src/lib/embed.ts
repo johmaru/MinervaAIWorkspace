@@ -19,8 +19,8 @@ import { createHash } from "crypto";
 //   Xenova/multilingual-e5-base            (768次元, 多言語, 高精度)
 // HTTP プロバイダ（Python embedder サービス）:
 //   LiquidAI/LFM2.5-Embedding-350M         (1024次元, 多言語, sentence-transformers)
-const MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
-const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
+let MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
+let EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
 type EmbedKind = "query" | "document";
 
@@ -97,6 +97,16 @@ async function embedViaHttp(texts: string[], kind?: EmbedKind): Promise<number[]
   }
 }
 
+/**
+ * 設定変更時に呼んで transformers.js パイプラインキャッシュを破棄する
+ * （EMBED_MODEL / EMBED_DIM / EMBED_PROVIDER 変更時）。
+ * 次回 embedText 呼び出しで新しい設定でパイプラインを再ロードする。
+ */
+export function resetEmbedPipeline(): void {
+  pipelinePromise = null;
+  MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
+  EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
+}
 /**
  * テキストの contentHash（SHA-256）を計算。
  * 再 embed 回避用。
