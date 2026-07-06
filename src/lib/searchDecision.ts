@@ -22,6 +22,7 @@ Use "wiki" when:
 - the user asks about a named entity, historical figure, concept, or term you are uncertain about
 - the user asks "what is X", "Xって何", "Xとは", "tell me about X" about a named entity
 - the answer is stable factual/encyclopedic knowledge, not current/volatile info
+- the user asks about a person's character, personality, reputation, or whether they really did something, even if phrased subjectively (e.g. "was X really a bad person?", "Xって性格悪かった？")
 - Generate 1 query (the entity/term name)
 
 Use "web" when:
@@ -31,6 +32,7 @@ Use "web" when:
 - the answer depends on a specific website's current state
 - the user mentions a specific product name, tool name, library, framework, or proper noun that may be unfamiliar or recently emerged (e.g. "omp", "Paseo", "Bun", "tRPC")
 - Generate 2 to 3 precise search queries in the user's language. Use different phrasings or aspects of the question for each query (e.g. a direct question, a keyword-focused query, and a variant with synonyms). This improves result coverage across search engines.
+- Do NOT use "web" for questions about a historical figure's or person's character, personality, or biography — use "wiki" instead
 
 Use "none" when:
 - the user asks for explanation, translation, coding help, general advice, brainstorming, or opinions
@@ -39,7 +41,7 @@ Use "none" when:
 - the user asks about past conversations, memories, or what was previously discussed
 - the entity is a well-known general concept that the model confidently knows (e.g. "what is Python", "what is HTTP") — only search when uncertain
 
-If both "wiki" and "web" seem applicable, choose "web".
+If both "wiki" and "web" seem applicable, choose "web" — EXCEPT when the question is about stable biographical or historical facts about a person/entity (character, personality, biography, actions), in which case choose "wiki".
 
 The userNotice should be a SHORT status-style sentence in the user's language (e.g. "最新の情報をWebで確認します。"). If search level is "none", set userNotice to null.
 
@@ -67,7 +69,7 @@ const MEMORY_RECALL_PATTERN =
  * MEMORY_RECALL_PATTERN が優先される（記憶呼び出し質問は検索しない）。
  */
 const UNKNOWN_TERM_PATTERN =
-  /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに))|(what (is|are) [A-Z])|(tell me about )|(って(良い|いい|どう|どうですか))/i;
+  /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに|誰|だれ|何者|どんな|どういう|どうやって|なぜ|なんで|本当[に]?|ほんと[に]?|良い|いい|どう|どうですか|性格|人柄|人物|生涯|経歴|生い立ち|特徴|エピソード|実在))|(what (is|are) [A-Z])|(tell me about )/i
 
 /**
  * 明らかに検索不要なパターン: コード質問、翻訳、意見、アドバイス。

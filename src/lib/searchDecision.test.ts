@@ -520,6 +520,59 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
+  // --- Step 7: 拡張 UNKNOWN_TERM_PATTERN のテスト ---
+  // 全てヒューリスティックで捕捉され LLM が呼ばれないことを検証する。
+  it("Xって性格悪かったの？ は wiki となる（って性格 マッチ）", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("欠地王ジョンって性格悪かったの？", "umans-glm-5.2", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("Wikipediaで調べます。");
+    expect(decision.queries).toEqual(["欠地王ジョンって性格悪かったの？"]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("Xってどんな人だった？ は wiki となる（ってどんな マッチ）", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("織田信長ってどんな人だった？", "umans-glm-5.2", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("Wikipediaで調べます。");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("Xって本当にいたの？ は wiki となる（って本当 マッチ）", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("ソクラテスって本当にいたの？", "umans-glm-5.2", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("Wikipediaで調べます。");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("Xって実在する？ は wiki となる（って実在 マッチ）", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("シャーロック・ホームズって実在する？", "umans-glm-5.2", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("Wikipediaで調べます。");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("Xって誰？ は wiki となる（って誰 マッチ）", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+    const decision = await decideSearch("ジョン王って誰？", "umans-glm-5.2", []);
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.userNotice).toBe("Wikipediaで調べます。");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it("LLM が searchLevel:wiki を返した場合パースする", async () => {
     mockCreate.mockReturnValue(
       mockClient(
