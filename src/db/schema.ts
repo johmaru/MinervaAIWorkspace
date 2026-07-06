@@ -38,6 +38,12 @@ export const users = sqliteTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash"),
   activeInstructionId: text("active_instruction_id"),
+  // パーソナライズ設定（ユーザー単位）。personalStyle が null なら機能無効。
+  personalStyle: text("personal_style"),
+  personalWarmth: integer("personal_warmth").notNull().default(1),
+  personalEnergy: integer("personal_energy").notNull().default(1),
+  personalStructure: integer("personal_structure").notNull().default(1),
+  personalEmoji: integer("personal_emoji").notNull().default(1),
   // DrizzleAdapter が OAuth createUser で書き込む列（Google ログイン用）
   name: text("name"),
   emailVerified: ts("email_verified"),

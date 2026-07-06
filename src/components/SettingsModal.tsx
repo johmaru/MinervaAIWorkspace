@@ -46,6 +46,12 @@ type SettingsResponse = {
   authUrl: string;
   // 既定グローバルインストラクション選択（ユーザー単位、DB）
   activeInstructionId: string | null;
+  // パーソナライズ（ユーザー単位、DB）
+  personalStyle: string | null;
+  personalWarmth: number;
+  personalEnergy: number;
+  personalStructure: number;
+  personalEmoji: number;
 };
 
 type TorConnection = {
@@ -354,6 +360,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     { icon: "🔍", label: t("settings.tabSearchNetwork") },
     { icon: "🖥️", label: t("settings.tabSystem") },
     { icon: "🔗", label: t("settings.tabConnections") },
+    { icon: "🎨", label: t("personalization.title") },
   ];
 
   return (
@@ -875,6 +882,85 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
             )}
           </div>
+          </div>
+          )}
+          {activeTab === 4 && (
+          <div className="space-y-6">
+            <div className="mt-3 space-y-4">
+              {/* スタイル・トーン プリセット */}
+              <div>
+                <label className="mb-2 block text-xs font-medium text-foreground">
+                  {t("personalization.style")}
+                </label>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={() => update("personalStyle", null)}
+                    className={`rounded-xl px-3 py-2 text-sm transition-all duration-200 ${
+                      form.personalStyle == null
+                        ? "bg-foreground text-background"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {t("personalization.styleNone")}
+                  </button>
+                  {([
+                    { id: "standard", key: "styleStandard" },
+                    { id: "polite", key: "stylePolite" },
+                    { id: "casual", key: "styleCasual" },
+                    { id: "concise", key: "styleConcise" },
+                    { id: "detailed", key: "styleDetailed" },
+                    { id: "academic", key: "styleAcademic" },
+                    { id: "creative", key: "styleCreative" },
+                    { id: "technical", key: "styleTechnical" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => update("personalStyle", opt.id)}
+                      className={`rounded-xl px-3 py-2 text-sm transition-all duration-200 ${
+                        form.personalStyle === opt.id
+                          ? "bg-foreground text-background"
+                          : "bg-muted text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t(`personalization.${opt.key}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* トレイトスライダー */}
+              {([
+                { key: "personalWarmth", label: "warmth" },
+                { key: "personalEnergy", label: "energy" },
+                { key: "personalStructure", label: "structure" },
+                { key: "personalEmoji", label: "emoji" },
+              ] as const).map((slider) => {
+                const val = form[slider.key] ?? 1;
+                const disabled = form.personalStyle == null;
+                return (
+                  <div key={slider.key} className="flex items-center gap-3">
+                    <label className={`w-32 text-xs font-medium ${disabled ? "text-muted-foreground/50" : "text-foreground"}`}>
+                      {t(`personalization.${slider.label}`)}
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={1}
+                      value={val}
+                      disabled={disabled}
+                      onChange={(e) => update(slider.key, Number(e.target.value))}
+                      className="w-32 disabled:opacity-50"
+                    />
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {[t("personalization.levelLow"), t("personalization.levelMedium"), t("personalization.levelHigh")][val]}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
           )}
         </div>

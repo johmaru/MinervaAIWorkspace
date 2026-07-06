@@ -8,6 +8,15 @@ const { readFileSyncMock, writeFileSyncMock, existsSyncMock } = vi.hoisted(() =>
   writeFileSyncMock: vi.fn(),
   existsSyncMock: vi.fn(() => true),
 }));
+const { dbUpdateMock } = vi.hoisted(() => {
+  // update() ごとに新しい chain を返す（テスト間のモック状態汚染を防ぐ）
+  const update = vi.fn(() => {
+    const where = vi.fn().mockResolvedValue(undefined);
+    const set = vi.fn(() => ({ where }));
+    return { set };
+  });
+  return { dbUpdateMock: update };
+});
 const { resetEmbedPipelineMock } = vi.hoisted(() => ({
   resetEmbedPipelineMock: vi.fn(),
 }));
@@ -30,7 +39,7 @@ vi.mock("@/lib/i18n", async (importOriginal) => {
   };
 });
 vi.mock("@/db", () => ({
-  db: { delete: vi.fn().mockResolvedValue(undefined) },
+  db: { delete: vi.fn().mockResolvedValue(undefined), update: dbUpdateMock },
 }));
 vi.mock("@/lib/llm", () => ({
   resetUmansModelsCache: vi.fn(),
@@ -243,5 +252,80 @@ describe("POST /api/settings — scraper /config 動的更新", () => {
     const res = await postSettings({ llmModel: "umans-glm-5.2" });
     expect(res.status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/settings — パーソナライズ設定の保存", () => {
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(getSessionUser).mockResolvedValue({ id: "user-1", email: "t@t" } as never);
+  });
+
+  afterEach(() => {
+    readFileSyncMock.mockReset();
+    writeFileSyncMock.mockReset();
+    existsSyncMock.mockClear();
+    fetchMock.mockReset();
+    vi.unstubAllGlobals();
+    dbUpdateMock.mockClear();
+  });
+
+  async function postSettings(body: Record<string, unknown>) {
+    const req = new Request("http://localhost/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return POST(req);
+  }
+
+  it("personalStyle を保存すると users テーブルへ update が呼ばれる", async () => {
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ personalStyle: "polite" });
+    expect(res.status).toBe(200);
+    expect(dbUpdateMock).toHaveBeenCalledTimes(1);
+    const setArg = dbUpdateMock.mock.results[0].value.set.mock.calls[0][0];
+    expect(setArg).toMatchObject({ personalStyle: "polite" });
+  });
+
+  it("personalStyle: null で機能を無効化できる", async () => {
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ personalStyle: null });
+    expect(res.status).toBe(200);
+    const setArg = dbUpdateMock.mock.results[0].value.set.mock.calls[0][0];
+    expect(setArg).toMatchObject({ personalStyle: null });
+  });
+
+  it("無効な personalStyle は 400 を返す", async () => {
+    const res = await postSettings({ personalStyle: "unknown" });
+    expect(res.status).toBe(400);
+    expect(dbUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("スライダー値は 0-2 にクランプされる", async () => {
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({
+      personalStyle: "standard",
+      personalWarmth: 99,
+      personalEnergy: -5,
+      personalStructure: 1,
+      personalEmoji: 1,
+    });
+    expect(res.status).toBe(200);
+    const setArg = dbUpdateMock.mock.results[0].value.set.mock.calls[0][0];
+    expect(setArg).toMatchObject({
+      personalStyle: "standard",
+      personalWarmth: 2,
+      personalEnergy: 0,
+      personalStructure: 1,
+      personalEmoji: 1,
+    });
   });
 });

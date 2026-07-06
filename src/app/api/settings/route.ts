@@ -9,6 +9,7 @@ import { resetUmansModelsCache } from "@/lib/llm";
 import { resetToolProbeCache } from "@/lib/toolProbe";
 import { getSessionUser } from "@/lib/auth-guards";
 import { resetEmbedPipeline } from "@/lib/embed";
+import { PERSONAL_STYLES } from "@/lib/personalization";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,9 +112,16 @@ export async function GET(req: Request) {
   if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
 
-  // ユーザーの既定グローバルインストラクション選択を取得（DB、ユーザー単位）
+  // ユーザー単位の設定を取得（DB）: 既定グローバルインストラクション + パーソナライズ
   const [userRow] = await db
-    .select({ activeInstructionId: users.activeInstructionId })
+    .select({
+      activeInstructionId: users.activeInstructionId,
+      personalStyle: users.personalStyle,
+      personalWarmth: users.personalWarmth,
+      personalEnergy: users.personalEnergy,
+      personalStructure: users.personalStructure,
+      personalEmoji: users.personalEmoji,
+    })
     .from(users)
     .where(eq(users.id, user.id));
 
@@ -150,6 +158,12 @@ export async function GET(req: Request) {
     authUrl: process.env.AUTH_URL || "http://localhost:3001",
     // 既定グローバルインストラクション選択（ユーザー単位、DB）
     activeInstructionId: userRow?.activeInstructionId ?? null,
+    // パーソナライズ（ユーザー単位、DB）
+    personalStyle: userRow?.personalStyle ?? null,
+    personalWarmth: userRow?.personalWarmth ?? 1,
+    personalEnergy: userRow?.personalEnergy ?? 1,
+    personalStructure: userRow?.personalStructure ?? 1,
+    personalEmoji: userRow?.personalEmoji ?? 1,
   });
 }
 
@@ -159,6 +173,12 @@ type SettingsBody = {
   llmApiKey?: string;
   // 既定グローバルインストラクション選択（ユーザー単位、DB に保存）
   activeInstructionId?: string | null;
+  // パーソナライズ（ユーザー単位、DB に保存）
+  personalStyle?: string | null;
+  personalWarmth?: number;
+  personalEnergy?: number;
+  personalStructure?: number;
+  personalEmoji?: number;
   llmModel?: string;
   llmModels?: string;
   thinkingEffort?: string;
@@ -221,6 +241,21 @@ export async function POST(req: Request) {
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
+
+  // パーソナライズのバリデーション
+  if (
+    body.personalStyle !== undefined &&
+    body.personalStyle !== null &&
+    !PERSONAL_STYLES.includes(body.personalStyle as never)
+  ) {
+    return new Response("personalStyle must be one of the valid presets or null", { status: 400 });
+  }
+  const clampTrait = (v: number | undefined) =>
+    v === undefined ? undefined : Math.max(0, Math.min(2, Math.trunc(v)));
+  const clampedWarmth = clampTrait(body.personalWarmth);
+  const clampedEnergy = clampTrait(body.personalEnergy);
+  const clampedStructure = clampTrait(body.personalStructure);
+  const clampedEmoji = clampTrait(body.personalEmoji);
   const dbVectorDim = getEmbedDim();
 
   // 新しい次元を決定
@@ -254,6 +289,26 @@ export async function POST(req: Request) {
     await db
       .update(users)
       .set({ activeInstructionId: body.activeInstructionId || null })
+      .where(eq(users.id, user.id));
+  }
+
+  // パーソナライズ設定を DB に保存（ユーザー単位）
+  if (
+    body.personalStyle !== undefined ||
+    body.personalWarmth !== undefined ||
+    body.personalEnergy !== undefined ||
+    body.personalStructure !== undefined ||
+    body.personalEmoji !== undefined
+  ) {
+    await db
+      .update(users)
+      .set({
+        ...(body.personalStyle !== undefined ? { personalStyle: body.personalStyle } : {}),
+        ...(clampedWarmth !== undefined ? { personalWarmth: clampedWarmth } : {}),
+        ...(clampedEnergy !== undefined ? { personalEnergy: clampedEnergy } : {}),
+        ...(clampedStructure !== undefined ? { personalStructure: clampedStructure } : {}),
+        ...(clampedEmoji !== undefined ? { personalEmoji: clampedEmoji } : {}),
+      })
       .where(eq(users.id, user.id));
   }
 

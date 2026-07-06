@@ -33,6 +33,7 @@ import {
   type ConnectionRow,
 } from "@/lib/connections";
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
+import { buildPersonalizationMessage } from "@/lib/personalization";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,7 +115,14 @@ export async function POST(req: Request) {
   let resolvedGlobalInstruction: string | null = null;
   const threadInstrId = thread.globalInstructionId ?? null;
   const [userRow] = await db
-    .select({ activeInstructionId: users.activeInstructionId })
+    .select({
+      activeInstructionId: users.activeInstructionId,
+      personalStyle: users.personalStyle,
+      personalWarmth: users.personalWarmth,
+      personalEnergy: users.personalEnergy,
+      personalStructure: users.personalStructure,
+      personalEmoji: users.personalEmoji,
+    })
     .from(users)
     .where(eq(users.id, user.id));
   const effectiveInstrId = threadInstrId ?? userRow?.activeInstructionId ?? null;
@@ -127,6 +135,15 @@ export async function POST(req: Request) {
   }
   // 優先順位: スレッド個別 systemPrompt > グローバル(スレッド上書き or ユーザー既定) > body
   const systemContent = thread.systemPrompt ?? resolvedGlobalInstruction ?? body.systemPrompt;
+
+  // パーソナライズメッセージ（ユーザー単位）。personalStyle が null なら無効。
+  const personalizationContent = buildPersonalizationMessage(
+    userRow?.personalStyle ?? null,
+    userRow?.personalWarmth ?? 1,
+    userRow?.personalEnergy ?? 1,
+    userRow?.personalStructure ?? 1,
+    userRow?.personalEmoji ?? 1,
+  );
 
   // ツールプローブを早期開始し、ストリーム内の並列処理とオーバーラップさせる。
   // warmupToolProbe() がモジュール読み込み時にプローブを開始済みだが、
@@ -250,6 +267,7 @@ export async function POST(req: Request) {
 
         const finalMessages = buildFinalMessages({
           systemContent,
+          personalizationContent,
           history: prepared.history,
           content: prepared.content,
           searchContextMessage,
@@ -313,6 +331,7 @@ export async function POST(req: Request) {
             const effectiveMessages = toolSupport?.supported
               ? buildFinalMessages({
                   systemContent,
+                  personalizationContent,
                   history: prepared.history,
                   content: prepared.content,
                   searchContextMessage: null,
@@ -742,6 +761,7 @@ function detectHostOs(): string {
 
 function buildFinalMessages({
   systemContent,
+  personalizationContent,
   history,
   content,
   searchContextMessage,
@@ -750,6 +770,7 @@ function buildFinalMessages({
   memoryMessage,
 }: {
   systemContent?: string | null;
+  personalizationContent?: string | null;
   history: DbMessage[];
   content: string;
   searchContextMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam | null;
@@ -759,6 +780,7 @@ function buildFinalMessages({
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return [
     { role: "system" as const, content: getEnvContext() },
+    ...(personalizationContent ? [{ role: "system" as const, content: personalizationContent }] : []),
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
     ...(skillMessage ? [skillMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
