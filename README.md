@@ -123,7 +123,7 @@ On first launch the launcher creates `data/umanschat.db`, applies migrations, st
 
 ## Releases (Docker + exe)
 
-Releases are produced automatically by GitHub Actions when a `v*.*.*` tag is pushed. Each release publishes **both** distribution formats:
+Releases are produced manually via GitHub Actions. Each release publishes **both** distribution formats:
 
 - **Docker images** (GHCR):
   - `ghcr.io/johmaru/umanschat-unofficial-app:<version>`
@@ -132,13 +132,13 @@ Releases are produced automatically by GitHub Actions when a `v*.*.*` tag is pus
   Each image is tagged with both `:<version>` and `:latest`.
 - **Windows standalone exe**: `UmansChat-<version>-windows-x64.zip`, attached to the GitHub Release.
 
-```bash
-# Create a release (tag push triggers .github/workflows/release.yml)
-git tag v1.2.3
-git push origin v1.2.3
+To create a release, run the workflow manually:
+
+```
+Actions tab → Release → Run workflow → enter version (e.g. 1.2.3)
 ```
 
-Manual dispatch is also available: Actions tab → **Release** → **Run workflow** (optional `version` input).
+The `version` input is **required** — this prevents accidental runs from overwriting `:latest`. Releases are not triggered automatically by tag pushes; only run when you intentionally want to publish.
 
 The pipeline runs four jobs: `prepare` (shared version), `docker` (ubuntu-latest, pushes 3 images), `exe` (windows-latest, builds `umanschat.exe` natively — no cross-compilation), and `release` (`needs: [prepare, docker, exe]` — creates the GitHub Release only after both artifacts succeed).
 

@@ -132,7 +132,7 @@ bun run pack:exe
 
 ## リリース（Docker + exe）
 
-`v*.*.*` タグを push すると GitHub Actions が自動的にリリースを生成します。各リリースでは **両方** の配布形式を公開します:
+リリースは GitHub Actions の手動実行（`workflow_dispatch`）のみで行います。各リリースでは **両方** の配布形式を公開します:
 
 - **Docker イメージ**（GHCR）:
   - `ghcr.io/johmaru/umanschat-unofficial-app:<バージョン>`
@@ -141,13 +141,13 @@ bun run pack:exe
   各イメージには `:<バージョン>` と `:latest` の両方のタグが付きます。
 - **Windows スタンドアロン exe**: `UmansChat-<バージョン>-windows-x64.zip`。GitHub Release に添付されます。
 
-```bash
-# リリース作成（タグ push で .github/workflows/release.yml が実行される）
-git tag v1.2.3
-git push origin v1.2.3
+リリースを作成するには、ワークフローを手動実行します:
+
+```
+Actions タブ → Release → Run workflow → バージョンを入力（例: 1.2.3）
 ```
 
-手動実行も可能: Actions タブ → **Release** → **Run workflow**（`version` 入力は任意）。
+`version` 入力は **必須** です。省略時は実行できないようにすることで、誤実行による `:latest` の上書きを防ぎます。タグ push では自動リリースしません。意図的に公開したい時だけ実行してください。
 
 パイプラインは 4 ジョブで構成されます: `prepare`（共通バージョン計算）、`docker`（ubuntu-latest、3 イメージを push）、`exe`（windows-latest、`umanschat.exe` をネイティブビルド — クロスコンパイルなし）、`release`（`needs: [prepare, docker, exe]` — 両アーティファクト成功後にのみ GitHub Release を作成）。
 

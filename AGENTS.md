@@ -184,18 +184,19 @@ Two distribution formats, both produced by GitHub Actions on every release:
 
 ### Release trigger
 
-```bash
-# Push a tag vX.Y.Z → triggers .github/workflows/release.yml
-git tag v1.2.3
-git push origin v1.2.3
+リリースは手動実行のみ（`workflow_dispatch`）。ユーザーが「リリースして」と指示した時だけ実行する。
+タグ push では自動リリースしない。
+
+```
+Actions タブ → Release → Run workflow → version 入力 (例: 1.2.3)
 ```
 
-Manual dispatch (Actions tab → Release → Run workflow) with optional `version` input.
+`version` 入力は必須。省略時は実行できない（誤実行で `:latest` を上書きするのを防ぐ）。
 
 ### Pipeline (`.github/workflows/release.yml`)
 
 1. `prepare` — computes a single shared `version` + `tag` (consumed by all later jobs).
-   Tag push → `GITHUB_REF_NAME`; manual → `v${inputs.version}` or `vdev-<sha>`.
+   Manual dispatch → `v${inputs.version}` (version input is required).
 2. `docker` (ubuntu-latest) — builds & pushes the 3 images to GHCR.
 3. `exe` (windows-latest) — runs `bun run pack:exe` natively, zips `dist/UmansChat/`,
    uploads as a workflow artifact. **No cross-compilation** — the exe is built on

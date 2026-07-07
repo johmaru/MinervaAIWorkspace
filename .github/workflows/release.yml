@@ -1,5 +1,5 @@
 # Release: Docker images (GHCR) + Windows standalone exe.
-# Triggered by pushing a tag matching v*.*.*, or manually via workflow_dispatch.
+# Triggered manually via workflow_dispatch (Actions tab → Release → Run workflow).
 #
 # Produces:
 #   - ghcr.io/johmaru/umanschat-unofficial-app:<version>
@@ -20,14 +20,11 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (without leading v). If omitted, dev-<sha> is used."
-        required: false
+        description: "Version (without leading v, e.g. 1.2.3). Required."
+        required: true
 
 permissions:
   contents: write   # create GitHub Release + upload exe asset
@@ -49,19 +46,8 @@ jobs:
       - name: Derive version and tag
         id: meta
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            # Tag push: tag is vX.Y.Z, version strips the leading v.
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
-          elif [ -n "${{ inputs.version }}" ]; then
-            # Manual dispatch with explicit version: synthesize a v-prefixed tag.
-            VERSION="${{ inputs.version }}"
-            TAG="v${VERSION}"
-          else
-            # Manual dispatch without input: dev build.
-            VERSION="dev-${GITHUB_SHA::7}"
-            TAG="v${VERSION}"
-          fi
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
