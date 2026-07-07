@@ -599,4 +599,92 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBe("I'll look it up on Wikipedia.");
     expect(mockCreate).not.toHaveBeenCalled();
   });
+  // --- Search query diversification: multi-query generation ---
+  it("web ヒューリスティックは direct + keyword の 2 クエリを生成する", async () => {
+    // LLM が呼ばれたら即座に失敗するよう reject を設定
+    // （ヒューリスティック web は短絡せず LLM ルーターへ進むが、canned "none"
+    //  により heuristicDecision がフォールバック返却される。ここでは LLM を
+    //  呼ばないよう reject にし、heuristicDecision のクエリ配列を検証する。）
+    mockCreate.mockReturnValue(
+      mockClient(
+        JSON.stringify({ searchLevel: "none", reason: "defer", userNotice: null, queries: [] }),
+      ),
+    );
+
+    const decision = await decideSearch("PMR2.0のSteam評価は？最新のレビュー", "umans-glm-5.2", "ja", []);
+
+    expect(decision.searchLevel).toBe("web");
+    expect(decision.queries.length).toBeGreaterThanOrEqual(2);
+    expect(decision.queries[0]).toContain("PMR2.0");
+    // keyword variant は元の助詞(の/は/が)を含まない
+    expect(decision.queries[1]).not.toMatch(/[のはが]/);
+  });
+
+  it("wiki ヒューリスティック: 純CJKエンティティは英語バリアントを生成しない", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+
+    const decision = await decideSearch("織田信長って何？", "umans-glm-5.2", "ja", []);
+
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.queries).toEqual(["織田信長って何？"]);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("wiki ヒューリスティック: ASCIIエンティティは英語バリアントを追加する", async () => {
+    mockCreate.mockReturnValue({
+      chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
+    });
+
+    const decision = await decideSearch("tRPCとは", "umans-glm-5.2", "ja", []);
+
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.queries.length).toBeGreaterThanOrEqual(2);
+    expect(decision.queries).toContain("tRPC");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("LLM web canned: 4 クエリ(3言語 + 1英語)をパースする", async () => {
+    mockCreate.mockReturnValue(
+      mockClient(
+        JSON.stringify({
+          searchLevel: "web",
+          reason: "latest eval",
+          userNotice: "確認するね",
+          queries: [
+            "GLM5.2 評価 最新 レビュー",
+            "GLM5.2 review rating benchmark",
+            "GLM-5.2 性能 比較",
+            "GLM5.2 evaluation latest",
+          ],
+        }),
+      ),
+    );
+
+    const decision = await decideSearch("最新のGLM5.2の評価どう？", "umans-glm-5.2", "ja", []);
+
+    expect(decision.searchLevel).toBe("web");
+    expect(decision.queries.length).toBe(4);
+    expect(decision.queries.some((q) => /^[A-Za-z0-9 .]+$/.test(q))).toBe(true);
+  });
+
+  it("LLM wiki canned: エンティティ + 英語の 2 クエリをパースする", async () => {
+    mockCreate.mockReturnValue(
+      mockClient(
+        JSON.stringify({
+          searchLevel: "wiki",
+          reason: "entity lookup",
+          userNotice: "Wikipediaで調べます。",
+          queries: ["アインシュタイン", "Albert Einstein"],
+        }),
+      ),
+    );
+
+    const decision = await decideSearch("アインシュタインについて教えて", "umans-glm-5.2", "ja", []);
+
+    expect(decision.searchLevel).toBe("wiki");
+    expect(decision.queries.length).toBe(2);
+    expect(decision.queries).toEqual(["アインシュタイン", "Albert Einstein"]);
+  });
 });

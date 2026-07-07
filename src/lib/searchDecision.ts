@@ -25,7 +25,7 @@ Use "wiki" when:
 - the user asks "what is X", "Xって何", "Xとは", "tell me about X" about a named entity
 - the answer is stable factual/encyclopedic knowledge, not current/volatile info
 - the user asks about a person's character, personality, reputation, or whether they really did something, even if phrased subjectively (e.g. "was X really a bad person?", "Xって性格悪かった？")
-- Generate 1 query (the entity/term name)
+- Generate 1 query (the entity/term name in the user's language). If the entity name is not already in English, also generate a 2nd query with the English name or transliteration. This yields 1 or 2 queries.
 
 Use "web" when:
 - the user asks for latest/current/recent information
@@ -33,7 +33,12 @@ Use "web" when:
 - the user explicitly asks to look up/search/check/verify
 - the answer depends on a specific website's current state
 - the user mentions a specific product name, tool name, library, framework, or proper noun that may be unfamiliar or recently emerged (e.g. "omp", "Paseo", "Bun", "tRPC")
-- Generate 2 to 3 precise search queries in the user's language. Use different phrasings or aspects of the question for each query (e.g. a direct question, a keyword-focused query, and a variant with synonyms). This improves result coverage across search engines.
+- Generate exactly 3 search queries in the user's language, each with a distinct role:
+  1. Direct question: a natural-language question a person would type (e.g. "Project Motor Racing 2.0 Steam review")
+  2. Keyword-focused: noun-phrase / entity keywords without grammar (e.g. "Project Motor Racing 2.0 review rating")
+  3. Synonym/variant: the same intent with different terms or a broader scope (e.g. "PMR 2.0 評価 レビュー")
+- If the user's language is not English, add one additional query in English (a direct translation of the keyword-focused query) to improve search-engine coverage. This yields 3 or 4 queries total.
+- Each query must differ in wording, not just word order. Do not repeat a query verbatim.
 - Do NOT use "web" for questions about a historical figure's or person's character, personality, or biography — use "wiki" instead
 
 Use "none" when:
@@ -97,11 +102,22 @@ function buildHeuristicDecision(userMessage: string, locale: Locale): SearchDeci
   // 未知概念・固有名詞への問い合わせ（「Xって何」「Xとは」「what is X」等）は検索。
   // 記憶呼び出し質問は上で除外済み。
   if (UNKNOWN_TERM_PATTERN.test(normalized)) {
+    // Best-effort English variant: if the message is CJK but contains an ASCII
+    // entity substring (e.g. "Bunって何？" -> "Bun"), use it as a 2nd query so
+    // the English Wikipedia is attempted as a fallback. We cannot transliterate
+    // pure-CJK entities without a library, so we do not fabricate one — the LLM
+    // router is the primary path for English variants when it runs.
+    const queries = [normalized];
+    const cjk = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(normalized);
+    if (cjk) {
+      const asciiMatch = normalized.match(/[A-Za-z][A-Za-z0-9.\-]*[A-Za-z0-9]/);
+      if (asciiMatch && asciiMatch[0].length >= 2) queries.push(asciiMatch[0]);
+    }
     return {
       searchLevel: "wiki",
       reason: "heuristic: user asks about an unfamiliar named entity or term",
       userNotice: t(locale, "chat.noticeSearchWiki"),
-      queries: [normalized],
+      queries,
     };
   }
 
@@ -119,19 +135,26 @@ function buildHeuristicDecision(userMessage: string, locale: Locale): SearchDeci
     return null;
   }
 
-  const queryParts = [normalized];
-  if (/steam/i.test(normalized) && !/(レビュー|評価|review|rating)/i.test(normalized)) {
-    queryParts.push("Steam レビュー 評価");
-  }
-  if (/(レビュー|評価|評判|ratings?|reviews?)/i.test(normalized) && !/steam/i.test(normalized)) {
-    queryParts.push("レビュー 評価 最新");
-  }
+  // queries[0]: the original normalized user message (direct intent).
+  // queries[1]: a keyword-focused variant — strip common Japanese particles
+  //   and append a volatility keyword from the matched VOLATILE_INFO_PATTERN
+  //   so the keyword query targets the changing facet. Reuses existing regex
+  //   matching; no new tokenizer.
+  const keywordVariant = normalized
+    .replace(/[のはがをにでと]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const volatilityMatch = normalized.match(VOLATILE_INFO_PATTERN);
+  const volatilityKeyword = volatilityMatch?.[0] ?? "";
+  const keywordQuery = [keywordVariant, volatilityKeyword, "最新"]
+    .filter((p) => p.length > 0)
+    .join(" ");
 
   return {
     searchLevel: "web",
     reason: "heuristic: user requested current or volatile information",
     userNotice: buildUserNotice(normalized, true, locale),
-    queries: [queryParts.join(" ")],
+    queries: [normalized, keywordQuery],
   };
 }
 

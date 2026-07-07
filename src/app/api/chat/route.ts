@@ -676,7 +676,7 @@ async function buildSearchContext({
   if (decision.searchLevel === "wiki") {
     const tWiki = Date.now();
     const wikiResults = await Promise.all(
-      decision.queries.slice(0, 1).map((q) => searchWikipedia(q).catch(() => null)),
+      decision.queries.slice(0, 2).map((q) => searchWikipedia(q).catch(() => null)),
     );
     const valid = wikiResults.filter((r): r is WikipediaResult => r !== null);
     console.log(`[search-timing] wikipedia lookup duration=${Date.now() - tWiki}ms found=${valid.length}`);
