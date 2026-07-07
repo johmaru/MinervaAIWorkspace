@@ -10,6 +10,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { UrlInput } from "@/components/UrlInput";
 import { SettingsModal } from "@/components/SettingsModal";
 import { MemoryViewerModal } from "@/components/MemoryViewerModal";
+import { SkillManagerModal } from "@/components/SkillManagerModal";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { MoveToFolderModal } from "@/components/MoveToFolderModal";
 import { useI18n } from "@/components/I18nProvider";
@@ -63,6 +64,7 @@ export const Sidebar = memo(function Sidebar({
 }: SidebarProps) {
   const { t } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [skillManagerOpen, setSkillManagerOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
@@ -215,6 +217,17 @@ export const Sidebar = memo(function Sidebar({
           </MotionButton>
           <MotionButton
             type="button"
+            onClick={() => setSkillManagerOpen(true)}
+            className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+            aria-label={t("skills.managerTitle")}
+            whileTap={{ scale: 0.9 }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+            </svg>
+          </MotionButton>
+          <MotionButton
+            type="button"
             onClick={() => onOpenHelp(null)}
             className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
             aria-label={t("sidebar.help")}
@@ -360,6 +373,7 @@ export const Sidebar = memo(function Sidebar({
       )}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} onOpenHelp={onOpenHelp} />
       <MemoryViewerModal open={memoryOpen} onClose={() => setMemoryOpen(false)} />
+      <SkillManagerModal open={skillManagerOpen} onClose={() => setSkillManagerOpen(false)} />
 
       <AnimatePresence>
         {menu && (
