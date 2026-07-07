@@ -1,0 +1,6 @@
+METRIC query_diversity=0.361045
+METRIC dual_lang_coverage=0.400000
+METRIC avg_queries_per_search=1.800000
+METRIC total_queries=9
+METRIC web_query_count=5
+METRIC wiki_query_count=4
