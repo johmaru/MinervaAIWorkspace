@@ -17,6 +17,7 @@ import { buildMemoryContext } from "@/lib/memoryStore";
 import { buildSkillContext } from "@/lib/skillStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
+import { extractSkillCandidates } from "@/lib/skillCandidate";
 import { readFileSync } from "node:fs";
 import { after } from "next/server";
 import { getSessionUser } from "@/lib/auth-guards";
@@ -504,6 +505,23 @@ export async function POST(req: Request) {
         await generateSkillFromConversation(body.threadId, user.id, llm, finalModel);
       } catch (err) {
         console.error("[skill] generation failed:", err);
+      }
+    } else {
+      // スキル候補自動抽出: 明示的保存要求がない場合、会話から候補を抽出
+      // ヒューリスティック: ユーザー+アシスタント内容の合計が 200 字超、
+      // またはコード/エラー/設定キーワードを含む場合のみ実行
+      const totalLen = prepared.content.length + streamResult.assistantContent.length;
+      const hasSubstantiveContent =
+        totalLen > 200 ||
+        /```|error|exception|config|bug|fix|debug/i.test(
+          prepared.content + streamResult.assistantContent,
+        );
+      if (hasSubstantiveContent) {
+        try {
+          await extractSkillCandidates(body.threadId, user.id, llm, finalModel);
+        } catch (err) {
+          console.error("[skill-candidate] extraction failed:", err);
+        }
       }
     }
   });

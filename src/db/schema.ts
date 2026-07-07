@@ -130,6 +130,35 @@ export const skills = sqliteTable("skills", {
 });
 
 /**
+ * skill_candidates — 会話から自動抽出されたスキル候補。
+ * ユーザーが承認するまで draft。承認で skills テーブルに昇格。
+ * status: draft → approved/rejected/merged
+ */
+export const skillCandidates = sqliteTable("skill_candidates", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  threadId: text("thread_id").references(() => threads.id, { onDelete: "cascade" }),
+  sourceMessageIds: text("source_message_ids", { mode: "json" }).$type<string[]>(),
+  proposedName: text("proposed_name").notNull(),
+  proposedKind: text("proposed_kind", {
+    enum: ["workflow", "bugfix", "project_rule", "tool_usage", "coding_pattern", "debugging"],
+  }).notNull(),
+  proposedTrigger: text("proposed_trigger").notNull(),
+  proposedContent: text("proposed_content").notNull(),
+  proposedTags: text("proposed_tags", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  confidence: real("confidence").notNull().default(0.5),
+  reason: text("reason"),
+  status: text("status", {
+    enum: ["draft", "approved", "rejected", "merged"],
+  }).notNull().default("draft"),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
+});
+
+/**
  * mcpServers — ユーザー単位の MCP (Model Context Protocol) サーバー接続定義。
  *
  * transport="http" の場合は url を使用（Streamable HTTP / SSE 自動フォールバック）。
