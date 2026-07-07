@@ -1,0 +1,87 @@
+# CI: validate that both distribution artifacts can be built from the
+# current source on every push/PR. Does NOT publish or tag.
+#
+#   - docker (ubuntu-latest): builds the 3 project Dockerfiles via buildx
+#     (build only, no push) to catch Dockerfile regressions early.
+#   - exe (windows-latest): runs `bun run pack:exe` to confirm the
+#     standalone exe assembles and compiles without errors.
+#
+# Both jobs are required-green before merge to develop/main.
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build app image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: umanschat-app:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build scraper image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./scraper
+          file: ./scraper/Dockerfile
+          push: false
+          load: true
+          tags: umanschat-scraper:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build embedder image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./embedder
+          file: ./embedder/Dockerfile
+          push: false
+          load: true
+          tags: umanschat-embedder:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build & pack exe (smoke test)
+        run: bun run pack:exe
+        env:
+          DATABASE_URL: ":memory:"
+
+      - name: Verify exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\UmansChat\umanschat.exe")) {
+            throw "dist\UmansChat\umanschat.exe not found after pack:exe"
+          }
+          Write-Host "umanschat.exe built successfully."

@@ -14,6 +14,9 @@ export default defineConfig({
     },
   },
   test: {
+    // ビルド成果物 (dist/, .next/standalone) にコピーされたテストファイルを
+    // 収集対象から除外する。これらは pack:exe で生成される一時コピー。
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.next/**"],
     environment: "jsdom",
     // Route Handler / lib のテストは各ファイル先頭の
     // `// @vitest-environment node` コメントで node 環境に切替（Vitest 4 で

@@ -1,5 +1,11 @@
 services:
+  # リリース配布: デフォルトで GHCR の公開イメージを使用。
+  #   docker compose pull          (GHCR のリリースイメージを取得)
+  #   docker compose up -d         (取得済みイメージで起動)
+  # ローカル開発 (ソースからビルド):
+  #   docker compose up -d --build
   app:
+    image: ${UMANSCHAT_APP_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-app:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -53,6 +59,7 @@ services:
     profiles: ["tunnel"]  # --profile tunnel で有効化。TUNNEL_TOKEN 未設定時は起動しない
 
   scraper:
+    image: ${UMANSCHAT_SCRAPER_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-scraper:latest}
     build:
       context: ./scraper
       dockerfile: Dockerfile
@@ -68,6 +75,7 @@ services:
       SCRAPE_PROXY: ${SCRAPE_PROXY:-}
 
   embedder:
+    image: ${UMANSCHAT_EMBEDDER_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-embedder:latest}
     build:
       context: ./embedder
       dockerfile: Dockerfile

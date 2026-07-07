@@ -8,8 +8,8 @@
  *
  * 使用法: bun scripts/pack-exe.ts
  */
-import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
 import { execSync } from "node:child_process";
 
 const root = process.cwd();
@@ -17,7 +17,7 @@ const distDir = join(root, "dist");
 const outDir = join(distDir, "UmansChat");
 
 console.log("[pack] Building standalone server...");
-execSync("bun run build", { cwd: root, stdio: "inherit" });
+execSync("bun run build", { cwd: root, stdio: "inherit", env: { ...process.env, DATABASE_URL: ":memory:" } });
 
 // dist/UmansChat/ をクリーンアップ
 if (existsSync(outDir)) {
@@ -33,7 +33,44 @@ if (!existsSync(standaloneDir)) {
   console.error("[pack] .next/standalone not found. Did the build succeed?");
   process.exit(1);
 }
-cpSync(standaloneDir, outDir, { recursive: true });
+// .next/standalone には Next.js の output-file-tracing が作成した junction
+// (node_modules/@xenova/transformers-<hash>, better-sqlite3-<hash>) が含まれる。
+// Windows で cpSync が junction を copyfile しようとして EPERM になるため、
+// junction をスキップし、コピー後に junction のターゲットを実ディレクトリとして
+// dist にコピーする。junction は絶対パスを指すため、配布先で壊れるのを防ぐ。
+function findJunctions(dir: string, base = ""): { src: string; target: string; rel: string }[] {
+  const junctions: { src: string; target: string; rel: string }[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    const rel = base ? join(base, entry.name) : entry.name;
+    let stat;
+    try { stat = lstatSync(full); } catch { continue; }
+    if (stat.isSymbolicLink()) {
+      junctions.push({ src: full, target: readlinkSync(full), rel });
+    } else if (entry.isDirectory()) {
+      junctions.push(...findJunctions(full, rel));
+    }
+  }
+  return junctions;
+}
+
+const junctions = findJunctions(standaloneDir);
+cpSync(standaloneDir, outDir, {
+  recursive: true,
+  force: true,
+  filter: (src) => {
+    try { return !lstatSync(src).isSymbolicLink(); } catch { return true; }
+  },
+});
+
+// junction ターゲットをディレクトリとして実コピー (絶対パス junction は配布先で壊れる)
+for (const j of junctions) {
+  const linkDest = join(outDir, j.rel);
+  mkdirSync(dirname(linkDest), { recursive: true });
+  if (!existsSync(linkDest)) {
+    cpSync(j.target, linkDest, { recursive: true, dereference: true });
+  }
+}
 
 // public/ → dist/UmansChat/public/
 const publicSrc = join(root, "public");
@@ -83,6 +120,23 @@ cpSync(
   join(root, "package.json"),
   join(outDir, "package.json"),
 );
+
+// 配布物からテストファイルを削除 (実行不要・サイズ削減)。
+// Next.js の output-file-tracing が src/**/*.test.ts(x) も standalone に
+// コピーするため、dist 側でも掃除する。
+const testPattern = /(\.test\.ts|\.test\.tsx)$/;
+function pruneTests(dir: string): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      pruneTests(full);
+    } else if (testPattern.test(entry.name)) {
+      rmSync(full, { force: true });
+    }
+  }
+}
+pruneTests(outDir);
+
 
 console.log("[pack] Compiling launcher to umanschat.exe...");
 try {

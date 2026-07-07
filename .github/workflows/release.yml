@@ -1,0 +1,175 @@
+# Release: Docker images (GHCR) + Windows standalone exe.
+# Triggered by pushing a tag matching v*.*.*, or manually via workflow_dispatch.
+#
+# Produces:
+#   - ghcr.io/johmaru/umanschat-unofficial-app:<version>
+#   - ghcr.io/johmaru/umanschat-unofficial-scraper:<version>
+#   - ghcr.io/johmaru/umanschat-unofficial-embedder:<version>
+#   - UmansChat-<version>-windows-x64.zip  (attached to the GitHub Release)
+#
+# Pipeline:
+#   prepare  → computes a single shared version/tag (consumed by all later jobs)
+#   docker   → builds & pushes the 3 images to GHCR  (needs: prepare)
+#   exe      → builds umanschat.exe natively on windows-latest  (needs: prepare)
+#   release  → creates the GitHub Release + attaches the zip  (needs: prepare, docker, exe)
+#
+# The release job only runs after BOTH artifacts succeed, so a Docker build
+# failure cannot publish an exe-only release. The exe artifact is built
+# natively on windows-latest (no cross-compilation) to match what end-users
+# download and run. Docker images are built on ubuntu-latest.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (without leading v). If omitted, dev-<sha> is used."
+        required: false
+
+permissions:
+  contents: write   # create GitHub Release + upload exe asset
+  packages: write   # push to GHCR
+
+env:
+  # GHCR rejects uppercase repository components — force lowercase.
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/johmaru/umanschat-unofficial
+
+jobs:
+  # ── Compute a single shared version + tag name ────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Derive version and tag
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # Tag push: tag is vX.Y.Z, version strips the leading v.
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            # Manual dispatch with explicit version: synthesize a v-prefixed tag.
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            # Manual dispatch without input: dev build.
+            VERSION="dev-${GITHUB_SHA::7}"
+            TAG="v${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+  # ── Docker images (app + scraper + embedder) ──────────────────────────
+  docker:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-app:latest
+            ${{ env.IMAGE_PREFIX }}-app:${{ needs.prepare.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push scraper image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./scraper
+          file: ./scraper/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-scraper:latest
+            ${{ env.IMAGE_PREFIX }}-scraper:${{ needs.prepare.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push embedder image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./embedder
+          file: ./embedder/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-embedder:latest
+            ${{ env.IMAGE_PREFIX }}-embedder:${{ needs.prepare.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Windows standalone exe ────────────────────────────────────────────
+  exe:
+    runs-on: windows-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build & pack exe
+        run: bun run pack:exe
+        env:
+          DATABASE_URL: ":memory:"
+
+      - name: Zip distribution
+        shell: pwsh
+        run: |
+          $version = "${{ needs.prepare.outputs.version }}"
+          $zip = "UmansChat-$version-windows-x64.zip"
+          Compress-Archive -Path dist\UmansChat\* -DestinationPath $zip
+          Write-Host "Created $zip"
+
+      - name: Upload zip as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: umanschat-exe-${{ needs.prepare.outputs.version }}
+          path: UmansChat-${{ needs.prepare.outputs.version }}-windows-x64.zip
+          retention-days: 5
+
+  # ── GitHub Release (only after both artifacts succeed) ────────────────
+  release:
+    runs-on: ubuntu-latest
+    needs: [prepare, docker, exe]
+    steps:
+      - name: Download exe zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: umanschat-exe-${{ needs.prepare.outputs.version }}
+          path: release-assets
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: UmansChat ${{ needs.prepare.outputs.tag }}
+          files: release-assets/UmansChat-${{ needs.prepare.outputs.version }}-windows-x64.zip
+          draft: false
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
+          generate_release_notes: true

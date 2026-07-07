@@ -20,6 +20,9 @@
 # production
 /build
 
+# standalone exe packaging output (bun run pack:exe)
+/dist
+
 # misc
 .DS_Store
 

@@ -170,6 +170,69 @@ If the instruction is ambiguous, ask whether it should be stored as a project ru
 - **Runtime Skills** (DB `skills` table): User-facing reusable prompts stored in SQLite, searched via embedding and injected into chat system context. Managed via the Skill Manager UI (sidebar 🛠️ button) and auto-extracted as draft candidates from conversations.
 - These are separate systems with different purposes; do not mix them. The `.agents/skills/` directory is never read by the running app, and the `skills` DB table is never read by dev agents.
 
+
+## Release & Distribution
+
+**第一優先: Docker と exe 両方の配布を毎回リリースすること。** どちらか一方だけの
+リリースは不完全。新機能・バグ修正問わず、リリース時は必ず両方のアーティファクトを
+生成・公開すること。
+
+Two distribution formats, both produced by GitHub Actions on every release:
+
+- **Docker images** (GHCR): `app`, `scraper`, `embedder` — 3 images, tagged `:<version>` + `:latest`.
+- **Windows standalone exe**: `UmansChat-<version>-windows-x64.zip` — attached to the GitHub Release.
+
+### Release trigger
+
+```bash
+# Push a tag vX.Y.Z → triggers .github/workflows/release.yml
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Manual dispatch (Actions tab → Release → Run workflow) with optional `version` input.
+
+### Pipeline (`.github/workflows/release.yml`)
+
+1. `prepare` — computes a single shared `version` + `tag` (consumed by all later jobs).
+   Tag push → `GITHUB_REF_NAME`; manual → `v${inputs.version}` or `vdev-<sha>`.
+2. `docker` (ubuntu-latest) — builds & pushes the 3 images to GHCR.
+3. `exe` (windows-latest) — runs `bun run pack:exe` natively, zips `dist/UmansChat/`,
+   uploads as a workflow artifact. **No cross-compilation** — the exe is built on
+   Windows to match what end-users download.
+4. `release` (`needs: [prepare, docker, exe]`) — creates the GitHub Release and
+   attaches the zip. Runs only after both artifacts succeed, so a Docker failure
+   cannot publish an exe-only release.
+
+### GHCR image names (all lowercase — GHCR rejects uppercase)
+
+```
+ghcr.io/johmaru/umanschat-unofficial-app:<version>
+ghcr.io/johmaru/umanschat-unofficial-scraper:<version>
+ghcr.io/johmaru/umanschat-unofficial-embedder:<version>
+```
+
+### Local build commands
+
+```bash
+bun run pack:exe    # build .next/standalone → assemble dist/UmansChat/ → compile umanschat.exe
+docker compose up -d --build   # local dev: build all 3 images from source
+docker compose pull            # release: pull published GHCR images
+```
+
+### CI validation (`.github/workflows/ci.yml`)
+
+On every push/PR to `develop`/`main`: builds all 3 Docker images (no push) and runs
+`bun run pack:exe` on windows-latest. Both jobs must be green before merge.
+
+### Parity rule
+
+The exe distribution must contain the same application code as the Docker image.
+Both produce the same Next.js standalone output with `DATABASE_URL=":memory:"`
+(Dockerfile uses `npx next build`; pack-exe.ts uses `bun run build`).
+Do not add exe-only or Docker-only code paths unless a fundamental platform constraint
+forces it — and if so, document it in `skill://umanschat-debug` and here.
+
 ## Documentation Sync
 Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.
 Do not update README files for purely internal refactors, small visual polish, typo fixes, or implementation details that users do not need to know.

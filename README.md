@@ -108,9 +108,9 @@ A no-Docker, double-clickable Windows experience. The resulting `dist/UmansChat/
 > **Build machine requires** Windows + [Bun](https://bun.sh) installed. The target machine needs nothing.
 
 ```bash
-# 1. Build the standalone server and assemble the distributable folder
-bun run build
-bun scripts/pack-exe.ts
+# 1. Build, assemble the distributable folder, and compile umanschat.exe
+#    (runs `next build` internally with DATABASE_URL=":memory:")
+bun run pack:exe
 
 # 2. Run the app
 #    Double-click dist/UmansChat/umanschat.exe
@@ -120,6 +120,41 @@ bun scripts/pack-exe.ts
 On first launch the launcher creates `data/umanschat.db`, applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
 
 > **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`, shipped in `.env.example` for `EMBED_PROVIDER=local`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected. For the HTTP Python embedder (`EMBED_PROVIDER=http`), the default model is `LiquidAI/LFM2.5-Embedding-350M` (1024-dim) and runs server-side — no client download.
+
+## Releases (Docker + exe)
+
+Releases are produced automatically by GitHub Actions when a `v*.*.*` tag is pushed. Each release publishes **both** distribution formats:
+
+- **Docker images** (GHCR):
+  - `ghcr.io/johmaru/umanschat-unofficial-app:<version>`
+  - `ghcr.io/johmaru/umanschat-unofficial-scraper:<version>`
+  - `ghcr.io/johmaru/umanschat-unofficial-embedder:<version>`
+  Each image is tagged with both `:<version>` and `:latest`.
+- **Windows standalone exe**: `UmansChat-<version>-windows-x64.zip`, attached to the GitHub Release.
+
+```bash
+# Create a release (tag push triggers .github/workflows/release.yml)
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Manual dispatch is also available: Actions tab → **Release** → **Run workflow** (optional `version` input).
+
+The pipeline runs four jobs: `prepare` (shared version), `docker` (ubuntu-latest, pushes 3 images), `exe` (windows-latest, builds `umanschat.exe` natively — no cross-compilation), and `release` (`needs: [prepare, docker, exe]` — creates the GitHub Release only after both artifacts succeed).
+
+### Consuming published images
+
+```bash
+# Pull the released images instead of building from source
+docker compose pull
+docker compose up -d
+```
+
+For local development from source, use `docker compose up -d --build`.
+
+### CI validation
+
+Every push/PR to `develop`/`main` runs `.github/workflows/ci.yml`: builds all 3 Docker images (no push) and runs `bun run pack:exe` on windows-latest. Both jobs must pass before merge.
 
 ## Public Access via Cloudflare Tunnel (Optional)
 

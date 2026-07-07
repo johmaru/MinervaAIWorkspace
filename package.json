@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "pack:exe": "bun scripts/pack-exe.ts",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",

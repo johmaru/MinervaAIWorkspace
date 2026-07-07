@@ -114,9 +114,8 @@ cp .env.example .env
 #    .env を編集し LLM_API_KEY を入力
 #    AUTH_SECRET を生成: bunx auth secret
 
-# 3. 配布フォルダをビルド
-bun run build
-bun scripts/pack-exe.ts
+# 3. 配布フォルダをビルド（内部で next build を DATABASE_URL=":memory:" で実行）
+bun run pack:exe
 #    dist/UmansChat/ に umanschat.exe と必要ファイル一式が出力されます
 ```
 
@@ -128,7 +127,43 @@ bun scripts/pack-exe.ts
 
 **埋め込みモデルの初回ダウンロード**: スタンドアロン exe はデフォルトでローカル ONNX 埋め込み（`EMBED_PROVIDER=local` 用に `.env.example` で `Xenova/all-MiniLM-L6-v2`）を使います。初回の埋め込み生成時に Hugging Face からモデルがダウンロードされるため、インターネット接続が必要です。モデルのダウンロードが完了すれば、以降のチャットはオフラインで動作します。HTTP Python embedder（`EMBED_PROVIDER=http`）の場合、既定モデルは `LiquidAI/LFM2.5-Embedding-350M`（1024次元）でサーバー側で実行され、クライアントでのダウンロードは不要です。
 
+
 **オプションサービスの縮退**: スタンドアロン exe にはスクレイパー、SearXNG、Tor、Python embedder は同梱されません。これらの機能を使わずにチャットは正常に動作しますが、Web 検索・スクレイピングは空の結果を返します（エラーにはなりません）。スクレイピング/検索を利用したい場合は別途 Docker で該当サービスを起動し、`.env` の `SCRAPER_URL`・`SEARXNG_URL` を公開ポートに向けてください。
+
+## リリース（Docker + exe）
+
+`v*.*.*` タグを push すると GitHub Actions が自動的にリリースを生成します。各リリースでは **両方** の配布形式を公開します:
+
+- **Docker イメージ**（GHCR）:
+  - `ghcr.io/johmaru/umanschat-unofficial-app:<バージョン>`
+  - `ghcr.io/johmaru/umanschat-unofficial-scraper:<バージョン>`
+  - `ghcr.io/johmaru/umanschat-unofficial-embedder:<バージョン>`
+  各イメージには `:<バージョン>` と `:latest` の両方のタグが付きます。
+- **Windows スタンドアロン exe**: `UmansChat-<バージョン>-windows-x64.zip`。GitHub Release に添付されます。
+
+```bash
+# リリース作成（タグ push で .github/workflows/release.yml が実行される）
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+手動実行も可能: Actions タブ → **Release** → **Run workflow**（`version` 入力は任意）。
+
+パイプラインは 4 ジョブで構成されます: `prepare`（共通バージョン計算）、`docker`（ubuntu-latest、3 イメージを push）、`exe`（windows-latest、`umanschat.exe` をネイティブビルド — クロスコンパイルなし）、`release`（`needs: [prepare, docker, exe]` — 両アーティファクト成功後にのみ GitHub Release を作成）。
+
+### 公開イメージの利用
+
+```bash
+# ソースからビルドせず、公開済みイメージを pull して起動
+docker compose pull
+docker compose up -d
+```
+
+ローカル開発でソースからビルドする場合は `docker compose up -d --build` を使います。
+
+### CI 検証
+
+`develop`/`main` への push/PR ごとに `.github/workflows/ci.yml` が実行されます: 3 つの Docker イメージをビルド（push なし）し、windows-latest で `bun run pack:exe` を実行します。両ジョブが成功しないとマージできません。
 
 
 ## Cloudflare Tunnel によるパブリックアクセス（任意）
