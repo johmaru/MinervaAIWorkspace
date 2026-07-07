@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, inArray, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { memories, threads } from "@/db/schema";
+import { memories, threads, folders } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
 
 /**
@@ -24,6 +24,8 @@ export type ExtractedMemory = {
   action: "new" | "replace" | "merge";
   /** replace/merge 時、既存記憶の content（類似検索で特定用） */
   targetContent?: string;
+  /** replace/merge 時、既存記憶の ID（直接指定用。targetId 優先） */
+  targetId?: string;
 };
 
 const SYSTEM_PROMPT = `You are a memory extractor. Analyze the conversation and extract durable memories.
@@ -37,14 +39,14 @@ For each memory, decide an action:
 - "replace": supersedes an existing memory that is now outdated or wrong
 - "merge": combines with an existing memory to form a richer one
 
-When action is "replace" or "merge", set targetContent to the EXACT content string of the existing memory you are replacing or merging with.
+When action is "replace" or "merge", set targetId to the ID of the existing memory you are replacing or merging with. The existing memories are listed with their IDs below. If you cannot identify the exact memory by ID, set targetContent to the EXACT content string instead.
 
 Write each memory's content as a concise, search-friendly sentence. Capture the topic and key facts, not just the user's identity.
 
 Skip pure greetings and acknowledgments (e.g. 'hello', 'thanks', 'got it'), BUT always save what was discussed or decided. If the conversation only contains greetings with no substance, return an empty array. Otherwise, extract at least one memory about what was discussed.
 
 Return ONLY valid JSON (no markdown fences):
-[{"kind": "fact"|"working", "content": "...", "importance": 0.0-1.0, "action": "new"|"replace"|"merge", "targetContent": "... (only for replace/merge)"}]`;
+[{"kind": "fact"|"working", "content": "...", "importance": 0.0-1.0, "action": "new"|"replace"|"merge", "targetId": "... (existing memory ID, for replace/merge)", "targetContent": "... (fallback: exact content string, for replace/merge)"}]`;
 
 /**
  * generateMemories で LLM に送る messages を構築。
@@ -61,7 +63,7 @@ function buildExtractionMessages(
   const existingList =
     existingMemories.length > 0
       ? existingMemories
-          .map((m, i) => `${i}: ${m.content}`)
+          .map((m) => `ID: ${m.id} | ${m.content}`)
           .join("\n")
       : "(none)";
 
@@ -106,6 +108,7 @@ function parseExtraction(raw: string | null | undefined): ExtractedMemory[] | nu
         importance: typeof m.importance === "number" ? m.importance : 0.5,
         action: m.action,
         targetContent: m.targetContent,
+        targetId: typeof m.targetId === "string" ? m.targetId : undefined,
       }));
   } catch {
     return null;
@@ -113,13 +116,25 @@ function parseExtraction(raw: string | null | undefined): ExtractedMemory[] | nu
 }
 
 /**
- * targetContent で既存アクティブ記憶を検索。
- * 完全一致で最も古い1件を返す。見つからなければ null。
+ * targetId または targetContent で既存アクティブ記憶を検索。
+ * targetId があれば ID で直接検索（スコープ問わず）。
+ * 無ければ targetContent で完全一致検索（threadId スコープ）。
+ * 見つからなければ null。
  */
 async function findExistingMemory(
   threadId: string,
-  targetContent: string,
+  targetContent: string | undefined,
+  targetId?: string,
 ): Promise<{ id: string } | null> {
+  if (targetId) {
+    const [row] = await db
+      .select({ id: memories.id })
+      .from(memories)
+      .where(and(eq(memories.id, targetId), isNull(memories.suppressedAt)))
+      .limit(1);
+    if (row) return row;
+  }
+  if (!targetContent) return null;
   const [row] = await db
     .select({ id: memories.id })
     .from(memories)
@@ -181,25 +196,67 @@ export async function generateMemories(
   recentTurns: { role: string; content: string }[],
   llm: OpenAI,
   model: string,
+  userId?: string,
 ): Promise<void> {
   // user/assistant ペアが無い場合は早期リターン
   const hasUser = recentTurns.some((t) => t.role === "user");
   const hasAssistant = recentTurns.some((t) => t.role === "assistant");
   if (!hasUser || !hasAssistant || recentTurns.length === 0) return;
 
-  // threads から folderId を取得
+  // threads から folderId と userId を取得
   const [thread] = await db
-    .select({ folderId: threads.folderId })
+    .select({ folderId: threads.folderId, userId: threads.userId })
     .from(threads)
     .where(eq(threads.id, threadId));
   const folderId = thread?.folderId ?? null;
+  const effectiveUserId = userId ?? thread?.userId;
 
   // 既存アクティブ記憶を取得（LLM へ提示用）
-  const existing = await db
-    .select({ id: memories.id, content: memories.content })
-    .from(memories)
-    .where(and(eq(memories.threadId, threadId), isNull(memories.suppressedAt)))
-    .orderBy(asc(memories.createdAt));
+  // スコープ: folder.memoryScope に従い同一フォルダ or 全スレッド横断
+  let existing: { id: string; content: string }[];
+  if (folderId) {
+    // フォルダの memoryScope を取得
+    const [folder] = await db
+      .select({ memoryScope: folders.memoryScope })
+      .from(folders)
+      .where(eq(folders.id, folderId));
+    if (folder?.memoryScope === "folder") {
+      // 同一フォルダ内の記憶を取得
+      existing = await db
+        .select({ id: memories.id, content: memories.content })
+        .from(memories)
+        .where(and(eq(memories.folderId, folderId), isNull(memories.suppressedAt)))
+        .orderBy(desc(memories.updatedAt))
+        .limit(20);
+    } else {
+      // global: 同一ユーザーの全スレッド横断
+      const threadIds = effectiveUserId
+        ? (await db
+            .select({ id: threads.id })
+            .from(threads)
+            .where(eq(threads.userId, effectiveUserId)))
+            .map((t) => t.id)
+        : [threadId];
+      existing = await db
+        .select({ id: memories.id, content: memories.content })
+        .from(memories)
+        .where(
+          and(
+            inArray(memories.threadId, threadIds),
+            isNull(memories.suppressedAt),
+          ),
+        )
+        .orderBy(desc(memories.updatedAt))
+        .limit(20);
+    }
+  } else {
+    // フォルダなし: 同一スレッドのみ（従来通り）
+    existing = await db
+      .select({ id: memories.id, content: memories.content })
+      .from(memories)
+      .where(and(eq(memories.threadId, threadId), isNull(memories.suppressedAt)))
+      .orderBy(asc(memories.createdAt));
+  }
 
   // LLM で記憶抽出
   let extracted: ExtractedMemory[] | null;
@@ -220,20 +277,20 @@ export async function generateMemories(
 
   for (const mem of extracted) {
     try {
-      if (mem.action === "replace" && mem.targetContent) {
-        const target = await findExistingMemory(threadId, mem.targetContent);
+      if (mem.action === "replace" && (mem.targetId || mem.targetContent)) {
+        const target = await findExistingMemory(threadId, mem.targetContent, mem.targetId);
         if (target) {
           await db
             .update(memories)
             .set({ suppressedAt: new Date(), updatedAt: new Date() })
             .where(eq(memories.id, target.id));
         }
-        // targetContent が見つからなくても新記憶として保存（フォールバック）
-      } else if (mem.action === "merge" && mem.targetContent) {
-        const target = await findExistingMemory(threadId, mem.targetContent);
+        // target が見つからなくても新記憶として保存（フォールバック）
+      } else if (mem.action === "merge" && (mem.targetId || mem.targetContent)) {
+        const target = await findExistingMemory(threadId, mem.targetContent, mem.targetId);
         if (target) {
           const existingContent =
-            existing.find((m) => m.id === target.id)?.content ?? mem.targetContent;
+            existing.find((m) => m.id === target.id)?.content ?? mem.targetContent ?? "";
           const mergedContent = await mergeContents(existingContent, mem.content, llm, model);
           const vector = await embedText(mergedContent, "document");
           if (vector.length === 0) continue; // embed 失敗 → スキップ
@@ -249,7 +306,7 @@ export async function generateMemories(
             .where(eq(memories.id, target.id));
           continue; // merge 完了、新規 INSERT しない
         }
-        // targetContent が見つからない → new にフォールバック
+        // target が見つからない → new にフォールバック
       }
 
       // action === "new" または フォールバック

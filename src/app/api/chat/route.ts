@@ -494,6 +494,7 @@ export async function POST(req: Request) {
         ],
         llm,
         finalModel,
+        user.id,
       );
     } catch (err) {
       console.error("[memory] generation failed:", err);
