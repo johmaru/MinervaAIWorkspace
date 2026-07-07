@@ -234,6 +234,29 @@ Both produce the same Next.js standalone output with `DATABASE_URL=":memory:"`
 Do not add exe-only or Docker-only code paths unless a fundamental platform constraint
 forces it — and if so, document it in `skill://umanschat-debug` and here.
 
+## Cloudflare Tunnel GUI
+
+Cloudflare Tunnel の設定・起動/停止を GUI（SettingsModal）から行う。
+アプリの再起動不要でトークン変更と AUTH_URL 切替が即時反映される。
+
+### 仕組み
+
+- **API**: `/api/tunnel`（GET: 状態、POST: 起動、DELETE: 停止）
+  - トークンは GET レスポンスに平文で返さない（`hasToken` のみ）
+  - AUTH_URL は `process.env` を動的更新 → NextAuth が `reqWithEnvURL` で毎回読むため再起動不要
+  - トークン変更時は `startTunnel(token, { force: true })` で停止→再起動（古いトークンを使い続けない）
+- **プロセス管理**: `src/lib/tunnel.ts`
+  - Docker 環境: `docker compose --profile tunnel up -d --force-recreate cloudflared`
+  - exe 環境: cloudflared バイナリを `data/cloudflared/` にダウンロードして子プロセス起動
+  - セキュリティ: 固定バージョン + SHA256 検証 + HTTPS のみ + 自動更新なし
+  - 対応プラットフォーム: Windows x64（スタンドアロン exe）、Linux x64（Node/Bun 実行時）
+
+### 注意点
+
+- Tunnel URL は自動取得できない。ユーザーが公開ホスト名（`https://your-tunnel.example.com`）を入力する必要がある
+- Google OAuth のリダイレクト URI は AUTH_URL に一致させる必要がある
+- cloudflared バイナリの SHA256 ハッシュはローカル計算で確認済みの値をハードコード（`CLOUDFLARED_HASHES`）。バージョンアップ時に更新が必要
+
 ## Documentation Sync
 Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.
 Do not update README files for purely internal refactors, small visual polish, typo fixes, or implementation details that users do not need to know.

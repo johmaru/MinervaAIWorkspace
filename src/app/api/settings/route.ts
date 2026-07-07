@@ -140,6 +140,9 @@ export async function GET(req: Request) {
     notionClientSecret: "",
     hasNotionClientSecret: !!process.env.NOTION_CLIENT_SECRET,
     authUrl: process.env.AUTH_URL || "http://localhost:3001",
+    // Cloudflare Tunnel — トークンは平文で返さず、設定済みかどうかのみ返す
+    tunnelToken: "",
+    hasTunnelToken: !!process.env.TUNNEL_TOKEN,
     // 既定グローバルインストラクション選択（ユーザー単位、DB）
     activeInstructionId: userRow?.activeInstructionId ?? null,
     // パーソナライズ（ユーザー単位、DB）
@@ -188,7 +191,8 @@ type SettingsBody = {
   notionClientId?: string;
   notionClientSecret?: string;
   authUrl?: string;
-  // マイグレーション確認
+  // Cloudflare Tunnel
+  tunnelToken?: string;
   applyMigration?: boolean;
 };
 
@@ -353,6 +357,8 @@ export async function POST(req: Request) {
     if (body.notionClientId !== undefined) updates.NOTION_CLIENT_ID = body.notionClientId;
     if (body.notionClientSecret !== undefined) updates.NOTION_CLIENT_SECRET = body.notionClientSecret;
     if (body.authUrl !== undefined) updates.AUTH_URL = body.authUrl;
+    // Cloudflare Tunnel — トークンは空文字列の場合は更新しない（既存値を保持）
+    if (body.tunnelToken !== undefined && body.tunnelToken !== "") updates.TUNNEL_TOKEN = body.tunnelToken;
     envContent = updateEnvContent(envContent, updates);
 
     writeFileSync(envPath, envContent);

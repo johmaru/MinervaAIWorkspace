@@ -170,21 +170,41 @@ docker compose up -d
 
 ポート開放やパブリック IP なしで HTTPS 経由でアプリを公開するには、Cloudflare 名前付きトンネルを使います。リモートネットワークから Google OAuth を利用する場合に推奨します。
 
+### GUI での設定（推奨）
+
 1. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel で名前付きトンネルを作成（タイプ: Cloudflared）。
 2. パブリックホスト名を追加し、`Service=http://app:3000` にルーティング。
-3. 発行されたトークンを `.env` に設定:
-   ```
-   TUNNEL_TOKEN=your-token-here
-   AUTH_URL=https://your-tunnel.example.com
-   ```
-4. トンネルプロファイル付きで起動:
-   ```bash
-   docker compose --profile tunnel up -d
-   ```
-5. Google Cloud Console で認可リダイレクト URI を以下に設定:
-   `https://your-tunnel.example.com/api/auth/callback/google`
+3. Cloudflare ダッシュボードからトンネルトークンをコピー。
+4. UmansChat → 設定 → コネクションタブ → Cloudflare Tunnel セクションを開く。
+5. **Tunnel Token** 欄にトークンを貼り付け。
+6. **AUTH_URL** に公開ホスト名を設定（例: `https://umanschat.example.com`）。`https://` で始まる必要があります。
+7. **起動** ボタンをクリック。トンネルが即座に起動します — アプリの再起動は不要です。
 
-`--profile tunnel` なしの場合、cloudflared サービスは除外され、アプリは通常通り `localhost:3001` で動作します。
+GUI からいつでもトンネルの起動/停止ができます。`AUTH_URL` は動的反映されるため（NextAuth がリクエスト毎に読み込み）、Google OAuth のコールバック URL も即座に切り替わります。
+
+### .env での設定（Docker CLI）
+
+```bash
+# .env
+TUNNEL_TOKEN=your-token-here
+AUTH_URL=https://your-tunnel.example.com
+```
+
+```bash
+docker compose --profile tunnel up -d
+```
+
+### Google OAuth のリダイレクト URI
+
+Google Cloud Console で認可リダイレクト URI を以下に設定:
+`https://your-tunnel.example.com/api/auth/callback/google`
+
+### Docker とスタンドアロン exe の違い
+
+- **Docker Compose**: cloudflared コンテナを Docker socket 経由で管理（トークン変更時は `--force-recreate` で再作成）。
+- **スタンドアロン exe（Windows x64 のみ）**: 初回使用時に cloudflared バイナリを `data/cloudflared/` にダウンロード。固定バージョン（`2024.12.2`）+ SHA256 検証 + HTTPS のみ + 自動更新なし。バージョンアップは開発者が再ビルドが必要。
+- **Linux x64 で Node/Bun 実行時**: ソースから Linux 上で実行する場合（スタンドアロン exe ではなく）、Linux 版 cloudflared バイナリを同じセキュリティ検証付きでダウンロード。
+- macOS は非対応（`.tgz` 展開が必要なため、未実装）。
 
 ## クイックスタート（ローカル開発）
 

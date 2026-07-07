@@ -160,21 +160,41 @@ Every push/PR to `develop`/`main` runs `.github/workflows/ci.yml`: builds all 3 
 
 To expose the app over public HTTPS without port forwarding or a public IP, use a Cloudflare named tunnel. This is the recommended way to use Google OAuth from a remote network.
 
+### Setup via GUI (recommended)
+
 1. Create a named tunnel at [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel (type: Cloudflared).
 2. Add a public hostname and route it to `Service=http://app:3000`.
-3. Copy the tunnel token into `.env`:
-   ```
-   TUNNEL_TOKEN=your-token-here
-   AUTH_URL=https://your-tunnel.example.com
-   ```
-4. Start with the tunnel profile:
-   ```bash
-   docker compose --profile tunnel up -d
-   ```
-5. In Google Cloud Console, set the authorized redirect URI to:
-   `https://your-tunnel.example.com/api/auth/callback/google`
+3. Copy the tunnel token from the Cloudflare dashboard.
+4. Open UmansChat → Settings → Connections tab → Cloudflare Tunnel section.
+5. Paste the tunnel token into the **Tunnel Token** field.
+6. Set **AUTH_URL** to your public hostname (e.g. `https://umanschat.example.com`). Must start with `https://`.
+7. Click **起動** (Start). The tunnel starts immediately — no app restart required.
 
-Without `--profile tunnel`, the cloudflared service is excluded and the app runs on `localhost:3001` as usual.
+The tunnel can be started/stopped from the same GUI at any time. `AUTH_URL` is applied dynamically (NextAuth reads it per-request), so the Google OAuth callback URL switches immediately.
+
+### Setup via .env (Docker CLI)
+
+```bash
+# .env
+TUNNEL_TOKEN=your-token-here
+AUTH_URL=https://your-tunnel.example.com
+```
+
+```bash
+docker compose --profile tunnel up -d
+```
+
+### Google OAuth redirect URI
+
+In Google Cloud Console, set the authorized redirect URI to:
+`https://your-tunnel.example.com/api/auth/callback/google`
+
+### Docker vs standalone exe
+
+- **Docker Compose**: The cloudflared container is managed via Docker socket (`--force-recreate` on token change).
+- **Standalone exe (Windows x64 only)**: cloudflared binary is downloaded to `data/cloudflared/` on first use. The binary is pinned to a fixed version (`2024.12.2`) with SHA256 verification, HTTPS-only download, and no automatic updates. Version upgrades require a rebuild by the developer.
+- **Node/Bun on Linux x64**: When running from source on Linux (not the standalone exe), the Linux cloudflared binary is downloaded to `data/cloudflared/` with the same security checks.
+- macOS is not supported (requires `.tgz` extraction, not implemented).
 
 ## Quick Start (Local Dev)
 

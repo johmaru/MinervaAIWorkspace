@@ -45,6 +45,9 @@ type SettingsResponse = {
   notionClientSecret: string;
   hasNotionClientSecret: boolean;
   authUrl: string;
+  // Cloudflare Tunnel
+  tunnelToken: string;
+  hasTunnelToken: boolean;
   // 既定グローバルインストラクション選択（ユーザー単位、DB）
   activeInstructionId: string | null;
   // パーソナライズ（ユーザー単位、DB）
@@ -89,6 +92,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const [torBusy, setTorBusy] = useState(false);
   const [torConnection, setTorConnection] = useState<TorConnection | null>(null);
   const [torChecking, setTorChecking] = useState(false);
+  // Cloudflare Tunnel 状態
+  const [tunnelRunning, setTunnelRunning] = useState(false);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const [connections, setConnections] = useState<{
     id: string;
@@ -303,6 +309,62 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setTorChecking(false);
     }
   }, [fetchTorStatus, t]);
+
+  // Cloudflare Tunnel 起動/停止
+  const handleTunnelToggle = useCallback(async () => {
+    setTunnelBusy(true);
+    setMessage(null);
+    try {
+      if (tunnelRunning) {
+        // 停止
+        const res = await clientFetch("/api/tunnel", { method: "DELETE" });
+        const data = (await res.json()) as { success?: boolean; error?: string; running?: boolean };
+        if (!res.ok) {
+          setMessage({ type: "error", text: data.error || "トンネル停止に失敗しました" });
+          return;
+        }
+        setTunnelRunning(false);
+        setMessage({ type: "success", text: "トンネルを停止しました" });
+      } else {
+        // 起動: トークン + AUTH_URL を送信
+        const token = form.tunnelToken ?? "";
+        const authUrl = form.authUrl ?? "";
+        if (!authUrl.startsWith("https://")) {
+          setMessage({ type: "error", text: "AUTH_URL は https:// で始まる公開 URL が必要です" });
+          return;
+        }
+        // トークンが未入力の場合は既存の .env の値を使用（API 側でフォールバック）
+        const body: Record<string, string> = { authUrl };
+        if (token) body.token = token;
+        const res = await clientFetch("/api/tunnel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as { success?: boolean; error?: string; running?: boolean };
+        if (!res.ok) {
+          setMessage({ type: "error", text: data.error || "トンネル起動に失敗しました" });
+          return;
+        }
+        setTunnelRunning(data.running ?? true);
+        setMessage({ type: "success", text: "トンネルを起動しました" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
+    } finally {
+      setTunnelBusy(false);
+    }
+  }, [tunnelRunning, form.tunnelToken, form.authUrl, t]);
+
+  // 初期ロード時にトンネル状態を取得
+  useEffect(() => {
+    clientFetch("/api/tunnel")
+      .then((res) => res.json())
+      .then((data: { running?: boolean; hasToken?: boolean; authUrl?: string }) => {
+        setTunnelRunning(data.running ?? false);
+      })
+      .catch(() => {});
+  }, []);
   const handleSaveInstruction = useCallback(async () => {
     const name = instrFormName.trim();
     const content = instrFormContent.trim();
@@ -862,7 +924,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">AUTH_URL</span>
-                <span className="block text-[10px] text-muted-foreground">Notion の Redirect URI と一致させる</span>
+                <span className="block text-[10px] text-muted-foreground">Notion の Redirect URI と一致させる。Cloudflare Tunnel 使用時は https:// で始まる公開 URL を設定</span>
               </label>
               <input
                 type="text"
@@ -871,6 +933,56 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 placeholder="http://localhost:3001"
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
+            </div>
+            {/* Cloudflare Tunnel */}
+            <div className="mt-4 space-y-3 rounded-2xl bg-muted/30 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">
+                    Cloudflare Tunnel {tunnelRunning ? t("settings.torRunning") : t("settings.torStopped")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {tunnelRunning
+                      ? "トンネル経由で公開中"
+                      : "トークンを入力して起動"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTunnelToggle}
+                  disabled={tunnelBusy}
+                  className={`rounded-xl px-3 py-1.5 text-sm text-white transition-all duration-200 disabled:opacity-50 ${
+                    tunnelRunning
+                      ? "bg-red-600 hover:bg-red-700"
+                      : "bg-green-600 hover:bg-green-700"
+                  }`}
+                >
+                  {tunnelBusy
+                    ? "処理中..."
+                    : tunnelRunning
+                      ? "停止"
+                      : "起動"}
+                </button>
+              </div>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">Tunnel Token</span>
+                  <span className="block text-[10px] text-muted-foreground">
+                    Cloudflare Zero Trust → Networks → Tunnels → トークンをコピー
+                  </span>
+                </label>
+                <input
+                  type="password"
+                  value={form.tunnelToken ?? ""}
+                  onChange={(e) => update("tunnelToken", e.target.value)}
+                  placeholder={
+                    settings?.hasTunnelToken
+                      ? "••••••••（入力で更新）"
+                      : "eyJhIjoi..."
+                  }
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
             </div>
             {/* 保存後に「Notion に接続」ボタンが使える */}
             {connections.length === 0 ? (
