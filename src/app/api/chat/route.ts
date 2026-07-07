@@ -206,6 +206,8 @@ export async function POST(req: Request) {
                 buildMemoryContext({
                   content: prepared.content,
                   thread,
+                  userId: user.id,
+                  currentThreadId: thread.id,
                 }).catch((err) => {
                   console.error("[chat] buildMemoryContext failed:", err);
                   return null;

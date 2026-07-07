@@ -1,6 +1,6 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, ne, and, isNull, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { memories, folders } from "@/db/schema";
+import { memories, folders, threads } from "@/db/schema";
 import { embedText } from "@/lib/embed";
 import { cosineSimilarity } from "@/lib/vectorSearch";
 import type { MemoryKind } from "@/lib/memory";
@@ -112,24 +112,69 @@ export async function findRelevantMemories(
 }
 
 /**
+ * ユーザーの直近スレッドタイトルを取得（現在のスレッドと空タイトルを除外）。
+ * 記憶コンテキストと一緒に AI に渡し、過去の会話トピックを推測させる。
+ *
+ * @param userId 現在のユーザー ID
+ * @param currentThreadId 現在のスレッド ID（結果から除外）
+ * @param limit 取得上限（デフォルト 15）
+ */
+export async function fetchRecentThreadTitles(
+  userId: string,
+  currentThreadId: string,
+  limit = 15,
+): Promise<string[]> {
+  const rows = await db
+    .select({ title: threads.title })
+    .from(threads)
+    .where(and(
+      eq(threads.userId, userId),
+      ne(threads.id, currentThreadId),
+      ne(threads.title, "New chat"),
+    ))
+    .orderBy(desc(threads.updatedAt))
+    .limit(limit);
+  return rows.map((r) => r.title);
+}
+
+/**
  * スレッドの folderId から記憶検索スコープを解決し、関連記憶を system message として構築。
- * 記憶が無い場合は null を返す（注入しない）。
+ * 併せて直近のスレッドタイトル一覧を注入し、AI が過去の会話トピックを推測できるようにする。
+ * タイトルも記憶も無い場合は null を返す（注入しない）。
  *
  * @param content ユーザー入力
- * @param thread スレッド行（folderId を参照）
+ * @param thread スレッド行（folderId・id を参照）
+ * @param userId 現在のユーザー ID
+ * @param currentThreadId 現在のスレッド ID（タイトル一覧から除外）
  */
 export async function buildMemoryContext({
   content,
   thread,
+  userId,
+  currentThreadId,
 }: {
   content: string;
   thread: { folderId: string | null };
+  userId: string;
+  currentThreadId: string;
 }): Promise<{ role: "system"; content: string } | null> {
-  const found = await findRelevantMemories(content, thread.folderId);
-  if (found.length === 0) return null;
-  const lines = found.map((m) => `- [${m.kind}] ${m.content}`).join("\n");
+  const [found, recentTitles] = await Promise.all([
+    findRelevantMemories(content, thread.folderId),
+    fetchRecentThreadTitles(userId, currentThreadId),
+  ]);
+
+  const sections: string[] = [];
+  if (recentTitles.length > 0) {
+    const titleList = recentTitles.map((t) => `- ${t}`).join("\n");
+    sections.push(`Recent conversation topics (most recent first). Use these to infer which past conversations may be relevant to the user's current question:\n${titleList}`);
+  }
+  if (found.length > 0) {
+    const lines = found.map((m) => `- [${m.kind}] ${m.content}`).join("\n");
+    sections.push(`Past memories from previous conversations. Use these to provide context for the user's question. If the user asks what you discussed before, summarize the relevant memories.\n${lines}`);
+  }
+  if (sections.length === 0) return null;
   return {
     role: "system",
-    content: `Past memories from previous conversations. Use these to provide context for the user's question. If the user asks what you discussed before, summarize the relevant memories.\n${lines}`,
+    content: sections.join("\n\n"),
   };
 }

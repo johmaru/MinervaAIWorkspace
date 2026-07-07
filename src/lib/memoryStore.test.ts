@@ -2,8 +2,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { db } from "@/db";
-import { memories, threads, folders } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { memories, threads, folders, users } from "@/db/schema";
+import { eq, ne, desc } from "drizzle-orm";
 
 // embedText をモック: 実 embedder サービスに依存せず、決定論的ベクトルを返す。
 // 内容のハッシュを元に1024次元の擬似ベクトルを生成し、同じ内容は同じベクトルになる。
@@ -24,7 +24,7 @@ vi.mock("@/lib/embed", () => ({
 }));
 
 import { embedText, hashContent } from "@/lib/embed";
-import { findRelevantMemories } from "@/lib/memoryStore";
+import { findRelevantMemories, buildMemoryContext, fetchRecentThreadTitles } from "@/lib/memoryStore";
 
 // findRelevantMemories の統合テスト。実 DB に記憶を INSERT し、
 // アプリ側 cosine 検索 → similarity + recency top-5 が返ることを検証。
@@ -150,5 +150,186 @@ describe("findRelevantMemories", () => {
     expect(results.length).toBeLessThanOrEqual(5);
     // 類似記憶が結果に含まれる
     expect(results.some((r) => r.content.includes("Python") || r.content.includes("TypeScript"))).toBe(true);
+  }, 60_000);
+});
+
+
+describe("fetchRecentThreadTitles", () => {
+  const userIds: string[] = [];
+  const titleThreadIds: string[] = [];
+
+  beforeAll(async () => {
+    const [user] = await db.insert(users).values({
+      nickname: "titles-test-user",
+      email: "titles-test@example.com",
+    }).returning();
+    userIds.push(user.id);
+  });
+
+  afterAll(async () => {
+    for (const id of titleThreadIds) {
+      await db.delete(threads).where(eq(threads.id, id));
+    }
+    for (const id of userIds) {
+      await db.delete(users).where(eq(users.id, id));
+    }
+  });
+
+  it("現在スレッドと New chat を除外し updatedAt 降順で返す", async () => {
+    const uid = userIds[0];
+    // updatedAt を意図的にずらすため順に挿入し、後に手動で上書きする
+    const now = Date.now();
+    const [t1] = await db.insert(threads).values({
+      userId: uid,
+      title: "一番古いスレッド",
+      updatedAt: new Date(now),
+    }).returning();
+    const [t2] = await db.insert(threads).values({
+      userId: uid,
+      title: "New chat",
+      updatedAt: new Date(now + 1000),
+    }).returning();
+    const [t3] = await db.insert(threads).values({
+      userId: uid,
+      title: "最新スレッド",
+      updatedAt: new Date(now + 2000),
+    }).returning();
+    titleThreadIds.push(t1.id, t2.id, t3.id);
+
+    // t3 を「現在のスレッド」として渡す → t3 は除外、t2 は "New chat" で除外、t1 のみ残る
+    const titles = await fetchRecentThreadTitles(uid, t3.id);
+    expect(titles).toEqual(["一番古いスレッド"]);
+  }, 60_000);
+
+  it("該当スレッドが無い場合は空配列を返す", async () => {
+    const uid = userIds[0];
+    // 存在しないスレッド ID を「現在」として渡す → 全スレッド候補だが
+    // 他のテストで作った分が混ざるのを避けるため別ユーザーで検証したいが、
+    // ここは単純に存在しない userId で空配列になることを確認する。
+    const titles = await fetchRecentThreadTitles("nonexistent-user-id", "nonexistent-thread-id");
+    expect(titles).toEqual([]);
+  }, 60_000);
+});
+
+describe("buildMemoryContext with titles", () => {
+  const userIds: string[] = [];
+  const ctxThreadIds: string[] = [];
+  const ctxFolderIds: string[] = [];
+  const ctxMemoryIds: string[] = [];
+
+  beforeAll(async () => {
+    const [user] = await db.insert(users).values({
+      nickname: "ctx-titles-test-user",
+      email: "ctx-titles-test@example.com",
+    }).returning();
+    userIds.push(user.id);
+  });
+
+  afterAll(async () => {
+    for (const id of ctxMemoryIds) {
+      await db.delete(memories).where(eq(memories.id, id));
+    }
+    for (const id of ctxThreadIds) {
+      await db.delete(threads).where(eq(threads.id, id));
+    }
+    for (const id of ctxFolderIds) {
+      await db.delete(folders).where(eq(folders.id, id));
+    }
+    for (const id of userIds) {
+      await db.delete(users).where(eq(users.id, id));
+    }
+  });
+
+  it("タイトルが無く記憶も無い場合は null を返す", async () => {
+    const uid = userIds[0];
+    // 専用フォルダを作り、そのスレッドは1つだけ（他にスレッド無し）
+    const [folder] = await db.insert(folders).values({
+      name: "ctx-null-folder",
+      memoryScope: "folder",
+    }).returning();
+    ctxFolderIds.push(folder.id);
+    const [thread] = await db.insert(threads).values({
+      userId: uid,
+      title: "New chat",
+      folderId: folder.id,
+    }).returning();
+    ctxThreadIds.push(thread.id);
+
+    const result = await buildMemoryContext({
+      content: "何か質問",
+      thread: { folderId: folder.id },
+      userId: uid,
+      currentThreadId: thread.id,
+    });
+    // タイトル候補無し（New chat 除外）+ 記憶無し → null
+    expect(result).toBeNull();
+  }, 60_000);
+
+  it("記憶がヒットしなくてもタイトル一覧を注入する", async () => {
+    const uid = userIds[0];
+    // 専用フォルダで記憶スコープを分離し、グローバル記憶にヒットしないようにする
+    const [folder] = await db.insert(folders).values({
+      name: "ctx-title-only-folder",
+      memoryScope: "folder",
+    }).returning();
+    ctxFolderIds.push(folder.id);
+    const [t1] = await db.insert(threads).values({
+      userId: uid,
+      title: "FPGA の話",
+      folderId: folder.id,
+    }).returning();
+    const [t2] = await db.insert(threads).values({
+      userId: uid,
+      title: "Rust の話",
+      folderId: folder.id,
+    }).returning();
+    ctxThreadIds.push(t1.id, t2.id);
+
+    // t2 を「現在のスレッド」とする。folder スコープ内に記憶は無いが
+    // タイトル候補として t1 が残るはず。
+    const result = await buildMemoryContext({
+      content: "全く関係ない質問 xyz123",
+      thread: { folderId: folder.id },
+      userId: uid,
+      currentThreadId: t2.id,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.content).toContain("Recent conversation topics");
+    expect(result!.content).toContain("FPGA の話");
+  }, 60_000);
+
+  it("タイトルと記憶の両方がある場合は両セクションを含む", async () => {
+    const uid = userIds[0];
+    const [folder] = await db.insert(folders).values({
+      name: "ctx-both-folder",
+      memoryScope: "folder",
+    }).returning();
+    ctxFolderIds.push(folder.id);
+    const [t1] = await db.insert(threads).values({
+      userId: uid,
+      title: "過去の設計議論",
+      folderId: folder.id,
+    }).returning();
+    const [t2] = await db.insert(threads).values({
+      userId: uid,
+      title: "現在のタスク",
+      folderId: folder.id,
+    }).returning();
+    ctxThreadIds.push(t1.id, t2.id);
+
+    // t2 のフォルダに記フォルダに記憶を挿入 → folder スコープでヒットするはず
+    await insertMemory(t2.id, folder.id, "ユーザーは FPGA 開発をしている", "fact");
+
+    const result = await buildMemoryContext({
+      content: "FPGA 開発",
+      thread: { folderId: folder.id },
+      userId: uid,
+      currentThreadId: t2.id,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.content).toContain("Recent conversation topics");
+    expect(result!.content).toContain("過去の設計議論");
+    expect(result!.content).toContain("Past memories from previous conversations");
+    expect(result!.content).toContain("FPGA 開発をしている");
   }, 60_000);
 });
