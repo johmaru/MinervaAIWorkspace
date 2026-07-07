@@ -7,6 +7,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 /** タイムスタンプ列の共通ヘルパー: Unix epoch ms（integer）で保存し Date で読み書き。 */
 function ts(name: string) {
@@ -94,12 +95,15 @@ export const verificationTokens = sqliteTable("verification_tokens", {
 export const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
 /**
- * skills — ユーザー単位の再利用可能プロンプト（persona / behavior / knowledge）。
+ * skills — ユーザー単位の再利用可能なプロシージャ/ルール。
  *
  * 会話から LLM で抽出・命名し、embedding 付きで保存。
  * 次回以降の全スレッドでアプリ側 cosine 検索 → system context に注入。
  * ユーザーが「〇〇スキルを使って」と指定すれば名前で直接適用。
  * 「スキルで保存して」で現在の会話からスキルを生成。
+ *
+ * persona/knowledge は memories で管理し、skills は再利用可能な手順・ルールに特化。
+ * kind でカテゴリ分け、trigger で発動条件、tags で検索性を向上。
  */
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -108,6 +112,19 @@ export const skills = sqliteTable("skills", {
   content: text("content").notNull(),
   embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
   contentHash: text("content_hash").notNull(),
+  kind: text("kind", {
+    enum: ["workflow", "bugfix", "project_rule", "tool_usage", "coding_pattern", "debugging"],
+  }).notNull().default("workflow"),
+  trigger: text("trigger"),
+  tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+  scope: text("scope", { enum: ["global", "folder", "thread"] }).notNull().default("global"),
+  status: text("status", { enum: ["active", "archived"] }).notNull().default("active"),
+  version: integer("version").notNull().default(1),
+  sourceThreadId: text("source_thread_id").references(() => threads.id, { onDelete: "set null" }),
+  sourceMessageIds: text("source_message_ids", { mode: "json" }).$type<string[]>(),
+  lastUsedAt: ts("last_used_at"),
+  successCount: integer("success_count").notNull().default(0),
+  failureCount: integer("failure_count").notNull().default(0),
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),
 });

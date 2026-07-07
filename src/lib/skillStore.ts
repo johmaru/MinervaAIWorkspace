@@ -45,8 +45,7 @@ export async function findRelevantSkills(
       embedding: skills.embedding,
     })
     .from(skills)
-    .where(eq(skills.userId, userId));
-
+    .where(and(eq(skills.userId, userId), eq(skills.status, "active")));
   if (rows.length === 0) return [];
 
   return rows
@@ -79,9 +78,11 @@ export async function findRelevantSkills(
 export async function buildSkillContext({
   content,
   userId,
+  threadId,
 }: {
   content: string;
   userId: string;
+  threadId?: string;
 }): Promise<{ role: "system"; content: string } | null> {
   // 手動スキル名抽出: "〇〇スキルを使って" / "use 〇〇 skill"
   const nameMatch =
@@ -96,7 +97,13 @@ export async function buildSkillContext({
       const [found] = await db
         .select({ id: skills.id, name: skills.name, content: skills.content })
         .from(skills)
-        .where(and(eq(skills.userId, userId), like(skills.name, pattern)))
+        .where(
+          and(
+            eq(skills.userId, userId),
+            eq(skills.status, "active"),
+            like(skills.name, pattern),
+          ),
+        )
         .limit(1);
       if (found) {
         namedSkill = {

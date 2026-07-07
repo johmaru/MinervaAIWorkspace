@@ -1,6 +1,6 @@
 # UmansChat
 
-セルフホスト可能な、ストリーミング対応の AI チャットプラットフォーム。枝分かれする会話、セマンティック検索、Web 知識の取り込みを備えます。
+高リソースの OpenAI 互換プロバイダ（UmansAI、OpenAI、vLLM、Ollama）向けの、セルフホスト可能なオープンソース AI ワークスペース。ChatGPT ライクな会話に、枝分かれスレッド、セマンティック記憶、Web 知識の取り込み、MCP ツール、外部コネクション、マルチモデルワークフロー、再利用可能なスキルを統合。
 
 [English](./README.md)
 
@@ -126,7 +126,7 @@ bun scripts/pack-exe.ts
 2. サーバーを起動し、ブラウザで `http://localhost:3001` を自動で開く
 3. 初回は管理者アカウントの作成を求められます
 
-**埋め込みモデルの初回ダウンロード**: スタンドアロン exe はデフォルトでローカル ONNX 埋め込み（`Xenova/all-MiniLM-L6-v2`）を使います。初回の埋め込み生成時に Hugging Face からモデルがダウンロードされるため、インターネット接続が必要です。モデルのダウンロードが完了すれば、以降のチャットはオフラインで動作します。
+**埋め込みモデルの初回ダウンロード**: スタンドアロン exe はデフォルトでローカル ONNX 埋め込み（`EMBED_PROVIDER=local` 用に `.env.example` で `Xenova/all-MiniLM-L6-v2`）を使います。初回の埋め込み生成時に Hugging Face からモデルがダウンロードされるため、インターネット接続が必要です。モデルのダウンロードが完了すれば、以降のチャットはオフラインで動作します。HTTP Python embedder（`EMBED_PROVIDER=http`）の場合、既定モデルは `LiquidAI/LFM2.5-Embedding-350M`（1024次元）でサーバー側で実行され、クライアントでのダウンロードは不要です。
 
 **オプションサービスの縮退**: スタンドアロン exe にはスクレイパー、SearXNG、Tor、Python embedder は同梱されません。これらの機能を使わずにチャットは正常に動作しますが、Web 検索・スクレイピングは空の結果を返します（エラーにはなりません）。スクレイピング/検索を利用したい場合は別途 Docker で該当サービスを起動し、`.env` の `SCRAPER_URL`・`SEARXNG_URL` を公開ポートに向けてください。
 
@@ -193,8 +193,8 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `LLM_MODEL`             | デフォルトモデル                                                  | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | モデルセレクタ用のカンマ区切りモデル一覧（OAI互換モード用。Umansモードでは無視） | —                                                    |
 | `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
-| `EMBED_MODEL`           | 埋め込みモデル名（`local` プロバイダでは `Xenova/*` モデルを使用） | `Xenova/all-MiniLM-L6-v2`                           |
-| `EMBED_DIM`             | 埋め込み次元数                                                    | `384`                                               |
+| `EMBED_MODEL`           | 埋め込みモデル名（`local` プロバイダでは `Xenova/*` ONNX モデル、`http` プロバイダでは `sentence-transformers` モデル） | `LiquidAI/LFM2.5-Embedding-350M`                           |
+| `EMBED_DIM`             | 埋め込み次元数（`EMBED_MODEL` に合わせる）                          | `1024`                                               |
 | `EMBED_PROVIDER`        | 埋め込みバックエンド: `local`（ONNX）または `http`（Python embedder） | `local`                                  |
 | `EMBEDDER_URL`          | Python embedder の URL（`EMBED_PROVIDER=http` 時に必要。Docker は自動設定） | `http://localhost:8001`                   |
 | `EMBEDDER_GPU_COUNT`    | Python embedder のGPU数（0 = CPUフォールバック、nvidiaのみ、Docker Composeのみ） | `0` |

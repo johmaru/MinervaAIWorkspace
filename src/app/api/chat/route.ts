@@ -215,6 +215,7 @@ export async function POST(req: Request) {
                 buildSkillContext({
                   content: prepared.content,
                   userId: user.id,
+                  threadId: thread.id,
                 }).catch((err) => {
                   console.error("[chat] buildSkillContext failed:", err);
                   return null;

@@ -1,6 +1,6 @@
 # UmansChat
 
-A self-hosted, streaming AI chat platform with branching conversations, semantic search, and web knowledge ingestion.
+A self-hosted, open-source AI workspace for high-resource OpenAI-compatible providers (UmansAI, OpenAI, vLLM, Ollama). Combines ChatGPT-like conversations with branching threads, semantic memory, web knowledge ingestion, MCP tools, external connections, multi-model workflows, and reusable skills.
 
 [日本語 / Japanese](./README.ja.md)
 
@@ -119,7 +119,7 @@ bun scripts/pack-exe.ts
 
 On first launch the launcher creates `data/umanschat.db`, applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
 
-> **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected.
+> **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`, shipped in `.env.example` for `EMBED_PROVIDER=local`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected. For the HTTP Python embedder (`EMBED_PROVIDER=http`), the default model is `LiquidAI/LFM2.5-Embedding-350M` (1024-dim) and runs server-side — no client download.
 
 ## Public Access via Cloudflare Tunnel (Optional)
 
@@ -183,8 +183,8 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
-| `EMBED_MODEL`           | Embedding model name (`Xenova/*` ONNX model for `local` provider)  | `Xenova/all-MiniLM-L6-v2`                            |
-| `EMBED_DIM`             | Embedding dimension (must match `EMBED_MODEL`)                     | `384`                                                |
+| `EMBED_MODEL`           | Embedding model name (`Xenova/*` ONNX model for `local` provider, or `sentence-transformers` model for `http` provider)  | `LiquidAI/LFM2.5-Embedding-350M`                     |
+| `EMBED_DIM`             | Embedding dimension (must match `EMBED_MODEL`)                     | `1024`                                               |
 | `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `local`                                              |
 | `EMBEDDER_URL`          | Python embedder URL (required when `EMBED_PROVIDER=http`; Docker sets automatically) | `http://localhost:8001`     |
 | `EMBEDDER_GPU_COUNT`    | GPU count for the Python embedder (0 = CPU fallback; nvidia only; Docker Compose only) | `0` |

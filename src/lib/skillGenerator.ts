@@ -15,16 +15,33 @@ import { embedText, hashContent } from "@/lib/embed";
  * skills は会話全体からの要約。1会話 → 1スキル。
  */
 
-const SYSTEM_PROMPT = `You are a skill extractor. Analyze the conversation and extract a reusable skill.
-A skill is a named set of instructions, persona, or knowledge that can be applied to future conversations.
-Summarize what the user wants the AI to know or do, as reusable instructions.
+const SYSTEM_PROMPT = `You are a skill extractor. Analyze the conversation and extract a concrete reusable skill.
 
-Respond in JSON only:
-{"name": "short skill name (2-5 words)", "content": "reusable instructions in second person (You are... / You should...)"}`;
+Only extract:
+- Concrete reusable procedures (step-by-step workflows)
+- Debugging patterns (how a specific bug was diagnosed and fixed)
+- Project rules (conventions, gotchas, must-do rules for this codebase)
+- Tool usage patterns (how to use a specific tool/API correctly)
+- Implementation patterns (reusable code patterns or architectural decisions)
+
+Do NOT extract:
+- User preferences, personal info, or identity
+- General facts or broad advice
+- Temporary context or one-off task details
+- Generic programming knowledge found in any docs
+- Persona or style instructions
+
+If no concrete reusable skill exists in this conversation, return an empty array: []
+
+Respond in JSON only. Return an array (empty if no skill applies):
+[{"name": "short skill name (2-5 words)", "kind": "workflow|bugfix|project_rule|tool_usage|coding_pattern|debugging", "trigger": "when to apply this skill (natural language)", "tags": ["tag1", "tag2"], "content": "reusable instructions in second person (You should... / When X happens, do Y)"}]`;
 
 type ExtractedSkill = {
   name: string;
   content: string;
+  kind: "workflow" | "bugfix" | "project_rule" | "tool_usage" | "coding_pattern" | "debugging";
+  trigger: string;
+  tags: string[];
 };
 
 /**
@@ -32,7 +49,7 @@ type ExtractedSkill = {
  * markdown コードフェンスを除去し JSON をパース。
  * 不正な場合は null を返し、呼び出し元でスキップ。
  */
-function parseSkillExtraction(raw: string | null | undefined): ExtractedSkill | null {
+export function parseSkillExtraction(raw: string | null | undefined): ExtractedSkill | null {
   if (!raw || !raw.trim()) return null;
   const stripped = raw
     .trim()
@@ -41,13 +58,31 @@ function parseSkillExtraction(raw: string | null | undefined): ExtractedSkill | 
     .trim();
   try {
     const parsed = JSON.parse(stripped) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const obj = parsed as Record<string, unknown>;
-    const name = obj.name;
-    const content = obj.content;
-    if (typeof name !== "string" || !name.trim()) return null;
-    if (typeof content !== "string" || !content.trim()) return null;
-    return { name: name.trim(), content: content.trim() };
+    // プロンプトは配列を要求するが、単一オブジェクトも許容（後方互換）
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    for (const item of arr) {
+      if (typeof item !== "object" || item === null) continue;
+      const obj = item as Record<string, unknown>;
+      const name = obj.name;
+      const content = obj.content;
+      if (typeof name !== "string" || !name.trim()) continue;
+      if (typeof content !== "string" || !content.trim()) continue;
+      const kind = obj.kind;
+      const trigger = obj.trigger;
+      const tags = obj.tags;
+      return {
+        name: name.trim(),
+        content: content.trim(),
+        kind:
+          kind === "workflow" || kind === "bugfix" || kind === "project_rule" ||
+          kind === "tool_usage" || kind === "coding_pattern" || kind === "debugging"
+            ? kind
+            : "workflow",
+        trigger: typeof trigger === "string" ? trigger.trim() : "",
+        tags: Array.isArray(tags) ? tags.filter((t): t is string => typeof t === "string") : [],
+      };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -120,14 +155,23 @@ export async function generateSkillFromConversation(
     return;
   }
 
-  // embedding 生成
-  const vector = await embedText(extracted.content, "document");
+  // embedding 生成: name + trigger + tags + content の結合テキストから
+  // 検索性を向上（trigger/tags がクエリと一致しやすくなる）
+  const embedSource = [
+    extracted.name,
+    extracted.trigger,
+    extracted.tags.join(", "),
+    extracted.content,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const vector = await embedText(embedSource, "document");
   if (vector.length === 0) {
     console.log("[skill] embedding failed, skipping");
     return;
   }
 
-  // contentHash で重複回避
+  // contentHash で重複回避（content のみで判定）
   const contentHash = hashContent(extracted.content);
   const [dup] = await db
     .select({ id: skills.id })
@@ -145,6 +189,10 @@ export async function generateSkillFromConversation(
     content: extracted.content,
     embedding: vector,
     contentHash,
+    kind: extracted.kind,
+    trigger: extracted.trigger,
+    tags: extracted.tags,
+    sourceThreadId: threadId,
   });
 
   console.log(`[skill] generated from conversation: ${extracted.name}`);

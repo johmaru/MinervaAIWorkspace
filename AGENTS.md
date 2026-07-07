@@ -7,7 +7,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 <!-- BEGIN:umanschat-debug-skill -->
 # UmansChat Debug Guide
 
-Before debugging SSE streaming, Docker build, transformers.js, pgvector, or
+Before debugging SSE streaming, Docker build, transformers.js, SQLite, or
 Next.js 16 issues in this project, read `skill://umanschat-debug`
 for known pitfalls and solutions discovered during development.
 
@@ -138,7 +138,7 @@ Follow up later: polish, optional refactors, or larger design improvements.
   `afterEach` (`cleanup()` from `@testing-library/react`, `vi.restoreAllMocks()`,
   `vi.unstubAllGlobals()`, env-var restore).
 
-- **DB tests:** use the real Postgres via `@/db`; create rows and tear them down in
+- **DB tests:** use the real SQLite via `@/db`; create rows and tear them down in
   `afterAll`. Do not mock the database.
 
 - **Before claiming work is done:** run `bun run test` and confirm zero failures.
@@ -164,6 +164,11 @@ If the instruction is ambiguous, ask whether it should be stored as a project ru
 開発中にハマったことやミスしたことがあったら、すべての実装が終わった後に、それ専用のスキルを作成するか既存のスキルを編集して記録すること。
 スキルはローカルの `.agents/skills` ディレクトリ（`C:\Users\Johma_sub\UmansChat-Unofficial\.agents\skills`）に配置する。
 これにより、同じ問題に再び遭遇したときの診断時間を短縮する。
+
+### Developer Skills vs Runtime Skills
+- **Developer Skills** (`.agents/skills/`): Markdown files read by Codex/OMP/dev agents during development. Contain debugging pitfalls, project conventions, and workflow recipes. Updated manually by the developer after hitting a problem.
+- **Runtime Skills** (DB `skills` table): User-facing reusable prompts stored in SQLite, searched via embedding and injected into chat system context. Managed via the Skill Manager UI (sidebar 🛠️ button) and auto-extracted as draft candidates from conversations.
+- These are separate systems with different purposes; do not mix them. The `.agents/skills/` directory is never read by the running app, and the `skills` DB table is never read by dev agents.
 
 ## Documentation Sync
 Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.

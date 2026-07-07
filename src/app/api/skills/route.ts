@@ -19,6 +19,15 @@ export async function GET() {
       id: skills.id,
       name: skills.name,
       content: skills.content,
+      kind: skills.kind,
+      trigger: skills.trigger,
+      tags: skills.tags,
+      scope: skills.scope,
+      status: skills.status,
+      version: skills.version,
+      lastUsedAt: skills.lastUsedAt,
+      successCount: skills.successCount,
+      failureCount: skills.failureCount,
       createdAt: skills.createdAt,
       updatedAt: skills.updatedAt,
     })
@@ -31,11 +40,15 @@ export async function GET() {
 type CreateBody = {
   name?: string;
   content?: string;
+  kind?: "workflow" | "bugfix" | "project_rule" | "tool_usage" | "coding_pattern" | "debugging";
+  trigger?: string;
+  tags?: string[];
 };
 
 /**
  * POST /api/skills — スキル手動作成。
- * name + content を受け取り、embedding + contentHash を生成して保存。
+ * name + content を受け取り、kind/trigger/tags と共に保存。
+ * embedding は name + trigger + tags + content の結合テキストから生成。
  * contentHash が既存と一致する場合は 409 Conflict。
  */
 export async function POST(req: Request) {
@@ -52,8 +65,15 @@ export async function POST(req: Request) {
   if (!name || !content) {
     return new Response("name and content are required", { status: 400 });
   }
+  const kind = body.kind ?? "workflow";
+  const trigger = body.trigger?.trim() || "";
+  const tags = Array.isArray(body.tags)
+    ? body.tags.filter((t): t is string => typeof t === "string")
+    : [];
 
-  const vector = await embedText(content, "document");
+  // embedding 生成: name + trigger + tags + content の結合テキストから
+  const embedSource = [name, trigger, tags.join(", "), content].filter(Boolean).join("\n");
+  const vector = await embedText(embedSource, "document");
   if (vector.length === 0) {
     return new Response("Embedding failed", { status: 503 });
   }
@@ -68,7 +88,16 @@ export async function POST(req: Request) {
 
   const [row] = await db
     .insert(skills)
-    .values({ userId: user.id, name, content, embedding: vector, contentHash })
+    .values({
+      userId: user.id,
+      name,
+      content,
+      embedding: vector,
+      contentHash,
+      kind,
+      trigger,
+      tags,
+    })
     .returning({ id: skills.id, name: skills.name, content: skills.content });
   return Response.json(row, { status: 201 });
 }
