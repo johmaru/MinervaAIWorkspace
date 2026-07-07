@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useI18n } from "@/components/I18nProvider";
 import { clientFetch } from "@/lib/clientFetch";
@@ -40,35 +40,61 @@ export function SearchBar({ onSelectThread }: Props) {
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
 
-  const handleSearch = useCallback(async (q: string) => {
+  const abortRef = useRef<AbortController | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearch = useCallback((q: string) => {
     setQuery(q);
+    // 常に直前のデバウンスタイマーをクリアし、空入力時に古い検索が発火しないようにする。
+    clearTimeout(debounceRef.current as ReturnType<typeof setTimeout> | undefined);
     if (!q.trim()) {
+      // 進行中のリクエストも abort して結果が残らないようにする。
+      abortRef.current?.abort();
       setResults([]);
       setPageResults([]);
       setShowResults(false);
       return;
     }
-    setIsSearching(true);
-    setShowResults(true);
-    try {
-      const res = await clientFetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q.trim() }),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        results: SearchResult[];
-        pages?: PageSearchResult[];
-      };
-      setResults(data.results);
-      setPageResults(data.pages ?? []);
-    } catch {
-      setResults([]);
-      setPageResults([]);
-    } finally {
-      setIsSearching(false);
-    }
+    // デバウンス: 連続入力時に直前のタイマーをキャンセル。
+    // 重い embedding+cosine 検索が各キーストロークで堆積するのを防ぐ。
+    debounceRef.current = setTimeout(async () => {
+      // 直前のリクエストを abort し race condition で古い結果が表示されるのを防ぐ。
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      setIsSearching(true);
+      setShowResults(true);
+      try {
+        const res = await clientFetch("/api/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q.trim() }),
+          signal: ac.signal,
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          results: SearchResult[];
+          pages?: PageSearchResult[];
+        };
+        if (ac.signal.aborted) return;
+        setResults(data.results);
+        setPageResults(data.pages ?? []);
+      } catch {
+        if (ac.signal.aborted) return;
+        setResults([]);
+        setPageResults([]);
+      } finally {
+        if (!ac.signal.aborted) setIsSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  // アンマウント時にタイマーと進行中のリクエストをクリーンアップ。
+  useEffect(() => {
+    return () => {
+      clearTimeout(debounceRef.current as ReturnType<typeof setTimeout> | undefined);
+      abortRef.current?.abort();
+    };
   }, []);
 
   const handleSelect = useCallback(

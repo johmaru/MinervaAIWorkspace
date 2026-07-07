@@ -27,17 +27,19 @@ export type ScoredMemory = {
  * クエリ文字列 + スコープから関連記憶を検索。
  *
  * 1. embedText(query, "query") でクエリベクトル化
- * 2. suppressed_at IS NULL、スコープフィルタで候補行を取得
+ * 2. suppressed_at IS NULL、userId 絞り込み、スコープフィルタで候補行を取得
  * 3. アプリ側 cosine similarity で類似度計算
  * 4. similarity > 0.3 でフィルタ
  * 5. recencyScore 降順で top-5 を返す
  *
  * @param query ユーザー入力
  * @param folderId 現在のスレッドの folderId（null 可）
+ * @param userId 記憶を所有するユーザーの ID（他ユーザーの記憶漏洩防止）
  */
 export async function findRelevantMemories(
   query: string,
   folderId: string | null,
+  userId: string,
 ): Promise<ScoredMemory[]> {
   const queryVector = await embedText(query, "query");
   if (queryVector.length === 0) return [];
@@ -56,8 +58,9 @@ export async function findRelevantMemories(
     }
   }
 
-  // 候補行を取得（suppressed_at IS NULL + スコープフィルタ）
-  const conditions = [isNull(memories.suppressedAt)];
+  // 候補行を取得（suppressed_at IS NULL + userId 絞り込み + スコープフィルタ）
+  // innerJoin で threads を経由し、当該ユーザーが所有するスレッドの記憶のみ取得。
+  const conditions = [isNull(memories.suppressedAt), eq(threads.userId, userId)];
   if (scopeFolder && targetFolderId) {
     conditions.push(eq(memories.folderId, targetFolderId));
   }
@@ -73,6 +76,7 @@ export async function findRelevantMemories(
       updatedAt: memories.updatedAt,
     })
     .from(memories)
+    .innerJoin(threads, eq(memories.threadId, threads.id))
     .where(and(...conditions));
 
   if (rows.length === 0) return [];
@@ -159,7 +163,7 @@ export async function buildMemoryContext({
   currentThreadId: string;
 }): Promise<{ role: "system"; content: string } | null> {
   const [found, recentTitles] = await Promise.all([
-    findRelevantMemories(content, thread.folderId),
+    findRelevantMemories(content, thread.folderId, userId),
     fetchRecentThreadTitles(userId, currentThreadId),
   ]);
 

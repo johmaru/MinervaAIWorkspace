@@ -86,6 +86,7 @@ type PatchBody = {
   mcpServerIds?: string[];
   connectionIds?: string[];
   globalInstructionId?: string | null;
+  currentLeafId?: string | null;
 };
 
 /**
@@ -120,6 +121,7 @@ export async function PATCH(req: Request) {
 
   if (Array.isArray(body.connectionIds)) values.connectionIds = body.connectionIds;
   if (body.globalInstructionId !== undefined) values.globalInstructionId = body.globalInstructionId || null;
+  if (body.currentLeafId !== undefined) values.currentLeafId = body.currentLeafId;
   const [row] = await db
     .update(threads)
     .set(values)

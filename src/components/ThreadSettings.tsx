@@ -207,7 +207,15 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
             </span>
             <select
               value={responseMode}
-              onChange={(e) => setResponseMode(e.target.value === "dual" ? "dual" : "single")}
+              onChange={(e) => {
+                const next = e.target.value === "dual" ? "dual" : "single";
+                setResponseMode(next);
+                // dual モード切替時、dualModelB が dualModelA と同じなら別モデルを自動選択。
+                if (next === "dual" && dualModelB === dualModelA) {
+                  const alt = models.find((m) => m !== dualModelA);
+                  if (alt) setDualModelB(alt);
+                }
+              }}
               className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
             >
               <option value="single">{t("threadSettings.responseModeSingle")}</option>

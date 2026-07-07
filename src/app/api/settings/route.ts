@@ -1,16 +1,15 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
-import { users, memories, pageEmbeddings } from "@/db/schema";
+import { users, memories, pageEmbeddings, skills } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
 import { resetToolProbeCache } from "@/lib/toolProbe";
 import { getSessionUser } from "@/lib/auth-guards";
-import { resetEmbedPipeline } from "@/lib/embed";
+import { resetEmbedPipeline, embedText } from "@/lib/embed";
 import { PERSONAL_STYLES } from "@/lib/personalization";
-
+import { resolveEnvPath, updateEnvContent } from "@/lib/envUtils";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -80,28 +79,7 @@ function getEmbedDim(): number {
   return Number(process.env.EMBED_DIM) || 1024;
 }
 
-/**
- * .env ファイルのパスを解決する。
- *
- * Next.js standalone サーバーは process.chdir で /app/.next/standalone に移動
- * するため、process.cwd() が /app と異なる。Docker では .env は /app/.env として
- * ボリュームマウントされるが、cwd ベースで resolve すると /app/.next/standalone/.env
- * （イメージレイヤ内の一時ファイル）に書き込んでしまい、再ビルドで失われる。
- *
- * cwd から親方向へ遡って既存の .env を探し、見つからなければ cwd 直下を返す
- * （ローカル dev や新規作成時のフォールバック）。
- */
-function resolveEnvPath(): string {
-  let dir = process.cwd();
-  for (let i = 0; i < 10; i++) {
-    const candidate = resolve(dir, ".env");
-    if (existsSync(candidate)) return candidate;
-    const parent = resolve(dir, "..");
-    if (parent === dir) break; // ルート到達
-    dir = parent;
-  }
-  return resolve(process.cwd(), ".env");
-}
+
 
 
 /**
@@ -128,7 +106,11 @@ export async function GET(req: Request) {
   return Response.json({
     // LLM
     llmBaseUrl: process.env.LLM_BASE_URL || "",
-    llmApiKey: process.env.LLM_API_KEY || "",
+    // シークレットは平文で返さず、設定済みかどうかのみ返す。
+    // SettingsModal はユーザーが新しい値を入力した場合のみ llmApiKey を送信し、
+    // 未入力時は undefined を送ることで既存値を保持する。
+    llmApiKey: "",
+    hasLlmApiKey: !!process.env.LLM_API_KEY,
     llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
     llmModels: process.env.LLM_MODELS || "",
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
@@ -148,13 +130,15 @@ export async function GET(req: Request) {
     // Tor プロキシ
     torProxy: process.env.TOR_PROXY || "",
     scrapeProxy: process.env.SCRAPE_PROXY || "",
-    // Database
+    // Database / 実行環境
     databaseUrl: process.env.DATABASE_URL || "",
     hostOs: process.env.HOST_OS || "",
     tz: process.env.TZ || "",
     // Notion OAuth
     notionClientId: process.env.NOTION_CLIENT_ID || "",
-    notionClientSecret: process.env.NOTION_CLIENT_SECRET || "",
+    // シークレットは平文で返さず、設定済みかどうかのみ返す。
+    notionClientSecret: "",
+    hasNotionClientSecret: !!process.env.NOTION_CLIENT_SECRET,
     authUrl: process.env.AUTH_URL || "http://localhost:3001",
     // 既定グローバルインストラクション選択（ユーザー単位、DB）
     activeInstructionId: userRow?.activeInstructionId ?? null,
@@ -277,11 +261,31 @@ export async function POST(req: Request) {
     );
   }
 
+  let pipelineResetForMigration = false;
   if (needsMigration && body.applyMigration) {
     // embedding 列は text（JSON）なので DDL 不要。次元が変わるため
     // 既存ベクトルデータを全削除（異なるモデル空間のベクトルは互換しない）。
+    // memories と page_embeddings は会話から再生成可能なため削除。
     await db.delete(memories);
     await db.delete(pageEmbeddings);
+    // skills はユーザー作成の永続プロンプトなので削除せず再 embed する。
+    // embedText は新しい EMBED_MODEL/EMBED_DIM を参照するため、
+    // resetEmbedPipeline() の後に呼ぶ必要があるが、ここではまだ env 更新前。
+    // そのため process.env を先に更新してから再 embed する。
+    for (const [k, v] of Object.entries({
+      EMBED_MODEL: body.embedModel ?? process.env.EMBED_MODEL ?? "",
+      EMBED_DIM: String(body.embedDim ?? process.env.EMBED_DIM ?? "1024"),
+      EMBED_PROVIDER: body.embedProvider ?? process.env.EMBED_PROVIDER ?? "",
+    })) {
+      process.env[k] = v;
+    }
+    resetEmbedPipeline();
+    pipelineResetForMigration = true;
+    const allSkills = await db.select({ id: skills.id, content: skills.content }).from(skills);
+    for (const skill of allSkills) {
+      const vector = await embedText(skill.content, "document");
+      await db.update(skills).set({ embedding: vector }).where(eq(skills.id, skill.id));
+    }
   }
 
   // 既定のグローバルインストラクション選択を DB に保存
@@ -349,14 +353,7 @@ export async function POST(req: Request) {
     if (body.notionClientId !== undefined) updates.NOTION_CLIENT_ID = body.notionClientId;
     if (body.notionClientSecret !== undefined) updates.NOTION_CLIENT_SECRET = body.notionClientSecret;
     if (body.authUrl !== undefined) updates.AUTH_URL = body.authUrl;
-    for (const [key, value] of Object.entries(updates)) {
-      const regex = new RegExp(`^${key}=.*$`, "m");
-      if (regex.test(envContent)) {
-        envContent = envContent.replace(regex, `${key}=${value}`);
-      } else {
-        envContent += `\n${key}=${value}`;
-      }
-    }
+    envContent = updateEnvContent(envContent, updates);
 
     writeFileSync(envPath, envContent);
 
@@ -377,7 +374,7 @@ export async function POST(req: Request) {
     const embedChanged = ["EMBED_MODEL", "EMBED_DIM", "EMBED_PROVIDER"].some(
       (k) => k in updates,
     );
-    if (embedChanged) {
+    if (embedChanged && !pipelineResetForMigration) {
       resetEmbedPipeline();
     }
     // scraper の設定を動的更新（SCRAPE_PROXY / SCRAPE_TIMEOUT 変更時）

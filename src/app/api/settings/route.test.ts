@@ -39,7 +39,24 @@ vi.mock("@/lib/i18n", async (importOriginal) => {
   };
 });
 vi.mock("@/db", () => ({
-  db: { delete: vi.fn().mockResolvedValue(undefined), update: dbUpdateMock },
+  db: {
+    delete: vi.fn().mockResolvedValue(undefined),
+    update: dbUpdateMock,
+    select: vi.fn(() => {
+      const from = vi.fn(() => ({
+        where: vi.fn().mockResolvedValue([]),
+        // select().from(table) without .where() — used by skills re-embed
+        then: (resolve: unknown) => Promise.resolve([]).then(resolve as never),
+      }));
+      // select().from(table) returns a thenable when no .where() is chained
+      const chain = {
+        from,
+        where: vi.fn().mockResolvedValue([]),
+        then: (resolve: unknown) => Promise.resolve([]).then(resolve as never),
+      };
+      return chain;
+    }),
+  },
 }));
 vi.mock("@/lib/llm", () => ({
   resetUmansModelsCache: vi.fn(),
@@ -49,11 +66,12 @@ vi.mock("@/lib/toolProbe", () => ({
 }));
 vi.mock("@/lib/embed", () => ({
   resetEmbedPipeline: resetEmbedPipelineMock,
+  embedText: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
   getModelId: () => "LiquidAI/LFM2.5-Embedding-350M",
   getEmbedDim: () => 1024,
 }));
 
-import { POST, EMBED_MODEL_BASE, getEmbedModelOptions } from "@/app/api/settings/route";
+import { POST, GET, EMBED_MODEL_BASE, getEmbedModelOptions } from "@/app/api/settings/route";
 import { getSessionUser } from "@/lib/auth-guards";
 
 describe("EMBED_MODEL_OPTIONS", () => {
@@ -114,6 +132,49 @@ describe("embedding dimension from env", () => {
     expect(dim).toBe(384);
     if (orig !== undefined) process.env.EMBED_DIM = orig;
     else delete process.env.EMBED_DIM;
+  });
+});
+
+describe("GET /api/settings — シークレットマスキング", () => {
+  const origApiKey = process.env.LLM_API_KEY;
+  const origNotionSecret = process.env.NOTION_CLIENT_SECRET;
+
+  afterEach(() => {
+    vi.mocked(getSessionUser).mockResolvedValue({ id: "user-1", email: "t@t" } as never);
+    if (origApiKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = origApiKey;
+    if (origNotionSecret === undefined) delete process.env.NOTION_CLIENT_SECRET;
+    else process.env.NOTION_CLIENT_SECRET = origNotionSecret;
+  });
+
+  it("LLM_API_KEY が設定済みでも平文を返さず hasLlmApiKey=true を返す", async () => {
+    process.env.LLM_API_KEY = "sk-super-secret-key";
+    const req = new Request("http://localhost/api/settings", { method: "GET" });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const data = await res.json() as { llmApiKey: string; hasLlmApiKey: boolean };
+    expect(data.llmApiKey).toBe("");
+    expect(data.hasLlmApiKey).toBe(true);
+  });
+
+  it("LLM_API_KEY 未設定時は hasLlmApiKey=false", async () => {
+    delete process.env.LLM_API_KEY;
+    const req = new Request("http://localhost/api/settings", { method: "GET" });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const data = await res.json() as { llmApiKey: string; hasLlmApiKey: boolean };
+    expect(data.llmApiKey).toBe("");
+    expect(data.hasLlmApiKey).toBe(false);
+  });
+
+  it("NOTION_CLIENT_SECRET が設定済みでも平文を返さず hasNotionClientSecret=true を返す", async () => {
+    process.env.NOTION_CLIENT_SECRET = "secret_abc123";
+    const req = new Request("http://localhost/api/settings", { method: "GET" });
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const data = await res.json() as { notionClientSecret: string; hasNotionClientSecret: boolean };
+    expect(data.notionClientSecret).toBe("");
+    expect(data.hasNotionClientSecret).toBe(true);
   });
 });
 

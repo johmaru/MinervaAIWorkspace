@@ -4,42 +4,51 @@ import { useI18n } from "@/components/I18nProvider";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import type { FolderSummary } from "@/hooks/useFolders";
 
+type Patch = {
+  name: string;
+  instruction: string | null;
+  memoryScope: "folder" | "global";
+};
+
 type Props = {
-  folder: FolderSummary;
+  /** 既存フォルダ編集時は FolderSummary。新規作成時は null。 */
+  folder: FolderSummary | null;
   open: boolean;
   onClose: () => void;
-  onSave: (patch: {
-    name: string;
-    instruction: string | null;
-    memoryScope: "folder" | "global";
-  }) => Promise<boolean>;
+  /** 既存フォルダ更新。folder が非 null のとき使用。 */
+  onSave?: (patch: Patch) => Promise<boolean>;
+  /** 新規フォルダ作成。folder が null のとき使用。 */
+  onCreate?: (patch: Patch) => Promise<boolean>;
 };
 
 /**
  * フォルダ設定モーダル。名前・Instruction・メモリスコープを編集。
+ * folder が null のときは新規作成モード（DB 作成は保存時まで遅延）。
  * folder.id 変更時にローカル state を同期（スレッド切替と同じパターン）。
  * モーダル外クリック / Esc で閉じる（SettingsModal と同じ枠）。
  */
-export function FolderSettingsModal({ folder, open, onClose, onSave }: Props) {
+export function FolderSettingsModal({ folder, open, onClose, onSave, onCreate }: Props) {
   const { t } = useI18n();
-  const [name, setName] = useState(folder.name);
-  const [instruction, setInstruction] = useState(folder.instruction ?? "");
+  const isNew = folder === null;
+  const [name, setName] = useState(folder?.name ?? "");
+  const [instruction, setInstruction] = useState(folder?.instruction ?? "");
   const [memoryScope, setMemoryScope] = useState<"folder" | "global">(
-    folder.memoryScope,
+    folder?.memoryScope ?? "global",
   );
   const [saving, setSaving] = useState(false);
 
   // folder 切替時にローカル state を同期
   useEffect(() => {
-    setName(folder.name);
-    setInstruction(folder.instruction ?? "");
-    setMemoryScope(folder.memoryScope);
-  }, [folder.id, folder.name, folder.instruction, folder.memoryScope]);
+    setName(folder?.name ?? "");
+    setInstruction(folder?.instruction ?? "");
+    setMemoryScope(folder?.memoryScope ?? "global");
+  }, [folder?.id, folder?.name, folder?.instruction, folder?.memoryScope]);
 
-  const dirty =
-    name !== folder.name ||
-    instruction !== (folder.instruction ?? "") ||
-    memoryScope !== folder.memoryScope;
+  // 新規作成モードでは常に dirty（空欄でもデフォルトで保存可能）
+  const dirty = isNew ||
+    name !== folder!.name ||
+    instruction !== (folder!.instruction ?? "") ||
+    memoryScope !== folder!.memoryScope;
 
   // Esc で閉じる
   useEffect(() => {
@@ -53,22 +62,25 @@ export function FolderSettingsModal({ folder, open, onClose, onSave }: Props) {
 
   async function handleSave() {
     const trimmedName = name.trim() || "New folder";
+    const patch: Patch = {
+      name: trimmedName,
+      instruction: instruction.trim().length > 0 ? instruction.trim() : null,
+      memoryScope,
+    };
     setSaving(true);
     try {
-      const ok = await onSave({
-        name: trimmedName,
-        instruction: instruction.trim().length > 0 ? instruction.trim() : null,
-        memoryScope,
-      });
+      const ok = isNew
+        ? await onCreate?.(patch) ?? false
+        : await onSave?.(patch) ?? false;
       if (ok) onClose();
     } finally {
       setSaving(false);
     }
   }
   return (
-    <AnimateModal open={open} onClose={onClose} ariaLabel={t("folderModal.title")} panelClassName="max-w-lg">
+    <AnimateModal open={open} onClose={onClose} ariaLabel={isNew ? t("folderModal.titleNew") : t("folderModal.title")} panelClassName="max-w-lg">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("folderModal.title")}</h2>
+        <h2 className="text-lg font-semibold">{isNew ? t("folderModal.titleNew") : t("folderModal.title")}</h2>
         <MotionButton
           type="button"
           onClick={onClose}

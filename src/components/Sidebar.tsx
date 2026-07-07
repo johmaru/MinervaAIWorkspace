@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { MotionButton } from "@/components/ui/motion";
+
+import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { SearchBar } from "@/components/SearchBar";
@@ -71,6 +72,12 @@ export const Sidebar = memo(function Sidebar({
     threadId: string;
     currentFolderId: string | null;
   } | null>(null);
+  // #22: 削除確認ダイアログ（React state ベース・テスト可能・スタイル統一）
+  const [pendingDelete, setPendingDelete] = useState<{
+    kind: "thread" | "folder";
+    id: string;
+    name: string;
+  } | null>(null);
 
   const toggleFolder = useCallback((id: string) => {
     setCollapsedFolders((prev) => {
@@ -118,7 +125,8 @@ export const Sidebar = memo(function Sidebar({
             type: "item",
             label: t("common.delete"),
             danger: true,
-            onClick: () => onDeleteFolder(folder.id),
+            onClick: () =>
+              setPendingDelete({ kind: "folder", id: folder.id, name: folder.name }),
           },
         ],
       });
@@ -148,7 +156,12 @@ export const Sidebar = memo(function Sidebar({
             type: "item",
             label: t("common.delete"),
             danger: true,
-            onClick: () => onDelete(thread.id),
+            onClick: () =>
+              setPendingDelete({
+                kind: "thread",
+                id: thread.id,
+                name: thread.title,
+              }),
           },
         ],
       });
@@ -156,6 +169,15 @@ export const Sidebar = memo(function Sidebar({
     [t, onDelete],
   );
 
+
+  // #22: ThreadRow の × ボタンも確認ダイアログを経由する
+  const handleThreadDelete = useCallback(
+    (id: string) => {
+      const thread = threads.find((t) => t.id === id);
+      setPendingDelete({ kind: "thread", id, name: thread?.title ?? "" });
+    },
+    [threads],
+  );
   const unassignedThreads = threads.filter((t) => t.folderId === null);
 
   return (
@@ -242,9 +264,7 @@ export const Sidebar = memo(function Sidebar({
         aria-label={t("sidebar.threadListNav")}
         onContextMenu={handleNavContextMenu}
       >
-        {(isLoading || foldersLoading) &&
-        threads.length === 0 &&
-        folders.length === 0 ? (
+        {(isLoading && threads.length === 0) || (foldersLoading && folders.length === 0) ? (
           <p className="px-2 py-4 text-xs text-muted-foreground animate-pulse">{t("common.loading")}</p>
         ) : threads.length === 0 && folders.length === 0 ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">
@@ -270,7 +290,7 @@ export const Sidebar = memo(function Sidebar({
                       collapsed={collapsed}
                       count={folderThreads.length}
                       onToggle={toggleFolder}
-                      onContextMenu={handleFolderContextMenu}
+                      onOpenMenu={handleFolderContextMenu}
                     />
                     {!collapsed && (
                       <ul className="ml-3 flex flex-col gap-0.5 border-l border-border pl-1">
@@ -285,7 +305,7 @@ export const Sidebar = memo(function Sidebar({
                               thread={t}
                               active={t.id === activeThreadId}
                               onSelect={onSelect}
-                              onDelete={onDelete}
+                              onDelete={handleThreadDelete}
                               onRename={onRename}
                               onRenamed={onRenamed}
                               onContextMenu={handleThreadContextMenu}
@@ -319,7 +339,7 @@ export const Sidebar = memo(function Sidebar({
                         thread={t}
                         active={t.id === activeThreadId}
                         onSelect={onSelect}
-                        onDelete={onDelete}
+                        onDelete={handleThreadDelete}
                         onRename={onRename}
                         onRenamed={onRenamed}
                         onContextMenu={handleThreadContextMenu}
@@ -361,6 +381,44 @@ export const Sidebar = memo(function Sidebar({
         onClose={() => setMoveTarget(null)}
         onMove={onMoveThread}
       />
+
+      {/* #22: 削除確認ダイアログ */}
+      <AnimateModal
+        open={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        ariaLabel={t("common.confirmDelete")}
+        panelClassName="max-w-sm"
+      >
+        <p className="mb-1 text-base font-semibold">
+          {t("common.confirmDelete")}
+        </p>
+        <p className="mb-4 text-sm text-muted-foreground">
+          {pendingDelete?.kind === "folder"
+            ? t("common.confirmDeleteFolder")
+            : t("common.confirmDeleteThread")}
+        </p>
+        <div className="flex justify-end gap-2">
+          <MotionButton
+            type="button"
+            onClick={() => setPendingDelete(null)}
+            className="rounded-xl bg-muted px-3 py-1.5 text-sm transition-all duration-200 hover:bg-muted/80"
+          >
+            {t("common.cancel")}
+          </MotionButton>
+          <MotionButton
+            type="button"
+            onClick={() => {
+              if (!pendingDelete) return;
+              if (pendingDelete.kind === "folder") onDeleteFolder(pendingDelete.id);
+              else onDelete(pendingDelete.id);
+              setPendingDelete(null);
+            }}
+            className="rounded-xl bg-red-500 px-4 py-2 text-sm text-white transition-all duration-200 hover:opacity-90"
+          >
+            {t("common.delete")}
+          </MotionButton>
+        </div>
+      </AnimateModal>
     </aside>
   );
 });
@@ -370,7 +428,8 @@ type FolderRowProps = {
   collapsed: boolean;
   count: number;
   onToggle: (id: string) => void;
-  onContextMenu: (e: React.MouseEvent, folder: FolderSummary) => void;
+  /** 右クリック・ケバブボタンどちらからでもメニューを開く */
+  onOpenMenu: (e: React.MouseEvent, folder: FolderSummary) => void;
 };
 
 const FolderRow = memo(function FolderRow({
@@ -378,14 +437,14 @@ const FolderRow = memo(function FolderRow({
   collapsed,
   count,
   onToggle,
-  onContextMenu,
+  onOpenMenu,
 }: FolderRowProps) {
   const { t } = useI18n();
   return (
     <div
       className="group flex items-center gap-1 rounded-xl px-1 py-1 transition-all duration-150 hover:bg-muted/70"
       onClick={() => onToggle(folder.id)}
-      onContextMenu={(e) => onContextMenu(e, folder)}
+      onContextMenu={(e) => onOpenMenu(e, folder)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -418,6 +477,22 @@ const FolderRow = memo(function FolderRow({
         </span>
       )}
       <span className="text-xs text-muted-foreground">{count}</span>
+      {/* #28: ケバブメニュー（モバイル・キーボードからフォルダ設定/削除にアクセス） */}
+      <button
+        type="button"
+        aria-label={t("sidebar.folderActions")}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenMenu(e, folder);
+        }}
+        className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.5" />
+          <circle cx="12" cy="12" r="1.5" />
+          <circle cx="12" cy="19" r="1.5" />
+        </svg>
+      </button>
     </div>
   );
 });
@@ -445,16 +520,23 @@ const ThreadRow = memo(function ThreadRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(thread.title);
 
+  const commitRenameRef = useRef(false);
   async function commitRename() {
+    if (commitRenameRef.current) return; // 二重実行防止（onBlur + Enter）
     const trimmed = draft.trim();
     if (!trimmed || trimmed === thread.title) {
       setEditing(false);
       setDraft(thread.title);
       return;
     }
+    commitRenameRef.current = true;
     const ok = await onRename(thread.id, trimmed);
-    setEditing(false);
-    if (ok) onRenamed();
+    commitRenameRef.current = false;
+    if (ok) {
+      setEditing(false);
+      onRenamed();
+    }
+    // 失敗時は編集状態を保持し、ユーザーが再試行できるようにする
   }
 
   if (editing) {

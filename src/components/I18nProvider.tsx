@@ -22,18 +22,30 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
 
-  // 初回マウント時に localStorage から復元
+  // 初回マウント時に localStorage から復元。
+  // try-catch で localStorage アクセス不可（プライベートモード等）を保護。
+  // 復元時に <html lang> も更新し、SSR の lang="en" とクライアント ja の
+  // 不一致によるスクリーンリーダーの誤読を防ぐ。
   useEffect(() => {
-    const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
-    if (stored && SUPPORTED_LOCALES.includes(stored as Locale)) {
-      setLocaleState(stored as Locale);
+    try {
+      const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
+      if (stored && SUPPORTED_LOCALES.includes(stored as Locale)) {
+        setLocaleState(stored as Locale);
+        document.documentElement.lang = stored;
+      }
+    } catch {
+      // localStorage が利用不可（プライベートモード等）なら無視
     }
   }, []);
 
   // locale 変更時に localStorage + cookie + <html lang> を更新
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
-    localStorage.setItem(LOCALE_STORAGE_KEY, next);
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, next);
+    } catch {
+      // localStorage が利用不可なら無視
+    }
     document.cookie = `${LOCALE_COOKIE_NAME}=${next}; path=/; max-age=31536000; samesite=lax`;
     document.documentElement.lang = next;
   }, []);

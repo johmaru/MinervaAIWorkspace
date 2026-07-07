@@ -26,6 +26,8 @@ export const ChatWindow = memo(function ChatWindow({
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // smooth スクロールの重複発火を抑制（連続 delta で smooth が積み重なりカクつくのを防ぐ）
+  const scrollAnimRef = useRef<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -104,9 +106,13 @@ export const ChatWindow = memo(function ChatWindow({
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distFromBottom < 150;
-    if (nearBottom) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    }
+    if (!nearBottom) return;
+    // スクロール中は新しい smooth スクロールを発火しない（重複抑制でカクつき防止）。
+    if (scrollAnimRef.current !== null) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    scrollAnimRef.current = window.setTimeout(() => {
+      scrollAnimRef.current = null;
+    }, 400);
   }, [messages]);
 
   // 入力欄の自動高さ
@@ -173,6 +179,9 @@ export const ChatWindow = memo(function ChatWindow({
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
+      // IME 変換中の Enter は送信しない（日本語入力の確定操作と競合するため）。
+      // isComposing は React の合成イベントで、ネイティブの keyCode === 229 と同等。
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       submit();
     }
@@ -530,6 +539,11 @@ function MessageBubble({
   const isStreamingThis = streaming && isAssistant && m.content === "";
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(m.content);
+  // m.content が変更された場合（ストリーミング等）、編集中でなければ editText を同期。
+  // 編集中はユーザー入力を保持し、古い内容で上書きしない。
+  useEffect(() => {
+    if (!editing) setEditText(m.content);
+  }, [m.content, editing]);
 
   const { siblings, currentIndex } = getSiblingInfo(m.id);
   const hasBranches = siblings.length > 1;
@@ -576,7 +590,7 @@ function MessageBubble({
               {m.statusLabel}
             </span>
           ) : null}
-          {streaming && answer && (
+          {streaming && isLast && answer && (
             <span className="ml-0.5 inline-block h-3 w-1.5 animate-[blink_1s_ease-in-out_infinite] bg-foreground align-middle" aria-hidden="true" />
           )}
         </div>
@@ -609,7 +623,7 @@ function MessageBubble({
             <p className="text-[10px] text-muted-foreground mb-1">{t("chat.referenceCount", { count: sources.length })}</p>
             <ul className="space-y-0.5">
               {sources.map((s, i) => (
-                <li key={i}>
+                <li key={s.url}>
                   <a
                     href={s.url}
                     target="_blank"

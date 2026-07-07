@@ -1,7 +1,9 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { readFileSync, writeFileSync } from "node:fs";
 import { getRequestLocale, t } from "@/lib/i18n";
 import { getSessionUser } from "@/lib/auth-guards";
+import { resolveEnvPath, escapeEnvValue } from "@/lib/envUtils";
 
 const execAsync = promisify(exec);
 
@@ -92,9 +94,7 @@ export async function POST(req: Request) {
 
   // .env の SCRAPE_PROXY と TOR_PROXY を更新
   try {
-    const { readFileSync, writeFileSync } = await import("node:fs");
-    const { resolve } = await import("node:path");
-    const envPath = resolve(process.cwd(), ".env");
+    const envPath = resolveEnvPath();
     let envContent = "";
     try {
       envContent = readFileSync(envPath, "utf8");
@@ -107,7 +107,8 @@ export async function POST(req: Request) {
       TOR_PROXY: wantProxy,
     };
 
-    for (const [key, value] of Object.entries(updates)) {
+    for (const [key, rawValue] of Object.entries(updates)) {
+      const value = escapeEnvValue(rawValue);
       const regex = new RegExp(`^${key}=.*$`, "m");
       if (regex.test(envContent)) {
         envContent = envContent.replace(regex, `${key}=${value}`);

@@ -5,6 +5,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 /** タイムスタンプ列の共通ヘルパー: Unix epoch ms（integer）で保存し Date で読み書き。 */
@@ -51,19 +52,28 @@ export const users = sqliteTable("users", {
   createdAt: tsNow("created_at"),
 });
 
-export const accounts = sqliteTable("accounts", {
-  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  type: text("type"),  // DrizzleAdapter linkAccount 用（oauth / oidc / email）
-  provider: text("provider").notNull(),
-  providerAccountId: text("provider_account_id").notNull(),
-  accessToken: text("access_token"),
-  refreshToken: text("refresh_token"),
-  expiresAt: ts("expires_at"),
-  tokenType: text("token_type"),
-  scope: text("scope"),
-  idToken: text("id_token"),
-});
+export const accounts = sqliteTable(
+  "accounts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    type: text("type"),  // DrizzleAdapter linkAccount 用（oauth / oidc / email）
+    provider: text("provider").notNull(),
+    providerAccountId: text("provider_account_id").notNull(),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    expiresAt: ts("expires_at"),
+    tokenType: text("token_type"),
+    scope: text("scope"),
+    idToken: text("id_token"),
+  },
+  (t) => ({
+    // (provider, providerAccountId) の複合一意制約。
+    // Auth.js DrizzleAdapter はこの制約を前提として upsert を行う。
+    // これにより同一 OAuth アカウントへの重複 accounts 行生成を防ぐ。
+    providerUnique: uniqueIndex("accounts_provider_unique").on(t.provider, t.providerAccountId),
+  }),
+);
 
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -166,6 +176,12 @@ export const threads = sqliteTable("threads", {
   connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   globalInstructionId: text("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
   currentLeafId: text("current_leaf_id"),
+  // 0002 マイグレーションで追加された列（schema.ts に反映されていなかった）。
+  // 現在コードから参照されていないが、schema と DB の整合性を保つために定義。
+  temperature: real("temperature"),
+  maxTokens: integer("max_tokens"),
+  contextLength: integer("context_length"),
+  autoCompact: integer("auto_compact"),
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),

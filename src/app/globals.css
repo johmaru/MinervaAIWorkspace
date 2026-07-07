@@ -230,11 +230,11 @@ body::before {
   border-radius: 4px;
 }
 
-/* テーブルの水平スクロール */
+/* テーブルの水平スクロール（セル内改行は許可し長文の読みやすさを確保） */
 .markdown-body table {
   display: block;
   overflow-x: auto;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 /* カード/バブルの内側ハイライト + 外側微光 */

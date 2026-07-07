@@ -16,6 +16,7 @@ type SettingsResponse = {
   // LLM
   llmBaseUrl: string;
   llmApiKey: string;
+  hasLlmApiKey: boolean;
   llmModel: string;
   llmModels: string;
   thinkingEffort: string;
@@ -35,14 +36,14 @@ type SettingsResponse = {
   // Tor プロキシ
   torProxy: string;
   scrapeProxy: string;
-  // Database
+  // Database / 実行環境
   databaseUrl: string;
-  // 実行環境
   hostOs: string;
   tz: string;
   // Notion OAuth
   notionClientId: string;
   notionClientSecret: string;
+  hasNotionClientSecret: boolean;
   authUrl: string;
   // 既定グローバルインストラクション選択（ユーザー単位、DB）
   activeInstructionId: string | null;
@@ -104,18 +105,20 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const [instrFormContent, setInstrFormContent] = useState("");
   const [editingInstrId, setEditingInstrId] = useState<string | null>(null);
 
-  const fetchTorStatus = useCallback(async () => {
+  const fetchTorStatus = useCallback(async (): Promise<TorConnection | null> => {
     try {
       const res = await clientFetch("/api/tor");
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data = (await res.json()) as {
         running: boolean;
         connection: TorConnection;
       };
       setTorRunning(data.running);
       setTorConnection(data.connection);
+      return data.connection;
     } catch {
       // 無視
+      return null;
     }
   }, []);
 
@@ -194,6 +197,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
+          // シークレットフィールドは空文字の場合送信しない（既存値を保持）。
+          // GET で llmApiKey/notionClientSecret は空文字で返るため、
+          // ユーザーが新値を入力した場合のみ送信する。
+          llmApiKey: form.llmApiKey || undefined,
+          notionClientSecret: form.notionClientSecret || undefined,
           embedDim: selectedOption?.dim ?? form.embedDim,
           embedProvider: selectedOption?.provider ?? form.embedProvider,
           applyMigration: needsMigration && migrationConfirmed,
@@ -226,12 +234,14 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       } else {
         setMessage({ type: "success", text: t("settings.saved") });
       }
+      // サーバー状態とフォームを再同期（保存後の最新値を反映）
+      await fetchSettings();
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
     } finally {
       setSaving(false);
     }
-  }, [form, selectedOption, needsMigration, migrationConfirmed, t]);
+  }, [form, selectedOption, needsMigration, migrationConfirmed, fetchSettings, t]);
 
   const handleTorToggle = useCallback(async () => {
     setTorBusy(true);
@@ -279,11 +289,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     try {
       // Tor の on/off に関わらず scraper は最新の SCRAPE_PROXY で起動しているので
       // 接続確認のみ実行（不要な再起動を省く）
-      await fetchTorStatus();
-      if (torConnection?.connected) {
-        setMessage({ type: "success", text: t("settings.torConnSuccess", { torIp: torConnection.torIp ?? "", directIp: torConnection.directIp ?? "" }) });
-      } else if (torConnection?.error) {
-        setMessage({ type: "error", text: t("settings.torConnFail", { error: torConnection.error }) });
+      const result = await fetchTorStatus();
+      if (result?.connected) {
+        setMessage({ type: "success", text: t("settings.torConnSuccess", { torIp: result.torIp ?? "", directIp: result.directIp ?? "" }) });
+      } else if (result?.error) {
+        setMessage({ type: "error", text: t("settings.torConnFail", { error: result.error }) });
       } else {
         setMessage({ type: "warning", text: t("settings.torNotVia") });
       }
@@ -292,7 +302,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     } finally {
       setTorChecking(false);
     }
-  }, [fetchTorStatus, torConnection, t]);
+  }, [fetchTorStatus, t]);
   const handleSaveInstruction = useCallback(async () => {
     const name = instrFormName.trim();
     const content = instrFormContent.trim();
@@ -423,6 +433,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 type="password"
                 value={form.llmApiKey ?? ""}
                 onChange={(e) => update("llmApiKey", e.target.value)}
+                placeholder={settings?.hasLlmApiKey ? "••••••••（入力で更新）" : ""}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
@@ -454,13 +465,17 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.thinkingEffort")}</span>
               </label>
-              <input
-                type="text"
+              <select
                 value={form.thinkingEffort ?? "medium"}
                 onChange={(e) => update("thinkingEffort", e.target.value)}
-                placeholder="none / low / medium / high / max"
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
+              >
+                <option value="none">none</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="max">max</option>
+              </select>
               <p className="mt-1 text-xs text-muted-foreground">
                 {t("settings.thinkingEffortDesc")}
               </p>
@@ -592,7 +607,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 min={1}
                 max={20}
                 value={form.webSearchMaxResults ?? 3}
-                onChange={(e) => update("webSearchMaxResults", Number(e.target.value) || 3)}
+                onChange={(e) => update("webSearchMaxResults", Math.min(20, Math.max(1, Number(e.target.value) || 3)))}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
@@ -605,7 +620,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 min={1}
                 max={5}
                 value={form.webSearchMaxRounds ?? 2}
-                onChange={(e) => update("webSearchMaxRounds", Number(e.target.value) || 2)}
+                onChange={(e) => update("webSearchMaxRounds", Math.min(5, Math.max(1, Number(e.target.value) || 2)))}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
               <p className="mt-1 text-xs text-muted-foreground">
@@ -840,7 +855,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 type="password"
                 value={form.notionClientSecret ?? ""}
                 onChange={(e) => update("notionClientSecret", e.target.value)}
-                placeholder="secret_..."
+                placeholder={settings?.hasNotionClientSecret ? "••••••••（入力で更新）" : "secret_..."}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>

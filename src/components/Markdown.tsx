@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useState, useCallback, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -18,39 +19,69 @@ import { sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
  * ストリーミング中の不完全な Markdown は react-markdown が寛容に扱う。
  * ツール呼び出しマークアップのサニタイズは sanitizeToolCallMarkup に委譲。
  */
-export function Markdown({ content }: { content: string }) {
+function PreBlock({ children }: { children?: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    // children からテキストを抽出
+    const extractText = (node: React.ReactNode): string => {
+      if (typeof node === "string") return node;
+      if (typeof node === "number") return String(node);
+      if (Array.isArray(node)) return node.map(extractText).join("");
+      if (node && typeof node === "object" && "props" in node) {
+        return extractText((node as { props: { children?: React.ReactNode } }).props.children);
+      }
+      return "";
+    };
+    const text = extractText(children);
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  }, [children]);
+  return (
+    <pre className="relative my-2 overflow-x-auto rounded-2xl bg-muted p-3 text-xs ring-1 ring-border group">
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="absolute right-2 top-2 rounded bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+        aria-label="Copy code"
+      >
+        {copied ? "✓" : "Copy"}
+      </button>
+      {children}
+    </pre>
+  );
+}
+
+function CodeBlock({ className, children, ...props }: ComponentPropsWithoutRef<"code">) {
+  // ブロックコード判定: language-* クラスの有無に加え、
+  // rehype-highlight が言語未検出時に付与する hljs クラスでも判定する。
+  const isBlock = className?.includes("language-") || className?.includes("hljs");
+  if (!isBlock) {
+    return (
+      <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono" {...props}>
+        {children}
+      </code>
+    );
+  }
+  return (
+    <code className={className} {...props}>
+      {children}
+    </code>
+  );
+}
+
+export const Markdown = memo(function Markdown({ content }: { content: string }) {
   const sanitized = sanitizeToolCallMarkup(content);
   return (
     <div className="markdown-body text-sm leading-relaxed">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight, rehypeKatex]}
+        rehypePlugins={[rehypeHighlight, [rehypeKatex, { throwOnError: false }]]}
         components={{
           // コードブロック: highlight.js が <pre><code class="language-xxx"> を生成
-          pre: ({ children }) => (
-            <pre className="my-2 overflow-x-auto rounded-2xl bg-muted p-3 text-xs ring-1 ring-border">
-              {children}
-            </pre>
-          ),
-          code: ({ className, children, ...props }) => {
-            // インラインコード（language-* クラスがない場合）
-            const isInline = !className?.includes("language-");
-            if (isInline) {
-              return (
-                <code
-                  className="rounded bg-muted px-1 py-0.5 text-xs font-mono"
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code className={className} {...props}>
-                {children}
-              </code>
-            );
-          },
+          pre: PreBlock,
+          code: CodeBlock,
           // テーブル
           table: ({ children }) => (
             <table className="my-2 w-full border-collapse text-xs">
@@ -103,4 +134,4 @@ export function Markdown({ content }: { content: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});

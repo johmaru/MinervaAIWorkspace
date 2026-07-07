@@ -207,6 +207,9 @@ export function useChat(threadId: string | null) {
 
     return () => {
       cancelled = true;
+      // スレッド切替時に進行中のストリームを abort し、
+      // 旧スレッドの SSE が新スレッドの state を上書きするのを防ぐ。
+      abortRef.current?.abort();
     };
   }, [threadId, t]);
 
@@ -477,6 +480,13 @@ export function useChat(threadId: string | null) {
     (messageId: string) => {
       if (thread) {
         setThread({ ...thread, currentLeafId: messageId });
+        // currentLeafId をサーバーに永続化（リロード後も同じ枝を表示）。
+        // fire-and-forget: UI の即時切り替えをブロックしない。
+        clientFetch(`/api/threads?id=${encodeURIComponent(thread.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ currentLeafId: messageId }),
+        }).catch(() => { /* silent: UI は既に切り替わっている */ });
       }
       setMessages(buildChain(messageId));
     },
@@ -487,14 +497,19 @@ export function useChat(threadId: string | null) {
     (messageId: string): { siblings: string[]; currentIndex: number } => {
       const msg = byIdRef.current.get(messageId);
       if (!msg) return { siblings: [messageId], currentIndex: 0 };
+      // parentId が null のルートメッセージは、messageId 自身のみを兄弟とする。
+      // （null === null で全ルートが兄弟扱いになるのを防ぐ）
+      if (msg.parentId === null) {
+        return { siblings: [messageId], currentIndex: 0 };
+      }
       const siblings: string[] = [];
       for (const [id, m] of byIdRef.current) {
-        if (m.parentId === msg.parentId) {
+        // 厳密な parentId 一致で兄弟判定。null 同士は兄弟としない。
+        if (m.parentId !== null && m.parentId === msg.parentId) {
           siblings.push(id);
         }
       }
-      // 作成順でソート（byId は挿入順を保持しないため、id でソート）
-      siblings.sort();
+      // byIdRef は Map で挿入順を保持するため、sort は不要（作成順が維持される）。
       return {
         siblings,
         currentIndex: siblings.indexOf(messageId),

@@ -10,6 +10,8 @@ import { useThreads } from "@/hooks/useThreads";
 import { useFolders, type FolderSummary } from "@/hooks/useFolders";
 import { useI18n } from "@/components/I18nProvider";
 
+const ACTIVE_THREAD_STORAGE_KEY = "umanschat-active-thread";
+
 /**
  * アプリ全体のシェル。アクティブスレッド状態をここで保持し、
  * Sidebar（一覧 + 選択）と ChatWindow（単一会話）に配る。
@@ -32,17 +34,44 @@ export function ChatShell() {
   const { t } = useI18n();
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [folderModal, setFolderModal] = useState<{ folder: FolderSummary } | null>(
-    null,
-  );
+  // folder: null = 新規作成モード（DB 作成は保存時まで遅延）
+  const [folderModal, setFolderModal] = useState<{
+    folder: FolderSummary | null;
+  } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpTopic, setHelpTopic] = useState<string | null>(null);
+
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+
+  // #29: 最後に選択したスレッドを localStorage に保存・復元
+  // マウント時に復元（threads ロード後に有効性チェック）
+  useEffect(() => {
+    if (threads.length === 0) return;
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY)
+        : null;
+    if (saved && threads.some((t) => t.id === saved) && !activeThreadId) {
+      setActiveThreadId(saved);
+    }
+    // 復元は初回のみ。activeThreadId 依存しない（一度設定したら再上書きしない）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threads]);
+
+  // activeThreadId 変更時に localStorage へ永続化
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (activeThreadId) {
+      window.localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, activeThreadId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_THREAD_STORAGE_KEY);
+    }
+  }, [activeThreadId]);
 
   const openHelp = useCallback((topic: string | null = null) => {
     setHelpTopic(topic);
     setHelpOpen(true);
   }, []);
-  const closeHelp = useCallback(() => setHelpOpen(false), []);
 
   const handleCreateThread = useCallback(
     async (): Promise<string | null> => {
@@ -85,15 +114,33 @@ export function ChatShell() {
 
   // --- フォルダ操作 ---
 
-  const handleCreateFolder = useCallback(async () => {
-    const f = await createFolder({});
-    if (f) setFolderModal({ folder: f });
-  }, [createFolder]);
+  // #16: フォルダ作成をモーダル保存時に遅延。handleCreateFolder はモーダルを開くだけ。
+  const handleCreateFolder = useCallback(() => {
+    setFolderModal({ folder: null });
+  }, []);
 
   const handleEditFolder = useCallback((folder: FolderSummary) => {
     setFolderModal({ folder });
   }, []);
 
+  // 新規フォルダ作成（モーダル保存時）
+  const handleCreateNewFolder = useCallback(
+    async (patch: {
+      name: string;
+      instruction: string | null;
+      memoryScope: "folder" | "global";
+    }): Promise<boolean> => {
+      const f = await createFolder(patch);
+      if (f) {
+        void refreshFolders();
+        return true;
+      }
+      return false;
+    },
+    [createFolder, refreshFolders],
+  );
+
+  // 既存フォルダ更新（モーダル保存時）
   const handleSaveFolder = useCallback(
     async (patch: {
       name: string;
@@ -213,6 +260,7 @@ export function ChatShell() {
           open={!!folderModal}
           onClose={() => setFolderModal(null)}
           onSave={handleSaveFolder}
+          onCreate={handleCreateNewFolder}
         />
       )}
       <HelpModal open={helpOpen} onClose={closeHelp} initialTopic={helpTopic} />

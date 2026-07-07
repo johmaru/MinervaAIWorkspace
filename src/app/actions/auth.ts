@@ -28,12 +28,17 @@ export async function register(state: FormState, formData: FormData): Promise<Fo
 
   const passwordHash = await hashPassword(password);
 
-  // ユーザー作成。最初のユーザーの場合、既存のオーナー無しデータを全て移行。
-  const userCount = await db.$count(users);
-  const [user] = await db
-    .insert(users)
-    .values({ nickname, email, passwordHash })
-    .returning({ id: users.id, nickname: users.nickname, email: users.email });
+  // ユーザー作成 + 初回ユーザー判定をトランザクション内で行い、
+  // 並行登録時の競合状態（両者とも userCount=0 を観測してオーナー無しデータを
+  // 二重移行する問題）を防止する。
+  const [user, userCount] = await db.transaction(async (tx) => {
+    const count = await tx.$count(users);
+    const [inserted] = await tx
+      .insert(users)
+      .values({ nickname, email, passwordHash })
+      .returning({ id: users.id, nickname: users.nickname, email: users.email });
+    return [inserted, count] as const;
+  });
 
   if (!user) return { error: "auth.createFailed" };
 

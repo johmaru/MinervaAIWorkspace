@@ -32,6 +32,8 @@ import { findRelevantMemories, buildMemoryContext, fetchRecentThreadTitles } fro
 const createdThreadIds: string[] = [];
 const createdFolderIds: string[] = [];
 const createdMemoryIds: string[] = [];
+const createdUserIds: string[] = [];
+let testUserId: string;
 
 async function insertMemory(
   threadId: string,
@@ -60,25 +62,33 @@ async function insertMemory(
 }
 
 beforeAll(async () => {
+  // テストユーザー作成（userId 絞り込みテスト用）
+  const [testUser] = await db.insert(users).values({
+    nickname: "memoryStore-test",
+    email: "memstore-test@umanschat.test",
+  }).returning();
+  testUserId = testUser.id;
+  createdUserIds.push(testUser.id);
+
   // スレッド A（フォルダなし = global scope）
-  const [threadA] = await db.insert(threads).values({ title: "memoryStore test A" }).returning();
+  const [threadA] = await db.insert(threads).values({ title: "memoryStore test A", userId: testUser.id }).returning();
   createdThreadIds.push(threadA.id);
 
   // フォルダ + スレッド B（folder scope）
-  const [folder] = await db.insert(folders).values({ name: "test folder", memoryScope: "folder" }).returning();
+  const [folder] = await db.insert(folders).values({ name: "test folder", memoryScope: "folder", userId: testUser.id }).returning();
   createdFolderIds.push(folder.id);
   const [threadB] = await db
     .insert(threads)
-    .values({ title: "memoryStore test B", folderId: folder.id })
+    .values({ title: "memoryStore test B", folderId: folder.id, userId: testUser.id })
     .returning();
   createdThreadIds.push(threadB.id);
 
   // スレッド C（別フォルダ = folder scope）
-  const [folder2] = await db.insert(folders).values({ name: "other folder", memoryScope: "folder" }).returning();
+  const [folder2] = await db.insert(folders).values({ name: "other folder", memoryScope: "folder", userId: testUser.id }).returning();
   createdFolderIds.push(folder2.id);
   const [threadC] = await db
     .insert(threads)
-    .values({ title: "memoryStore test C", folderId: folder2.id })
+    .values({ title: "memoryStore test C", folderId: folder2.id, userId: testUser.id })
     .returning();
   createdThreadIds.push(threadC.id);
 });
@@ -94,14 +104,16 @@ afterAll(async () => {
   for (const id of createdFolderIds) {
     await db.delete(folders).where(eq(folders.id, id));
   }
+  for (const id of createdUserIds) {
+    await db.delete(users).where(eq(users.id, id));
+  }
 });
 
 describe("findRelevantMemories", () => {
   it("関連クエリで記憶がヒットする（similarity > 0.3）", async () => {
     const threadId = createdThreadIds[0];
     await insertMemory(threadId, null, "ユーザーは FPGA と低レイヤー開発を得意としている");
-
-    const results = await findRelevantMemories("FPGA 低レイヤー 開発", null);
+    const results = await findRelevantMemories("FPGA 低レイヤー 開発", null, testUserId);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((r) => r.similarity > 0.3)).toBe(true);
@@ -113,8 +125,7 @@ describe("findRelevantMemories", () => {
     const threadId = createdThreadIds[0];
     const memId = await insertMemory(threadId, null, "一時的な作業メモ： suppressed test");
     await db.update(memories).set({ suppressedAt: new Date() }).where(eq(memories.id, memId));
-
-    const results = await findRelevantMemories("suppressed test", null);
+    const results = await findRelevantMemories("suppressed test", null, testUserId);
 
     const hit = results.find((r) => r.id === memId);
     expect(hit).toBeUndefined();
@@ -127,13 +138,12 @@ describe("findRelevantMemories", () => {
     // フォルダB（scope=folder）に記憶を挿入
     await insertMemory(threadBId, folderBId, "フォルダB固有の記憶： Rust で組み込み開発");
 
-    // フォルダBのスレッドから検索 → フォルダBの記憶はヒットする
-    const resultsB = await findRelevantMemories("Rust 組み込み開発", folderBId);
+    const resultsB = await findRelevantMemories("Rust 組み込み開発", folderBId, testUserId);
     expect(resultsB.some((r) => r.content.includes("フォルダB固有"))).toBe(true);
 
     // フォルダCのスレッドから検索 → フォルダBの記憶はヒットしない
     const folderCId = createdFolderIds[1];
-    const resultsC = await findRelevantMemories("Rust 組み込み開発", folderCId);
+    const resultsC = await findRelevantMemories("Rust 組み込み開発", folderCId, testUserId);
     expect(resultsC.some((r) => r.content.includes("フォルダB固有"))).toBe(false);
   }, 60_000);
 
@@ -143,13 +153,64 @@ describe("findRelevantMemories", () => {
     await insertMemory(threadId, null, "ユーザーは Python が好き", "fact");
     await insertMemory(threadId, null, "ユーザーは TypeScript も使う", "fact");
     await insertMemory(threadId, null, "現在のタスク： API設計中", "working");
-
-    const results = await findRelevantMemories("Python TypeScript", null);
+    const results = await findRelevantMemories("Python TypeScript", null, testUserId);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.length).toBeLessThanOrEqual(5);
     // 類似記憶が結果に含まれる
     expect(results.some((r) => r.content.includes("Python") || r.content.includes("TypeScript"))).toBe(true);
+  }, 60_000);
+});
+
+describe("findRelevantMemories — userId 分離", () => {
+  const otherUserIds: string[] = [];
+  const otherThreadIds: string[] = [];
+  const otherMemoryIds: string[] = [];
+
+  afterAll(async () => {
+    for (const id of otherMemoryIds) {
+      await db.delete(memories).where(eq(memories.id, id));
+    }
+    for (const id of otherThreadIds) {
+      await db.delete(threads).where(eq(threads.id, id));
+    }
+    for (const id of otherUserIds) {
+      await db.delete(users).where(eq(users.id, id));
+    }
+  });
+
+  it("他ユーザーの記憶は検索結果に含まれない", async () => {
+    // 別ユーザーを作成
+    const [otherUser] = await db.insert(users).values({
+      nickname: "other-user",
+      email: "other-user@umanschat.test",
+    }).returning();
+    otherUserIds.push(otherUser.id);
+
+    // 別ユーザーのスレッド + 記憶を作成（testUserId と同じ内容で類似度が高くなる）
+    const [otherThread] = await db.insert(threads).values({
+      title: "other user thread",
+      userId: otherUser.id,
+    }).returning();
+    otherThreadIds.push(otherThread.id);
+
+    const embedding = await embedText("ユーザーは FPGA と低レイヤー開発を得意としている");
+    const contentHash = hashContent("ユーザーは FPGA と低レイヤー開発を得意としている");
+    const [otherMem] = await db.insert(memories).values({
+      threadId: otherThread.id,
+      kind: "fact",
+      content: "他ユーザーの秘密の記憶： FPGA 低レイヤー開発",
+      importance: 0.5,
+      contentHash,
+      embedding,
+      model: "test-model",
+    }).returning();
+    otherMemoryIds.push(otherMem.id);
+
+    // testUserId で検索 → 他ユーザーの記憶は含まれない
+    const results = await findRelevantMemories("FPGA 低レイヤー 開発", null, testUserId);
+    const leaked = results.find((r) => r.content.includes("他ユーザーの秘密の記憶"));
+    expect(leaked).toBeUndefined();
   }, 60_000);
 });
 
@@ -246,6 +307,7 @@ describe("buildMemoryContext with titles", () => {
     const [folder] = await db.insert(folders).values({
       name: "ctx-null-folder",
       memoryScope: "folder",
+      userId: uid,
     }).returning();
     ctxFolderIds.push(folder.id);
     const [thread] = await db.insert(threads).values({
@@ -271,6 +333,7 @@ describe("buildMemoryContext with titles", () => {
     const [folder] = await db.insert(folders).values({
       name: "ctx-title-only-folder",
       memoryScope: "folder",
+      userId: uid,
     }).returning();
     ctxFolderIds.push(folder.id);
     const [t1] = await db.insert(threads).values({
@@ -303,6 +366,7 @@ describe("buildMemoryContext with titles", () => {
     const [folder] = await db.insert(folders).values({
       name: "ctx-both-folder",
       memoryScope: "folder",
+      userId: uid,
     }).returning();
     ctxFolderIds.push(folder.id);
     const [t1] = await db.insert(threads).values({

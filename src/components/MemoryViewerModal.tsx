@@ -46,6 +46,9 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   const [editImportance, setEditImportance] = useState(0.5);
   const [saving, setSaving] = useState(false);
 
+  // 削除確認状態
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
   // 追加状態
   const [addOpen, setAddOpen] = useState(false);
   const [addContent, setAddContent] = useState("");
@@ -76,6 +79,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   // モーダルを開いたときにメモリ一覧 + 最新スレッド取得
   useEffect(() => {
     if (!open) return;
+    setPendingDeleteId(null);
     void fetchMemories();
     void clientFetch("/api/threads")
       .then((res) => res.json())
@@ -97,6 +101,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   );
 
   const startEdit = (m: MemoryEntry) => {
+    setPendingDeleteId(null);
     setEditingId(m.id);
     setEditContent(m.content);
     setEditKind(m.kind);
@@ -139,6 +144,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
           return;
         }
         setError(null);
+        setPendingDeleteId(null);
         await fetchMemories();
       } catch {
         setError(t("memoryViewer.error"));
@@ -401,18 +407,39 @@ export function MemoryViewerModal({ open, onClose }: Props) {
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                           </svg>
                         </MotionButton>
-                        <MotionButton
-                          type="button"
-                          onClick={() => handleDelete(m.id)}
-                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
-                          aria-label={t("memoryViewer.delete")}
-                          whileTap={{ scale: 0.9 }}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                        </MotionButton>
+                        {pendingDeleteId === m.id ? (
+                          <>
+                            <MotionButton
+                              type="button"
+                              onClick={() => handleDelete(m.id)}
+                              className="rounded-lg bg-red-500/15 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-500/25 dark:text-red-400"
+                              whileTap={{ scale: 0.97 }}
+                            >
+                              {t("memoryViewer.deleteConfirmYes")}
+                            </MotionButton>
+                            <MotionButton
+                              type="button"
+                              onClick={() => setPendingDeleteId(null)}
+                              className="rounded-lg bg-muted px-2.5 py-1 text-xs hover:bg-muted/80"
+                              whileTap={{ scale: 0.97 }}
+                            >
+                              {t("memoryViewer.cancel")}
+                            </MotionButton>
+                          </>
+                        ) : (
+                          <MotionButton
+                            type="button"
+                            onClick={() => setPendingDeleteId(m.id)}
+                            className="rounded-lg p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                            aria-label={t("memoryViewer.delete")}
+                            whileTap={{ scale: 0.9 }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </MotionButton>
+                        )}
                       </div>
                     </div>
                   </>
