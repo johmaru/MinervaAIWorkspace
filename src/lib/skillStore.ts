@@ -1,6 +1,6 @@
 import { eq, like, and } from "drizzle-orm";
 import { db } from "@/db";
-import { skills } from "@/db/schema";
+import { skills, skillUsageEvents } from "@/db/schema";
 import { embedText } from "@/lib/embed";
 import { cosineSimilarity } from "@/lib/vectorSearch";
 
@@ -133,6 +133,25 @@ export async function buildSkillContext({
     }
   }
 
+  // スキル使用ログ + lastUsedAt 更新（fire-and-forget）
+  if (threadId) {
+    const usageEntries = merged.map((s) => ({
+      skillId: s.id,
+      userId,
+      threadId,
+      similarity: s.similarity,
+      activationType: (s.id === namedSkill?.id ? "manual" : "semantic") as "manual" | "semantic",
+    }));
+    db.insert(skillUsageEvents)
+      .values(usageEntries)
+        .catch((e) => console.error("[skill] usage log failed:", e));
+    for (const s of merged) {
+      db.update(skills)
+        .set({ lastUsedAt: new Date() })
+        .where(eq(skills.id, s.id))
+        .catch((e) => console.error("[skill] lastUsedAt update failed:", e));
+    }
+  }
   if (merged.length === 0) return null;
   const lines = merged.map((s) => `- [${s.name}] ${s.content}`).join("\n");
   return {

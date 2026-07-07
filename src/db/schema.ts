@@ -159,6 +159,26 @@ export const skillCandidates = sqliteTable("skill_candidates", {
 });
 
 /**
+ * skill_usage_events — スキル使用ログ。
+ * buildSkillContext で注入されたスキル毎に記録。
+ * activationType: semantic (検索一致) or manual (名前指定)
+ * outcome: unknown (初期) → helpful / not_helpful (将来のフィードバック用)
+ */
+export const skillUsageEvents = sqliteTable("skill_usage_events", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  messageId: text("message_id"),
+  similarity: real("similarity"),
+  activationType: text("activation_type", { enum: ["semantic", "manual"] }).notNull(),
+  outcome: text("outcome", { enum: ["unknown", "helpful", "not_helpful"] })
+    .notNull()
+    .default("unknown"),
+  createdAt: tsNow("created_at"),
+});
+
+/**
  * mcpServers — ユーザー単位の MCP (Model Context Protocol) サーバー接続定義。
  *
  * transport="http" の場合は url を使用（Streamable HTTP / SSE 自動フォールバック）。

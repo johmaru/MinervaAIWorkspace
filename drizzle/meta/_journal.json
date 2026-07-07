@@ -43,6 +43,13 @@
       "when": 1783428153514,
       "tag": "0005_strong_zaran",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783428651341,
+      "tag": "0006_puzzling_bullseye",
+      "breakpoints": true
     }
   ]
 }
