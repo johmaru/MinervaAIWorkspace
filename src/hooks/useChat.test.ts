@@ -1,10 +1,21 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook as rtlRenderHook, waitFor } from "@testing-library/react";
 import type { Mock } from "vitest";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
+import { createElement, type ReactNode } from "react";
 import { db } from "@/db";
 import { messages, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { useChat } from "@/hooks/useChat";
+import { I18nProvider } from "@/components/I18nProvider";
+
+const wrapper = ({ children }: { children: ReactNode }) => createElement(I18nProvider, null, children);
+function renderHook<T>(callback: () => T) {
+  return rtlRenderHook(callback, { wrapper });
+}
 
 // useChat は Phase 2 で DB-backed になった。
 // - 初回ロードで GET /api/threads/[id] を叩く → これはモックして決定的な履歴を返す。
@@ -94,7 +105,7 @@ describe("useChat — 初回ロード", () => {
 
     const { result } = renderHook(() => useChat(id));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(fetchMock()).toHaveBeenCalledWith(`/api/threads/${id}`);
+    expect(fetchMock()).toHaveBeenCalledWith(`/api/threads/${id}`, undefined);
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[0].content).toBe("hi");
     expect(result.current.messages[1].content).toBe("hello");

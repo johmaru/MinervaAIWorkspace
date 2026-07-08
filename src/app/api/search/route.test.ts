@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/auth-guards", () => ({
+  getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id" }),
+}));
 import { createHash } from "node:crypto";
 import { db } from "@/db";
 import { pages, pageEmbeddings, memories, threads } from "@/db/schema";
@@ -115,7 +118,7 @@ describe("POST /api/search — 記憶検索", () => {
   const createdMemoryIds: string[] = [];
 
   beforeAll(async () => {
-    const [thread] = await db.insert(threads).values({ title: "Memory Search Test" }).returning();
+    const [thread] = await db.insert(threads).values({ title: "Memory Search Test", userId: "test-user-id" }).returning();
     createdThreadIds.push(thread.id);
 
     const content = "ユーザーは FPGA と低レイヤー開発を得意としている";

@@ -73,6 +73,7 @@ export function useFolders() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const folder = (await res.json()) as FolderSummary;
         setFolders((prev) => [folder, ...prev]);
+        setError(null);
         return folder;
       } catch (err) {
         setError(err instanceof Error ? err.message : t("sidebar.folderCreateError"));
@@ -93,6 +94,7 @@ export function useFolders() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const updated = (await res.json()) as FolderSummary;
         setFolders((prev) => prev.map((f) => (f.id === id ? updated : f)));
+        setError(null);
         return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : t("sidebar.folderUpdateError"));
@@ -108,6 +110,7 @@ export function useFolders() {
         const res = await clientFetch(`/api/folders/${id}`, { method: "DELETE" });
         if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`);
         setFolders((prev) => prev.filter((f) => f.id !== id));
+        setError(null);
         return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : t("sidebar.folderDeleteError"));

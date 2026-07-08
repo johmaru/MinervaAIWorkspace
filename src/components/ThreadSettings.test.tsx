@@ -1,5 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { I18nProvider } from "@/components/I18nProvider";
 
@@ -82,13 +86,16 @@ describe("ThreadSettings — 折りたたみ", () => {
     expect(screen.queryByPlaceholderText("このスレッドのシステムプロンプト（任意）")).not.toBeInTheDocument();
   });
 
-  it("トグルボタンで開閉", () => {
+  it("トグルボタンで開閉", async () => {
     renderSettings();
     const btn = screen.getByRole("button", { name: "スレッド設定を開閉" });
     fireEvent.click(btn);
     expect(screen.getByPlaceholderText("このスレッドのシステムプロンプト（任意）")).toBeInTheDocument();
     fireEvent.click(btn);
-    expect(screen.queryByPlaceholderText("このスレッドのシステムプロンプト（任意）")).not.toBeInTheDocument();
+    // AnimatePresence の exit アニメーション中も DOM に残るため waitFor で待つ。
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText("このスレッドのシステムプロンプト（任意）")).not.toBeInTheDocument();
+    });
   });
 });
 

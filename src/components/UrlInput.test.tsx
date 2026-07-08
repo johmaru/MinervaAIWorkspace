@@ -1,9 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
 import { UrlInput } from "@/components/UrlInput";
 import { I18nProvider } from "@/components/I18nProvider";
 
 beforeEach(() => {
+  localStorage.setItem("umanschat-locale", "ja");
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string) => {

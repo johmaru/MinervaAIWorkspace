@@ -122,7 +122,6 @@ afterAll(async () => {
   for (const id of createdFolderIds) {
     await db.delete(folders).where(eq(folders.id, id));
   }
-  await db.delete(users).where(eq(users.id, "test-user-id"));
 });
 
 async function createThread(): Promise<string> {
@@ -145,7 +144,7 @@ function chatReq(
       rapid: opts?.rapid,
       timeRange: opts?.timeRange,
     }),
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
   });
 }
 

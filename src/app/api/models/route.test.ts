@@ -1,5 +1,8 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/auth-guards", () => ({
+  getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id" }),
+}));
 import { GET } from "@/app/api/models/route";
 
 // process.env を一時的に上書き

@@ -1,5 +1,11 @@
 // @vitest-environment node
 import { afterAll, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/auth-guards", () => ({
+  getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id" }),
+}));
+vi.mock("next/server", () => ({
+  after: () => {},
+}));
 import { db } from "@/db";
 import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -67,6 +73,7 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
       .insert(folders)
       .values({
         name: "敬語フォルダ",
+        userId: "test-user-id",
         instruction: "丁寧な敬語で回答してください",
       })
       .returning();
@@ -77,6 +84,7 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
       .insert(threads)
       .values({
         title: "instruction test",
+        userId: "test-user-id",
         folderId: folder.id,
         systemPrompt: "簡潔に答えて",
       })
@@ -88,21 +96,25 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
     await res.text(); // ストリーム消費
 
     // system message に instruction と systemPrompt 両方が含まれる
+    // getEnvContext() の "Current date:" メッセージが先頭に来るため、
+    // プロンプト系 system message を特定する。
     const systemMessages = capturedMessages.filter((m) => m.role === "system");
     expect(systemMessages.length).toBeGreaterThan(0);
-    const firstSystem = String(systemMessages[0].content);
-    expect(firstSystem).toContain("丁寧な敬語で回答してください");
-    expect(firstSystem).toContain("簡潔に答えて");
+    const promptSystem = String(
+      systemMessages.find((m) => !String(m.content).startsWith("Current date:"))?.content ?? "",
+    );
+    expect(promptSystem).toContain("丁寧な敬語で回答してください");
+    expect(promptSystem).toContain("簡潔に答えて");
     // instruction が先頭に来る
-    expect(firstSystem.indexOf("丁寧な敬語")).toBeLessThan(
-      firstSystem.indexOf("簡潔に答えて"),
+    expect(promptSystem.indexOf("丁寧な敬語")).toBeLessThan(
+      promptSystem.indexOf("簡潔に答えて"),
     );
   }, 30_000);
 
   it("folder.instruction が null の場合は thread.systemPrompt のみ", async () => {
     const [folder] = await db
       .insert(folders)
-      .values({ name: "空フォルダ", instruction: null })
+      .values({ name: "空フォルダ", userId: "test-user-id", instruction: null })
       .returning();
     createdFolderIds.push(folder.id);
 
@@ -110,26 +122,28 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
       .insert(threads)
       .values({
         title: "no instruction",
+        userId: "test-user-id",
         folderId: folder.id,
         systemPrompt: "短く答えて",
       })
       .returning();
     createdIds.push(thread.id);
-
     const res = await POST(chatReq(thread.id, "テスト"));
     expect(res.status).toBe(200);
     await res.text();
 
     const systemMessages = capturedMessages.filter((m) => m.role === "system");
     expect(systemMessages.length).toBeGreaterThan(0);
-    const firstSystem = String(systemMessages[0].content);
-    expect(firstSystem).toBe("短く答えて");
+    const promptSystem = String(
+      systemMessages.find((m) => !String(m.content).startsWith("Current date:"))?.content ?? "",
+    );
+    expect(promptSystem).toBe("短く答えて");
   }, 30_000);
 
   it("フォルダ未所属スレッドは thread.systemPrompt のみ", async () => {
     const [thread] = await db
       .insert(threads)
-      .values({ title: "no folder", systemPrompt: "通常プロンプト" })
+      .values({ title: "no folder", userId: "test-user-id", systemPrompt: "通常プロンプト" })
       .returning();
     createdIds.push(thread.id);
 
@@ -139,15 +153,17 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
 
     const systemMessages = capturedMessages.filter((m) => m.role === "system");
     expect(systemMessages.length).toBeGreaterThan(0);
-    const firstSystem = String(systemMessages[0].content);
-    expect(firstSystem).toBe("通常プロンプト");
+    const promptSystem = String(
+      systemMessages.find((m) => !String(m.content).startsWith("Current date:"))?.content ?? "",
+    );
+    expect(promptSystem).toBe("通常プロンプト");
   }, 30_000);
 
   it("whitespace-only instruction は systemContent に含まれない", async () => {
     // DB に直接 whitespace-only instruction を仕込む（API 経由だと trim されてしまうため）
     const [folder] = await db
       .insert(folders)
-      .values({ name: "空白フォルダ", instruction: "   " })
+      .values({ name: "空白フォルダ", userId: "test-user-id", instruction: "   " })
       .returning();
     createdFolderIds.push(folder.id);
 
@@ -155,6 +171,7 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
       .insert(threads)
       .values({
         title: "whitespace test",
+        userId: "test-user-id",
         folderId: folder.id,
         systemPrompt: "有効プロンプト",
       })
@@ -167,8 +184,10 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
 
     const systemMessages = capturedMessages.filter((m) => m.role === "system");
     expect(systemMessages.length).toBeGreaterThan(0);
-    const firstSystem = String(systemMessages[0].content);
+    const promptSystem = String(
+      systemMessages.find((m) => !String(m.content).startsWith("Current date:"))?.content ?? "",
+    );
     // whitespace-only instruction は除外され、systemPrompt のみになる
-    expect(firstSystem).toBe("有効プロンプト");
+    expect(promptSystem).toBe("有効プロンプト");
   }, 30_000);
 });

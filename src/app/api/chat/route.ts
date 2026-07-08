@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
 import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams } from "@/lib/llm";
 import { db } from "@/db";
-import { messages, threads, users, mcpServers, connections, globalInstructions } from "@/db/schema";
+import { messages, threads, users, mcpServers, connections, globalInstructions, folders } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
@@ -137,8 +137,22 @@ export async function POST(req: Request) {
       .where(and(eq(globalInstructions.id, effectiveInstrId), eq(globalInstructions.userId, user.id)));
     resolvedGlobalInstruction = instr?.content?.trim() || null;
   }
+  // フォルダ Instruction（folderId 経由）。空白のみは除外。
+  // 所有権チェック: folders.userId === user.id で絞り込み。
+  let folderInstruction: string | null = null;
+  if (thread.folderId) {
+    const [folder] = await db
+      .select({ instruction: folders.instruction })
+      .from(folders)
+      .where(and(eq(folders.id, thread.folderId), eq(folders.userId, user.id)));
+    folderInstruction = folder?.instruction?.trim() || null;
+  }
   // 優先順位: スレッド個別 systemPrompt > グローバル(スレッド上書き or ユーザー既定) > body
-  const systemContent = thread.systemPrompt ?? resolvedGlobalInstruction ?? body.systemPrompt;
+  const baseSystemContent = thread.systemPrompt ?? resolvedGlobalInstruction ?? body.systemPrompt;
+  // フォルダ Instruction がある場合は先頭に結合（instruction → systemPrompt の順）。
+  const systemContent = folderInstruction
+    ? [folderInstruction, baseSystemContent].filter(Boolean).join("\n")
+    : baseSystemContent;
 
   // パーソナライズメッセージ（ユーザー単位）。personalStyle が null なら無効。
   const personalizationContent = buildPersonalizationMessage(

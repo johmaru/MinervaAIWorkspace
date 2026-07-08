@@ -1,5 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { I18nProvider } from "@/components/I18nProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -15,6 +19,7 @@ const mockMatchMedia = vi.fn().mockReturnValue({
 beforeEach(() => {
   vi.stubGlobal("matchMedia", mockMatchMedia);
   localStorage.clear();
+  localStorage.setItem("umanschat-locale", "ja");
 });
 
 afterEach(() => {

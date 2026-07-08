@@ -1,8 +1,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
 import { AttachmentBar } from "@/components/AttachmentBar";
 import { I18nProvider } from "@/components/I18nProvider";
 import type { MessageAttachment } from "@/hooks/useChat";
+
+beforeEach(() => {
+  localStorage.setItem("umanschat-locale", "ja");
+});
 
 afterEach(() => {
   cleanup();

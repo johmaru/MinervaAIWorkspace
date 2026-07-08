@@ -1,5 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
 import { ChatShell } from "@/components/ChatShell";
 import { I18nProvider } from "@/components/I18nProvider";
 
@@ -38,6 +42,10 @@ vi.mock("@/components/ChatWindow", () => ({
     <div data-testid="chat-window" data-thread={threadId}>ChatWindow</div>
   ),
 }));
+
+beforeEach(() => {
+  localStorage.setItem("umanschat-locale", "ja");
+});
 
 afterEach(() => {
   cleanup();

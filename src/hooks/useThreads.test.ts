@@ -1,10 +1,21 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook as rtlRenderHook, waitFor } from "@testing-library/react";
 import type { Mock } from "vitest";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
+import { createElement, type ReactNode } from "react";
 import { db } from "@/db";
 import { threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { useThreads } from "@/hooks/useThreads";
+import { I18nProvider } from "@/components/I18nProvider";
+
+const wrapper = ({ children }: { children: ReactNode }) => createElement(I18nProvider, null, children);
+function renderHook<T>(callback: () => T) {
+  return rtlRenderHook(callback, { wrapper });
+}
 
 // useThreads は /api/threads の CRUD を叩く。
 // fetch をモックして決定的な応答を返す。
@@ -57,7 +68,7 @@ describe("useThreads — 初回ロード", () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(fetchMock()).toHaveBeenCalledWith("/api/threads");
+    expect(fetchMock()).toHaveBeenCalledWith("/api/threads", undefined);
     expect(result.current.threads).toHaveLength(1);
     expect(result.current.threads[0].title).toBe("Sample");
   });

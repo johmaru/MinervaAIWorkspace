@@ -1,7 +1,18 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook as rtlRenderHook, waitFor } from "@testing-library/react";
 import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
+import { createElement, type ReactNode } from "react";
 import { useFolders } from "@/hooks/useFolders";
+import { I18nProvider } from "@/components/I18nProvider";
+
+const wrapper = ({ children }: { children: ReactNode }) => createElement(I18nProvider, null, children);
+function renderHook<T>(callback: () => T) {
+  return rtlRenderHook(callback, { wrapper });
+}
 
 // useFolders は /api/folders の CRUD を叩く。fetch をモックして決定的な応答を返す。
 
@@ -45,7 +56,7 @@ describe("useFolders — 初回ロード", () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(fetchMock()).toHaveBeenCalledWith("/api/folders");
+    expect(fetchMock()).toHaveBeenCalledWith("/api/folders", undefined);
     expect(result.current.folders).toHaveLength(1);
     expect(result.current.folders[0].name).toBe("仕事");
   });

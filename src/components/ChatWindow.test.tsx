@@ -1,5 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
 import type { ChatMessage } from "@/hooks/useChat";
 import { ChatWindow } from "@/components/ChatWindow";
 import { I18nProvider } from "@/components/I18nProvider";
@@ -139,8 +143,9 @@ describe("ChatWindow — threadId がない状態", () => {
     fireEvent.change(ta, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "メッセージを送信" }));
     await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
+    mockState.thread = mockThread({ id: "t-new" });
     rerender(<I18nProvider><ChatWindow threadId="t-new" onCreateThread={onCreateThread} /></I18nProvider>);
-    await waitFor(() => expect(send).toHaveBeenCalledWith("hello"));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("hello", {}));
   });
 
   it("onCreateThread が失敗すると send は呼ばれない", async () => {
@@ -288,19 +293,23 @@ describe("ChatWindow — メッセージ描画", () => {
     expect(screen.getByText("どうも")).toBeInTheDocument();
   });
 
-  it("assistant の thinking 部分は折りたためる思考ブロック内に表示", () => {
+  it("assistant の thinking 部分は折りたためる思考ブロック内に表示", async () => {
     mockState.messages = [
       { id: "a1", role: "assistant", content: "<thinking>We need answer greeting in Japanese.</thinking>\nこんにちは！お元気ですか？", parentId: null },
     ];
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
-    expect(screen.getByText("We need answer greeting in Japanese.")).toBeInTheDocument();
     expect(screen.getByText("こんにちは！お元気ですか？")).toBeInTheDocument();
-    const thinking = screen.getByText("We need answer greeting in Japanese.").closest("details");
-    expect(thinking).toBeInTheDocument();
-    expect(thinking).not.toHaveAttribute("open");
+    // Accordion は閉じた状態でマウントされるため、クリックして開く。
+    const thinkingBtn = screen.getByRole("button", { name: "思考" });
+    fireEvent.click(thinkingBtn);
+    await waitFor(() => {
+      expect(screen.getByText("We need answer greeting in Japanese.")).toBeInTheDocument();
+    });
+    const region = screen.getByLabelText("思考内容");
+    expect(region).toBeInTheDocument();
   });
 
-  it("thinking フィールドがあるとき折りたたみ思考ブロックとして表示", () => {
+  it("thinking フィールドがあるとき折りたたみ思考ブロックとして表示", async () => {
     mockState.messages = [
       {
         id: "a2",
@@ -311,14 +320,18 @@ describe("ChatWindow — メッセージ描画", () => {
       },
     ];
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
-    expect(screen.getByText("User said こんにちは. Respond friendly in Japanese.")).toBeInTheDocument();
     expect(screen.getByText("こんにちは！お元気ですか？")).toBeInTheDocument();
-    const thinking = screen.getByText("User said こんにちは. Respond friendly in Japanese.").closest("details");
-    expect(thinking).toBeInTheDocument();
-    expect(thinking).not.toHaveAttribute("open");
+    // Accordion は閉じた状態でマウントされるため、クリックして開く。
+    const thinkingBtn = screen.getByRole("button", { name: "思考" });
+    fireEvent.click(thinkingBtn);
+    await waitFor(() => {
+      expect(screen.getByText("User said こんにちは. Respond friendly in Japanese.")).toBeInTheDocument();
+    });
+    const region = screen.getByLabelText("思考内容");
+    expect(region).toBeInTheDocument();
   });
 
-  it("デュアルモデル詳細を折りたたみで表示", () => {
+  it("デュアルモデル詳細を折りたたみで表示", async () => {
     mockState.messages = [
       {
         id: "a-dual",
@@ -342,8 +355,13 @@ describe("ChatWindow — メッセージ描画", () => {
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText("統合結論です。")).toBeInTheDocument();
     expect(screen.getByText("デュアルモデル詳細")).toBeInTheDocument();
-    expect(screen.getByText("Aの回答")).toBeInTheDocument();
-    expect(screen.getByText("Bのレビュー")).toBeInTheDocument();
+    // Accordion は閉じた状態でマウントされるため、クリックして開く。
+    const dualBtn = screen.getByRole("button", { name: "デュアルモデル詳細" });
+    fireEvent.click(dualBtn);
+    await waitFor(() => {
+      expect(screen.getByText("Aの回答")).toBeInTheDocument();
+      expect(screen.getByText("Bのレビュー")).toBeInTheDocument();
+    });
   });
 
   it("error があるときエラー文を表示", () => {

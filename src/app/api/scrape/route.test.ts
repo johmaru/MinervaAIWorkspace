@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/auth-guards", () => ({
+  getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id" }),
+}));
 import { db } from "@/db";
 import { pages, pageEmbeddings } from "@/db/schema";
 import { eq } from "drizzle-orm";

@@ -19,7 +19,7 @@ Next.js 16 (App Router, Turbopack) + Bun
 ├── src/components/      # React 19 (ChatWindow, Sidebar, Markdown, etc.)
 ├── src/hooks/           # useChat, useThreads (状態管理 + SSE パース)
 ├── src/lib/             # llm.ts (OpenAI SDK), embed.ts (transformers.js)
-├── src/db/              # Drizzle ORM + PostgreSQL + pgvector
+├── src/db/              # Drizzle ORM + better-sqlite3 (SQLite)
 └── Docker               | Bun → Next.js build → runner stage
 ```
 
@@ -280,6 +280,155 @@ try {
 
 ---
 
+### 12. Vitest テスト環境の DB マイグレーション競合
+
+**症状**: `bun run test` で `SqliteError: no such table: users` または `table 'accounts' already exists` が発生。
+
+**原因**:
+- `vitest.setup.ts` が DB マイグレーションを実行しない（`predev` の `drizzle-kit migrate` のみ）。
+- `:memory:` DB は `openDatabase` の `fileMustExist` プローブで throw → corruption 警告。
+- `process.pid` ベースの DB ファイルは複数 worker で共有され、migrate が再実行されて "table already exists" になる。
+
+**修正** (`vitest.setup.ts`):
+1. `DATABASE_URL` に `VITEST_WORKER_ID` を含めて worker ごとに固有の DB ファイルを作成。
+2. ファイル先頭で `DATABASE_URL` を設定（静的 import の hoist より前）。
+3. `@/db` と `migrate` は動的 `await import()` で読み込む（hoist 回避）。
+4. `globalThis.__umanschatTestDbReady` ガードで同一 worker 内の再マイグレーションを防止。
+5. 共有テストユーザー（`test-user-id`）をマイグレーション後に作成（FK 制約対応）。
+
+```ts
+import { tmpdir } from "node:os";
+import { readFileSync, unlinkSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("/app/data/")) {
+  const workerId = process.env.VITEST_WORKER_ID ?? "0";
+  process.env.DATABASE_URL = join(tmpdir(), `umanschat-test-${process.pid}-${workerId}.db`);
+  try { unlinkSync(process.env.DATABASE_URL); } catch { /* 初回 */ }
+}
+// ... .env 読み込み ...
+const globalForTestSetup = globalThis as unknown as { __umanschatTestDbReady?: boolean };
+if (!globalForTestSetup.__umanschatTestDbReady) {
+  const { db } = await import("@/db");
+  const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
+  migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
+  const { users } = await import("@/db/schema");
+  await db.insert(users).values({ id: "test-user-id", nickname: "tester", email: "t@example.com" }).onConflictDoNothing();
+  globalForTestSetup.__umanschatTestDbReady = true;
+}
+```
+
+---
+
+### 13. next-auth headers() がテストで throw する
+
+**症状**: `Error: headers was called outside a request scope`
+
+**原因**: `getSessionUser()` が `auth()` → `headers()` を呼ぶ。テスト環境では Next.js request store がない。
+
+**修正**: テストファイルに `vi.mock("@/lib/auth-guards")` を追加。
+
+```ts
+vi.mock("@/lib/auth-guards", () => ({
+  getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id" }),
+}));
+```
+
+**注意**: `chat/route` を import するテスト（`instruction.test.ts` 等）は `next/server` の `after()` も mock が必要。
+
+---
+
+### 14. jsdom が HTMLElement.scrollTo を実装していない
+
+**症状**: `TypeError: el.scrollTo is not a function` （ChatWindow の自動スクロール）
+
+**修正** (`vitest.setup.ts`):
+```ts
+if (typeof HTMLElement !== "undefined" && !HTMLElement.prototype.scrollTo) {
+  HTMLElement.prototype.scrollTo = function () {};
+}
+```
+
+---
+
+### 15. I18nProvider 初回レンダーが en で日本語アサーションが失敗する
+
+**症状**: `getByText("日本語ラベル")` が失敗。`I18nProvider` の `useState(DEFAULT_LOCALE)` が `en` で初期化されるため。
+
+**修正**: テストファイルに `vi.mock("@/lib/i18n/types")` を追加して `DEFAULT_LOCALE` を `ja` に上書き。
+
+```ts
+vi.mock("@/lib/i18n/types", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/i18n/types")>();
+  return { ...actual, DEFAULT_LOCALE: "ja" as const };
+});
+```
+
+**注意**:
+- `vi.mock` は hoist されるため、component import より前に評価される。
+- `beforeEach` に `localStorage.setItem("umanschat-locale", "ja")` も追加（useEffect 復元整合性）。
+- Hook テスト（`.ts` ファイル）は `I18nProvider` wrapper が必要。JSX が使えないため `createElement` を使用:
+```ts
+import { createElement, type ReactNode } from "react";
+import { I18nProvider } from "@/components/I18nProvider";
+const wrapper = ({ children }: { children: ReactNode }) => createElement(I18nProvider, null, children);
+// renderHook を alias して wrapper を自動適用
+import { renderHook as rtlRenderHook } from "@testing-library/react";
+function renderHook<T>(callback: () => T) {
+  return rtlRenderHook(callback, { wrapper });
+}
+```
+
+---
+
+### 16. Accordion コンポーネントのテスト（AnimatePresence exit animation）
+
+**症状**: トグルクリック後に `queryByPlaceholderText(...).not.toBeInTheDocument()` が失敗。`AnimatePresence` の exit animation 中も DOM に残るため。
+
+**修正**: `await waitFor()` で exit 完了を待つ。
+```ts
+fireEvent.click(btn); // close
+await waitFor(() => {
+  expect(screen.queryByPlaceholderText("...")).not.toBeInTheDocument();
+});
+```
+
+**注意**: `Accordion` は `defaultOpen=false` でマウントされる。内容を確認するにはクリックで開く必要がある。`closest("details")` は使えない（`Accordion` は `<details>` ではなく `<button>` + `AnimatePresence`）。
+
+---
+
+### 17. Route Handler テストで日本語ステータスメッセージが期待と不一致
+
+**症状**: `expect(lastStatus.data.label).toContain("Web検索で結果が見つかりませんでした")` が失敗。実際は英語。
+
+**原因**: `getRequestLocale(req)` が Cookie なしで `DEFAULT_LOCALE = "en"` にフォールバック。
+
+**修正**: テストの Request helper に locale cookie を追加:
+```ts
+headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
+```
+
+---
+
+### 18. useFolders の error が成功後にクリアされない
+
+**症状**: create/update/remove 失敗後に成功すると、`error` が `null` にならない。
+
+**原因**: `useFolders` の `create`/`update`/`remove` が成功時に `setError(null)` を呼んでいない（`useThreads.move` は呼んでいる）。
+
+**修正**: 成功パスに `setError(null)` を追加。
+
+---
+
+### 19. folder.instruction が chat route に結合されない
+
+**症状**: `instruction.test.ts` が 404 または systemContent に folder instruction が含まれない。
+
+**原因**: `chat/route.ts` が `folders` テーブルの `instruction` カラムを読んでいなかった。
+
+**修正**: `chat/route.ts` で `thread.folderId` 経由で `folders.instruction` を lookup（`folders.userId === user.id` で所有権チェック）。空白のみは trim で除外。`systemContent` の先頭に結合。
+
+---
 ## デバッグの基本手順
 
 1. **症状を再現** — ブラウザまたは curl で確実に再現
@@ -303,11 +452,17 @@ try {
 | `Dockerfile` | ビルドステージ、sharp 削除 |
 | `.dockerignore` | node_modules 上書き防止 |
 | `docker-compose.yml` | env 変数、ポートマッピング |
+| `src/lib/i18n/types.ts` | DEFAULT_LOCALE, LOCALE_STORAGE_KEY |
+| `src/lib/auth-guards.ts` | getSessionUser (next-auth headers) |
+| `src/hooks/useFolders.ts` | フォルダ CRUD、error クリア |
+| `src/components/ui/motion.tsx` | Accordion, AnimatePresence |
+| `vitest.setup.ts` | DB migration, test user, scrollTo polyfill |
+| `vitest.config.mts` | threads pool, next/server alias |
 
 ## 環境変数
 
 ```
-DATABASE_URL=postgres://umans:umans@db:5432/umanschat
+DATABASE_URL=umanschat.db
 LLM_BASE_URL=https://api.code.umans.ai/v1
 LLM_API_KEY=sk-...
 LLM_MODEL=umans-glm-5.2
