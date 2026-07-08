@@ -1,6 +1,6 @@
 # UmansChat
 
-A self-hosted, open-source AI workspace for high-resource OpenAI-compatible providers (UmansAI, OpenAI, vLLM, Ollama). Combines ChatGPT-like conversations with branching threads, semantic memory, web knowledge ingestion, MCP tools, external connections, multi-model workflows, and reusable skills.
+A self-hosted, open-source AI workspace for high-resource OpenAI-compatible providers (UmansAI, OpenAI, vLLM, Ollama). Combines ChatGPT-like conversations with branching threads, semantic memory, web knowledge ingestion, MCP tools, external connections, multi-model workflows, reusable skills, and tone personalization.
 
 [日本語 / Japanese](./README.ja.md)
 
@@ -32,6 +32,12 @@ A self-hosted, open-source AI workspace for high-resource OpenAI-compatible prov
 - **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
 - **Connections (Notion)** — connect your Notion account via OAuth; the LLM calls `notion_search`, `notion_get_page`, and `notion_get_blocks` tools during chat to find and read Notion content; enabled per-thread via the ＋ menu
 - **Account authentication** — Auth.js v5 with Credentials (email/password) and optional Google OAuth; first Docker launch requires account creation, then login; each user's data is isolated
+- **Personalization** — per-user style presets (standard/polite/casual/concise/detailed/academic/creative/technical) + warmth/energy/structure/emoji trait sliders (0-2). Adjusts LLM tone system-wide. Disabled by default; configure in Settings → Personalization.
+- **Skills system** — reusable procedural skills with semantic RAG matching. 6 kinds (workflow/bugfix/project_rule/tool_usage/coding_pattern/debugging). Auto-extracted draft candidates from conversations (up to 3/turn with confidence + reason); approve, edit-and-approve, or reject in the Skill Manager (sidebar 🛠️ button). Manual CRUD also supported. Skills track usage (success/failure counts, last-used).
+- **Time-range filter** — composer dropdown (None/day/week/month/year) that narrows memory, web-knowledge, skill RAG retrieval, and web search results to the selected period.
+- **Folder-level instructions & memory scope** — folders support a per-folder system prompt (applies to all threads in the folder) and a memory scope toggle: `global` (all threads) or `folder` (only threads in the same folder).
+- **Reasoning display** — when a model emits thinking tokens, they appear in a collapsible "Thinking" block above the answer; inline `<thinking>` tags are also extracted and rendered.
+- **Rich Markdown** — KaTeX math rendering (`$...$` inline, `$$...$$` block), syntax-highlighted code blocks with copy-to-clipboard, GFM tables/strikethrough/task lists.
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
 
 ## Architecture
@@ -307,6 +313,10 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
 - **Global system instructions** — open Settings → AI & Models to create, edit, and delete named system instructions. Select one as your default; it applies to all threads unless a thread overrides it. In thread settings, pick a different instruction per-thread.
 - **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories.
+- **Personalization** — open Settings → Personalization. Pick a style preset (or "None" to disable). Adjust the 4 trait sliders (warmth, energy, structure, emoji; 0-2). Changes apply to all new messages immediately — no restart needed.
+- **Skill Manager** — click 🛠️ in the sidebar. **Active Skills** tab: edit name/content/kind/trigger/tags, archive. **Draft Candidates** tab: review LLM-proposed skills (with confidence score + reason), approve as-is, edit-then-approve, or reject. **Archived** tab: restore archived skills. Skills are matched by cosine similarity to the conversation and injected as context.
+- **Time-range filter** — use the dropdown in the composer (next to ⚡) to limit memory/knowledge/skill retrieval and web search to a recent time window. "None" searches all history.
+- **Folder settings** — right-click a folder → Settings (or create a new folder). Set a folder-level instruction (system prompt for all threads in the folder) and memory scope (global = all threads, folder = only threads in this folder).
 
 ## Database Migrations
 
