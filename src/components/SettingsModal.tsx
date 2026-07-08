@@ -48,6 +48,9 @@ type SettingsResponse = {
   // Cloudflare Tunnel
   tunnelToken: string;
   hasTunnelToken: boolean;
+  // Security
+  registrationLocked: boolean;
+  allowedRegistrationIps: string;
   // Default global instruction selection (per user, DB)
   activeInstructionId: string | null;
   // Personalization (per user, DB)
@@ -56,6 +59,10 @@ type SettingsResponse = {
   personalEnergy: number;
   personalStructure: number;
   personalEmoji: number;
+  // Logging
+  logLevel: string;
+  logFileEnabled: string;
+  logFilePath: string;
 };
 
 type TorConnection = {
@@ -982,6 +989,44 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               )}
             </div>
           )}
+          {/* Logging */}
+          <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
+            <span className="block text-xs font-medium text-foreground">{t("settings.logSectionTitle")}</span>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.logLevelLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.logLevelHint")}</span>
+              </label>
+              <select
+                value={form.logLevel ?? "info"}
+                onChange={(e) => update("logLevel", e.target.value)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="debug">debug</option>
+                <option value="info">info</option>
+                <option value="warn">warn</option>
+                <option value="error">error</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.logFileEnabledLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.logFileEnabledHint")}</span>
+              </label>
+              <select
+                value={form.logFileEnabled ?? "true"}
+                onChange={(e) => update("logFileEnabled", e.target.value)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="true">{t("common.enabled")}</option>
+                <option value="false">{t("common.disabled")}</option>
+              </select>
+            </div>
+            <div>
+              <span className="block text-[10px] text-muted-foreground">{t("settings.logFilePathLabel")}</span>
+              <p className="break-all text-[10px] text-muted-foreground/70">{form.logFilePath}</p>
+            </div>
+          </div>
           </div>
           )}
           {activeTab === 3 && (
@@ -1091,6 +1136,35 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                       ? t("settings.placeholderUpdate")
                       : "eyJhIjoi..."
                   }
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+            </div>
+            {/* Security — registration lock + IP whitelist */}
+            <div className="mt-4 space-y-3 rounded-2xl bg-muted/30 p-4">
+              <h3 className="text-sm font-semibold text-foreground">{t("settings.security")}</h3>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.registrationLocked ?? false}
+                  onChange={(e) => update("registrationLocked", e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                />
+                <span>
+                  <span className="block text-sm text-foreground">{t("settings.registrationLocked")}</span>
+                  <span className="block text-xs text-muted-foreground">{t("settings.registrationLockedDesc")}</span>
+                </span>
+              </label>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-sm text-foreground">{t("settings.allowedIps")}</span>
+                  <span className="block text-xs text-muted-foreground">{t("settings.allowedIpsDesc")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.allowedRegistrationIps ?? ""}
+                  onChange={(e) => update("allowedRegistrationIps", e.target.value)}
+                  placeholder={t("settings.allowedIpsPlaceholder")}
                   className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
                 />
               </div>

@@ -1,16 +1,17 @@
 /**
- * Scrapling microservice クライアント。
- * Next.js Route Handler から `POST /scrape` を呼ぶ薄いラッパー。
+ * Scrapling microservice client.
+ * A thin wrapper that calls `POST /scrape` from Next.js Route Handlers.
  *
  * env SCRAPER_URL:
  * - Docker Compose: http://scraper:8000
- * - ローカル開発: http://localhost:8000
+ * - Local development: http://localhost:8000
  */
 import { db } from "@/db";
 import { pages } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { hashContent } from "@/lib/embed";
 import { upsertPage } from "@/lib/pageStore";
+import { logger } from "@/lib/logger";
 
 export type ScrapeResult = {
   url: string;
@@ -20,8 +21,8 @@ export type ScrapeResult = {
 };
 
 /**
- * microservice の /scrape を呼ぶ。
- * タイムアウトは microservice 側の Scrapling timeout(30s) + リトライ3回(各2s遅延) + 余裕で 45s。
+ * Calls the microservice's /scrape endpoint.
+ * Timeout is 45s: microservice-side Scrapling timeout(30s) + 3 retries (2s delay each) + margin.
  */
 export async function scrapeUrl(url: string): Promise<ScrapeResult> {
   const t0 = Date.now();
@@ -36,24 +37,24 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {
       error?: string;
     };
-    console.log(`[search-timing] scrapeUrl url=${url} duration=${Date.now() - t0}ms ok=false`);
+    logger.info("search-timing", "scrapeUrl", { url, duration: Date.now() - t0, ok: false });
     throw new Error(data.error || `scraper returned ${res.status}`);
   }
-  console.log(`[search-timing] scrapeUrl url=${url} duration=${Date.now() - t0}ms ok=true`);
+  logger.info("search-timing", "scrapeUrl", { url, duration: Date.now() - t0, ok: true });
   return (await res.json()) as ScrapeResult;
 }
 
 /**
- * SearXNG 経由の Web 検索結果1件（スクレイピング済み）。
+ * A single web search result via SearXNG (already scraped).
  */
 export type WebSearchResult = {
   url: string;
   title: string;
-  snippet: string; // SearXNG の content（検索結果サマリ）
+  snippet: string; // SearXNG content (search result summary)
   scraped: boolean;
-  content: string; // スクレイピングした本文（scraped=false は空）
+  content: string; // Scraped body text (empty when scraped=false)
   scrapeTitle: string;
-  raw_content: string; // SearXNG の content 全文（スクレイピング失敗時のフォールバック）
+  raw_content: string; // SearXNG full content (fallback when scraping fails)
 };
 
 export type WebSearchResponse = {
@@ -62,7 +63,7 @@ export type WebSearchResponse = {
 };
 
 /**
- * チャット上の参照元表示用。scrapeTitle があれば優先。
+ * For displaying source references in the chat UI. Uses scrapeTitle if available.
  */
 export type SourceInfo = {
   url: string;
@@ -71,8 +72,8 @@ export type SourceInfo = {
 };
 
 /**
- * microservice の /search を呼ぶ（SearXNG 検索 → 上位 URL をスクレイピング）。
- * タイムアウトは SearXNG 検索(20s) + スクレイピング5件並列(30s) + 余裕で 60s。
+ * Calls the microservice's /search endpoint (SearXNG search → scrape top URLs).
+ * Timeout is 60s: SearXNG search(20s) + 5 parallel scrapes(30s) + margin.
  */
 export async function searchWeb(
   query: string,
@@ -90,12 +91,12 @@ export async function searchWeb(
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {
       error?: string;
     };
-    console.log(`[search-timing] searchWeb query=${query} duration=${Date.now() - t0}ms ok=false`);
+    logger.info("search-timing", "searchWeb", { query, duration: Date.now() - t0, ok: false });
     throw new Error(data.error || `search failed (${res.status})`);
   }
   const response = (await res.json()) as WebSearchResponse;
 
-  // DB キャッシュで本文を補完: scraped=false または content 空の結果を pages テーブルで補完
+  // Supplement body text from DB cache: fill in results where scraped=false or content is empty using the pages table
   for (const r of response.results) {
     if (!r.scraped || !r.content) {
       const urlHash = hashContent(r.url);
@@ -108,25 +109,25 @@ export async function searchWeb(
     }
   }
 
-  // 新規スクレイプ成功分を DB に保存（非同期、エラー無視、embed 走る）
+  // Save newly scraped results to DB (async, errors ignored, embed runs)
   for (const r of response.results) {
     if (r.scraped && r.content) {
       upsertPage(r.url, r.scrapeTitle || r.title, r.content).catch(() => {});
     }
   }
 
-  console.log(`[search-timing] searchWeb query=${query} duration=${Date.now() - t0}ms results=${response.results.length}`);
+  logger.info("search-timing", "searchWeb", { query, duration: Date.now() - t0, results: response.results.length });
   return response;
 }
 
 /**
- * URL を正規化。無効URLは空文字を返す。
- * - scheme は http/https のみ許可
- * - fragment 削除
- * - ルート URL 以外の末尾スラッシュ削除
+ * Normalizes a URL. Returns empty string for invalid URLs.
+ * - Only http/https schemes are allowed
+ * - Fragment is removed
+ * - Trailing slash is removed (except for root URLs)
  *
- * UI/API 入力バリデーション用。microservice 側でも正規化するため二重だが、
- * 無効URLで往復するコストを避けるため Next.js 側でも即時弾く。
+ * For UI/API input validation. The microservice also normalizes, so this is
+ * redundant, but it rejects invalid URLs on the Next.js side to avoid round-trip costs.
  */
 export function normalizeUrl(rawUrl: string): string {
   try {

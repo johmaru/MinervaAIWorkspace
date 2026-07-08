@@ -277,6 +277,9 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `DATABASE_URL`          | SQLite database file path                                          | `data/umanschat.db`                          |
 | `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
+| `LOG_LEVEL`             | Log threshold (`debug`/`info`/`warn`/`error`)                     | `info`                                               |
+| `LOG_FILE_ENABLED`      | Write logs to `data/logs/umanschat.log` (`true`/`false`; auto: exe→`true`, Docker→`false`) | auto                                   |
+| `LOG_FILE_MAX_SIZE`     | Max log file size in bytes before rotation (keeps one `.log.1` backup) | `5242880` (5MB)                                 |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
 | `NOTION_CLIENT_ID`       | Notion OAuth client ID (for Connections feature; see [Notion Connection Setup](#notion-connection-setup)) | — |
@@ -328,7 +331,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Semantic search** — search across all threads; results are ranked by cosine similarity.
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
 - **Tor** — toggle Tor in settings for anonymous scraping.
-- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
+- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, Tor options, and log level. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
 - **Global system instructions** — open Settings → AI & Models to create, edit, and delete named system instructions. Select one as your default; it applies to all threads unless a thread overrides it. In thread settings, pick a different instruction per-thread.
 - **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories.
 - **Personalization** — open Settings → Personalization. Pick a style preset (or "None" to disable). Adjust the 4 trait sliders (warmth, energy, structure, emoji; 0-2). Changes apply to all new messages immediately — no restart needed.

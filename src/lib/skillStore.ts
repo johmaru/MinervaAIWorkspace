@@ -3,14 +3,15 @@ import { db } from "@/db";
 import { skills, skillUsageEvents } from "@/db/schema";
 import { embedText } from "@/lib/embed";
 import { cosineSimilarity } from "@/lib/vectorSearch";
+import { logger } from "@/lib/logger";
 
 /**
- * スキル検索・注入 — ユーザー単位の再利用可能プロンプト。
+ * Skill search and injection — per-user reusable prompts.
  *
- * memories がスレッド単位の時限的文脈断片であるのに対し、
- * skills はユーザー横断の恒久的な persona / behavior / knowledge。
- * アプリ側 cosine 検索で関連スキルを検索し system message として注入する。
- * ユーザーが「〇〇スキルを使って」と指定すれば名前で直接適用。
+ * While memories are ephemeral context fragments per thread, skills are
+ * permanent cross-thread persona / behavior / knowledge.
+ * Searches for relevant skills via client-side cosine similarity and injects them as system messages.
+ * If the user says "use skill X", it is applied directly by name.
  */
 
 export type ScoredSkill = {
@@ -21,13 +22,13 @@ export type ScoredSkill = {
 };
 
 /**
- * クエリ文字列 + ユーザーID から関連スキルを検索。
+ * Searches for relevant skills by query string and user ID.
  *
- * 1. embedText(query, "query") でクエリベクトル化
- * 2. ユーザーの全スキルを取得
- * 3. アプリ側 cosine similarity で類似度計算
- * 4. similarity > 0.3 でフィルタ
- * 5. similarity 降順で top-limit を返す
+ * 1. Vectorize the query via embedText(query, "query")
+ * 2. Get all skills for the user
+ * 3. Compute cosine similarity client-side
+ * 4. Filter by similarity > 0.3
+ * 5. Return top-limit by similarity descending
  */
 export async function findRelevantSkills(
   query: string,
@@ -65,15 +66,15 @@ export async function findRelevantSkills(
 }
 
 /**
- * ユーザー入力から関連スキルを検索し system message として構築。
- * スキルが無い場合は null を返す（注入しない）。
+ * Searches for relevant skills from user input and builds them as a system message.
+ * Returns null if there are no skills (no injection).
  *
- * 手動スキル指定（Phase 4）:
- * ユーザーが「〇〇スキルを使って」「use 〇〇 skill」と入力した場合、
- * 名前で部分一致検索し、該当スキルを先頭に付与する。
+ * Manual skill specification (Phase 4):
+ * If the user enters "use skill X" or a Japanese skill-use phrase, a partial match
+ * search by name is performed and the matching skill is prepended.
  *
- * @param content ユーザー入力
- * @param userId スキル所有者
+ * @param content User input
+ * @param userId Skill owner
  */
 export async function buildSkillContext({
   content,
@@ -84,7 +85,7 @@ export async function buildSkillContext({
   userId: string;
   threadId?: string;
 }): Promise<{ role: "system"; content: string } | null> {
-  // 手動スキル名抽出: "〇〇スキルを使って" / "use 〇〇 skill"
+  // Manual skill name extraction: Japanese skill-use pattern / "use X skill"
   const nameMatch =
     content.match(/(.+?)スキルを使っ(?:て|え)/) ??
     content.match(/use\s+(.+?)\s+skill/i);
@@ -92,7 +93,7 @@ export async function buildSkillContext({
   if (nameMatch) {
     const name = nameMatch[1].trim();
     if (name) {
-      // 名前で部分一致検索。SQLite の LIKE はデフォルトで大文字小文字を区別しない。
+      // Partial match search by name. SQLite LIKE is case-insensitive by default.
       const pattern = `%${name.replace(/[%_]/g, "\\$&")}%`;
       const [found] = await db
         .select({ id: skills.id, name: skills.name, content: skills.content })
@@ -116,10 +117,10 @@ export async function buildSkillContext({
     }
   }
 
-  // セマンティック検索
+  // Semantic search
   const semantic = await findRelevantSkills(content, userId);
 
-  // 名前指定スキルを先頭に付与（重複除外）
+  // Prepend named skill (dedup)
   const seen = new Set<string>();
   const merged: ScoredSkill[] = [];
   if (namedSkill) {
@@ -133,7 +134,7 @@ export async function buildSkillContext({
     }
   }
 
-  // スキル使用ログ + lastUsedAt 更新（fire-and-forget）
+  // Skill usage log + lastUsedAt update (fire-and-forget)
   if (threadId) {
     const usageEntries = merged.map((s) => ({
       skillId: s.id,
@@ -144,12 +145,12 @@ export async function buildSkillContext({
     }));
     db.insert(skillUsageEvents)
       .values(usageEntries)
-        .catch((e) => console.error("[skill] usage log failed:", e));
+        .catch((e) => logger.error("skill", "usage log failed", { error: e instanceof Error ? e.message : String(e) }));
     for (const s of merged) {
       db.update(skills)
         .set({ lastUsedAt: new Date() })
         .where(eq(skills.id, s.id))
-        .catch((e) => console.error("[skill] lastUsedAt update failed:", e));
+        .catch((e) => logger.error("skill", "lastUsedAt update failed", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
   if (merged.length === 0) return null;

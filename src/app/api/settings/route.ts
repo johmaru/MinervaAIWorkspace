@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
 import { users, memories, pageEmbeddings, skills } from "@/db/schema";
@@ -10,6 +10,7 @@ import { getSessionUser } from "@/lib/auth-guards";
 import { resetEmbedPipeline, embedText } from "@/lib/embed";
 import { PERSONAL_STYLES } from "@/lib/personalization";
 import { resolveEnvPath, updateEnvContent } from "@/lib/envUtils";
+import { getLogFilePath } from "@/lib/logger";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -21,9 +22,9 @@ type EmbedModelBase = {
 };
 
 /**
- * 埋め込みモデルの候補。
- * provider: "local" = transformers.js（ONNX）/ "http" = Python embedder サービス
- * label はロケールに応じて t() で翻訳される。
+ * Embedding model candidates.
+ * provider: "local" = transformers.js (ONNX) / "http" = Python embedder service
+ * label is translated via t() according to locale.
  */
 const EMBED_MODEL_BASE: EmbedModelBase[] = [
   {
@@ -59,21 +60,22 @@ const EMBED_MODEL_BASE: EmbedModelBase[] = [
 ];
 
 /**
- * ロケールに応じた埋め込みモデル候補を返す。
- * label が翻訳される。テストからは EMBED_MODEL_BASE で構造検査可能。
+ * Returns embedding model candidates for the given locale.
+ * label is translated. Tests can inspect structure via EMBED_MODEL_BASE.
  */
 export function getEmbedModelOptions(locale: Locale) {
   return EMBED_MODEL_BASE.map((o) => ({ ...o, label: t(locale, o.labelKey) }));
 }
 
-/** テスト用: label 無しの構造 */
+/** Test-only: structure without label */
 export { EMBED_MODEL_BASE };
 
 /**
- * 現在の埋め込み次元を取得。
- * SQLite では embedding は JSON 配列（text 列）のため、次元は列型ではなく
- * 環境変数 EMBED_DIM から取得する。次元変更時は既存データをクリアする必要があるが、
- * 列の DDL は不要（text 列は任意次元の JSON を格納可能）。
+ * Get the current embedding dimension.
+ * In SQLite, embeddings are stored as JSON arrays (text columns), so the dimension
+ * comes from the EMBED_DIM environment variable rather than the column type.
+ * When the dimension changes, existing data must be cleared, but no column DDL
+ * is needed (text columns can store JSON of any dimension).
  */
 function getEmbedDim(): number {
   return Number(process.env.EMBED_DIM) || 1024;
@@ -81,16 +83,15 @@ function getEmbedDim(): number {
 
 
 
-
 /**
- * GET /api/settings — 現在の全設定 + 候補リストを返す。
+ * GET /api/settings — Returns all current settings + candidate lists.
  */
 export async function GET(req: Request) {
   const user = await getSessionUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
   const locale = getRequestLocale(req);
 
-  // ユーザー単位の設定を取得（DB）: 既定グローバルインストラクション + パーソナライズ
+  // Get per-user settings (DB): default global instruction + personalization
   const [userRow] = await db
     .select({
       activeInstructionId: users.activeInstructionId,
@@ -106,9 +107,9 @@ export async function GET(req: Request) {
   return Response.json({
     // LLM
     llmBaseUrl: process.env.LLM_BASE_URL || "",
-    // シークレットは平文で返さず、設定済みかどうかのみ返す。
-    // SettingsModal はユーザーが新しい値を入力した場合のみ llmApiKey を送信し、
-    // 未入力時は undefined を送ることで既存値を保持する。
+    // Do not return secrets in plaintext; return only whether they are set.
+    // SettingsModal sends llmApiKey only when the user enters a new value;
+    // when omitted, it sends undefined to preserve the existing value.
     llmApiKey: "",
     hasLlmApiKey: !!process.env.LLM_API_KEY,
     llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
@@ -121,36 +122,43 @@ export async function GET(req: Request) {
     embedModelOptions: getEmbedModelOptions(locale),
     dbVectorDim: getEmbedDim(),
     dbPageEmbeddingsDim: getEmbedDim(),
-    // Web 検索
+    // Web search
     webSearchModel: process.env.WEB_SEARCH_MODEL || "umans-qwen3.6-35b-a3b",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
     webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2,
     scraperUrl: process.env.SCRAPER_URL || "http://localhost:8000",
     searxngUrl: process.env.SEARXNG_URL || "http://localhost:8080",
-    // Tor プロキシ
+    // Tor proxy
     torProxy: process.env.TOR_PROXY || "",
     scrapeProxy: process.env.SCRAPE_PROXY || "",
-    // Database / 実行環境
+    // Database / runtime environment
     databaseUrl: process.env.DATABASE_URL || "",
     hostOs: process.env.HOST_OS || "",
     tz: process.env.TZ || "",
     // Notion OAuth
     notionClientId: process.env.NOTION_CLIENT_ID || "",
-    // シークレットは平文で返さず、設定済みかどうかのみ返す。
+    // Do not return secrets in plaintext; return only whether they are set.
     notionClientSecret: "",
     hasNotionClientSecret: !!process.env.NOTION_CLIENT_SECRET,
     authUrl: process.env.AUTH_URL || "http://localhost:3001",
-    // Cloudflare Tunnel — トークンは平文で返さず、設定済みかどうかのみ返す
+    // Cloudflare Tunnel — do not return token in plaintext; return only whether it is set
     tunnelToken: "",
     hasTunnelToken: !!process.env.TUNNEL_TOKEN,
-    // 既定グローバルインストラクション選択（ユーザー単位、DB）
+    // Security — registration lock + IP whitelist
+    registrationLocked: process.env.REGISTRATION_LOCKED === "true",
+    allowedRegistrationIps: process.env.ALLOWED_REGISTRATION_IPS || "",
+    // Default global instruction selection (per-user, DB)
     activeInstructionId: userRow?.activeInstructionId ?? null,
-    // パーソナライズ（ユーザー単位、DB）
+    // Personalization (per-user, DB)
     personalStyle: userRow?.personalStyle ?? null,
     personalWarmth: userRow?.personalWarmth ?? 1,
     personalEnergy: userRow?.personalEnergy ?? 1,
     personalStructure: userRow?.personalStructure ?? 1,
     personalEmoji: userRow?.personalEmoji ?? 1,
+    // Logging
+    logLevel: process.env.LOG_LEVEL || "info",
+    logFileEnabled: process.env.LOG_FILE_ENABLED || (existsSync("/var/run/docker.sock") ? "false" : "true"),
+    logFilePath: getLogFilePath(),
   });
 }
 
@@ -158,9 +166,9 @@ type SettingsBody = {
   // LLM
   llmBaseUrl?: string;
   llmApiKey?: string;
-  // 既定グローバルインストラクション選択（ユーザー単位、DB に保存）
+  // Default global instruction selection (per-user, saved to DB)
   activeInstructionId?: string | null;
-  // パーソナライズ（ユーザー単位、DB に保存）
+  // Personalization (per-user, saved to DB)
   personalStyle?: string | null;
   personalWarmth?: number;
   personalEnergy?: number;
@@ -173,18 +181,18 @@ type SettingsBody = {
   embedModel?: string;
   embedDim?: number;
   embedProvider?: string;
-  // Web 検索
+  // Web search
   webSearchModel?: string;
   webSearchMaxResults?: number;
   webSearchMaxRounds?: number;
   scraperUrl?: string;
   searxngUrl?: string;
-  // Tor プロキシ
+  // Tor proxy
   torProxy?: string;
   scrapeProxy?: string;
   // Database
   databaseUrl?: string;
-  // 実行環境
+  // Runtime environment
   hostOs?: string;
   tz?: string;
   // Notion OAuth
@@ -193,13 +201,19 @@ type SettingsBody = {
   authUrl?: string;
   // Cloudflare Tunnel
   tunnelToken?: string;
+  // Security
+  registrationLocked?: boolean;
+  allowedRegistrationIps?: string;
+  // Logging
+  logLevel?: string;
+  logFileEnabled?: string;
   applyMigration?: boolean;
 };
 
 /**
- * POST /api/settings — 全設定を .env に保存。
+ * POST /api/settings — Save all settings to .env.
  *
- * embedModel の次元が変わる場合は applyMigration=true で vector 列を再作成。
+ * If the embedModel dimension changes, pass applyMigration=true to recreate the vector column.
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -212,7 +226,7 @@ export async function POST(req: Request) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  // バリデーション
+  // Validation
   if (body.webSearchModel !== undefined && !/^[a-zA-Z0-9._-]+$/.test(body.webSearchModel)) {
     return new Response("webSearchModel must be alphanumeric (e.g. umans-coder, umans-glm-5.2)", { status: 400 });
   }
@@ -230,7 +244,7 @@ export async function POST(req: Request) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
 
-  // パーソナライズのバリデーション
+  // Personalization validation
   if (
     body.personalStyle !== undefined &&
     body.personalStyle !== null &&
@@ -246,11 +260,11 @@ export async function POST(req: Request) {
   const clampedEmoji = clampTrait(body.personalEmoji);
   const dbVectorDim = getEmbedDim();
 
-  // 新しい次元を決定
+  // Determine the new dimension
   const newDim = body.embedDim ?? dbVectorDim;
-  // SQLite では embedding は text（JSON 配列）のため、次元変更に列 DDL は不要。
-  // ただし異なるモデルのベクトル空間は互換しないため、次元が変わる場合は
-  // 既存の embedding データを全削除する必要がある。
+  // In SQLite, embeddings are stored as text (JSON arrays), so no column DDL is needed for dimension changes.
+  // However, different models' vector spaces are incompatible, so when the dimension changes,
+  // all existing embedding data must be deleted.
   const needsMigration = body.embedDim !== undefined && body.embedDim !== dbVectorDim;
 
   if (needsMigration && !body.applyMigration) {
@@ -267,15 +281,13 @@ export async function POST(req: Request) {
 
   let pipelineResetForMigration = false;
   if (needsMigration && body.applyMigration) {
-    // embedding 列は text（JSON）なので DDL 不要。次元が変わるため
-    // 既存ベクトルデータを全削除（異なるモデル空間のベクトルは互換しない）。
-    // memories と page_embeddings は会話から再生成可能なため削除。
-    await db.delete(memories);
-    await db.delete(pageEmbeddings);
-    // skills はユーザー作成の永続プロンプトなので削除せず再 embed する。
-    // embedText は新しい EMBED_MODEL/EMBED_DIM を参照するため、
-    // resetEmbedPipeline() の後に呼ぶ必要があるが、ここではまだ env 更新前。
-    // そのため process.env を先に更新してから再 embed する。
+    // The embedding column is text (JSON), so no DDL is needed. Since the dimension changes,
+    // delete all existing vector data (vectors from different model spaces are incompatible).
+    // memories and page_embeddings can be regenerated from conversations, so they are deleted.
+    // skills are user-created persistent prompts, so they are not deleted but re-embedded.
+    // embedText references the new EMBED_MODEL/EMBED_DIM, so it must be called after
+    // resetEmbedPipeline(), but here the env is not yet updated.
+    // Therefore, update process.env first, then re-embed.
     for (const [k, v] of Object.entries({
       EMBED_MODEL: body.embedModel ?? process.env.EMBED_MODEL ?? "",
       EMBED_DIM: String(body.embedDim ?? process.env.EMBED_DIM ?? "1024"),
@@ -292,7 +304,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // 既定のグローバルインストラクション選択を DB に保存
+  // Save the default global instruction selection to the DB
   if (body.activeInstructionId !== undefined) {
     await db
       .update(users)
@@ -300,7 +312,7 @@ export async function POST(req: Request) {
       .where(eq(users.id, user.id));
   }
 
-  // パーソナライズ設定を DB に保存（ユーザー単位）
+  // Save personalization settings to the DB (per-user)
   if (
     body.personalStyle !== undefined ||
     body.personalWarmth !== undefined ||
@@ -320,7 +332,7 @@ export async function POST(req: Request) {
       .where(eq(users.id, user.id));
   }
 
-  // .env に全設定を保存
+  // Save all settings to .env
   try {
     const envPath = resolveEnvPath();
     let envContent = "";
@@ -345,29 +357,35 @@ export async function POST(req: Request) {
     if (body.scraperUrl !== undefined) updates.SCRAPER_URL = body.scraperUrl;
     if (body.searxngUrl !== undefined) updates.SEARXNG_URL = body.searxngUrl;
     if (body.webSearchModel !== undefined) updates.WEB_SEARCH_MODEL = body.webSearchModel;
-    // Tor プロキシ
+    // Tor proxy
     if (body.torProxy !== undefined) updates.TOR_PROXY = body.torProxy;
     if (body.scrapeProxy !== undefined) updates.SCRAPE_PROXY = body.scrapeProxy;
     // Database
     if (body.databaseUrl !== undefined) updates.DATABASE_URL = body.databaseUrl;
-    // 実行環境
+    // Runtime environment
     if (body.hostOs !== undefined) updates.HOST_OS = body.hostOs;
     if (body.tz !== undefined) updates.TZ = body.tz;
     // Notion OAuth
     if (body.notionClientId !== undefined) updates.NOTION_CLIENT_ID = body.notionClientId;
     if (body.notionClientSecret !== undefined) updates.NOTION_CLIENT_SECRET = body.notionClientSecret;
     if (body.authUrl !== undefined) updates.AUTH_URL = body.authUrl;
-    // Cloudflare Tunnel — トークンは空文字列の場合は更新しない（既存値を保持）
+    // Cloudflare Tunnel — do not update token when empty string (preserve existing value)
     if (body.tunnelToken !== undefined && body.tunnelToken !== "") updates.TUNNEL_TOKEN = body.tunnelToken;
+    // Security
+    if (body.registrationLocked !== undefined) updates.REGISTRATION_LOCKED = body.registrationLocked ? "true" : "false";
+    if (body.allowedRegistrationIps !== undefined) updates.ALLOWED_REGISTRATION_IPS = body.allowedRegistrationIps;
+    // Logging
+    if (body.logLevel !== undefined) updates.LOG_LEVEL = body.logLevel;
+    if (body.logFileEnabled !== undefined) updates.LOG_FILE_ENABLED = body.logFileEnabled;
     envContent = updateEnvContent(envContent, updates);
 
     writeFileSync(envPath, envContent);
 
-    // process.env にも反映
+    // Also reflect in process.env
     for (const [key, value] of Object.entries(updates)) {
       process.env[key] = value;
     }
-    // LLM 関連設定が変更された場合はプロセス内キャッシュを無効化（再起動不要で反映）
+    // Invalidate in-process cache when LLM-related settings change (no restart needed)
     const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS"].some(
       (k) => k in updates,
     );
@@ -375,17 +393,17 @@ export async function POST(req: Request) {
       resetUmansModelsCache();
       resetToolProbeCache();
     }
-    // Embedding 関連設定が変更された場合は transformers.js パイプラインキャッシュを無効化
-    // （EMBED_MODEL 変更で異なるモデルをロードする必要があるため）
+    // Invalidate transformers.js pipeline cache when embedding-related settings change
+    // (EMBED_MODEL change requires loading a different model)
     const embedChanged = ["EMBED_MODEL", "EMBED_DIM", "EMBED_PROVIDER"].some(
       (k) => k in updates,
     );
     if (embedChanged && !pipelineResetForMigration) {
       resetEmbedPipeline();
     }
-    // scraper の設定を動的更新（SCRAPE_PROXY / SCRAPE_TIMEOUT 変更時）
-    // scraper コンテナは compose 起動時に環境変数が固定されるため、
-    // /config エンドポイント経由でプロセス内変数を書き換えて即時反映する
+    // Dynamically update scraper settings (when SCRAPE_PROXY / SCRAPE_TIMEOUT change)
+    // The scraper container's environment variables are fixed at compose startup,
+    // so in-process variables are rewritten via the /config endpoint for immediate effect
     const scraperChanged = ["SCRAPE_PROXY", "SCRAPE_TIMEOUT"].some((k) => k in updates);
     if (scraperChanged) {
       const scraperBase = process.env.SCRAPER_URL || "http://localhost:8000";
@@ -397,8 +415,8 @@ export async function POST(req: Request) {
           scrape_timeout: Number(process.env.SCRAPE_TIMEOUT) || 30,
         }),
       }).catch(() => {
-        // scraper が一時的にダウンしても .env / process.env は更新済み。
-        // 次回起動時に compose が .env から読み込むため永続化は保証される
+        // Even if scraper is temporarily down, .env / process.env are already updated.
+        // Persistence is guaranteed since compose reads from .env on next startup.
       });
     }
   } catch (err) {

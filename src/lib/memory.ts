@@ -3,16 +3,17 @@ import { and, asc, eq, isNull, inArray, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { memories, threads, folders } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
+import { logger } from "@/lib/logger";
 
 /**
- * 記憶システム — アシスタント応答完了後に会話を要約・分類して保存。
+ * Memory system — summarizes and classifies conversations after assistant responses, then stores them.
  *
- * フロー:
- * 1. generateMemories: 直近ターンを LLM に渡し fact/working で分類 + new/replace/merge を判定。
- * 2. findRelevantMemories (memoryStore.ts): 次回送信時に pgvector 検索 → similarity + recency top-5。
- * 3. chat route が system context に注入。
+ * Flow:
+ * 1. generateMemories: passes recent turns to the LLM, classifies as fact/working + determines new/replace/merge.
+ * 2. findRelevantMemories (memoryStore.ts): on next send, searches via cosine similarity → similarity + recency top-5.
+ * 3. chat route injects into system context.
  *
- * replace/merge で古い記憶は suppressedAt で論理削除（物理削除しない）。
+ * On replace/merge, old memories are soft-deleted via suppressedAt (not physically deleted).
  */
 
 export type MemoryKind = "fact" | "working";
@@ -22,9 +23,9 @@ export type ExtractedMemory = {
   content: string;
   importance?: number;
   action: "new" | "replace" | "merge";
-  /** replace/merge 時、既存記憶の content（類似検索で特定用） */
+  /** On replace/merge: the existing memory's content (for similarity-based lookup) */
   targetContent?: string;
-  /** replace/merge 時、既存記憶の ID（直接指定用。targetId 優先） */
+  /** On replace/merge: the existing memory's ID (for direct specification. targetId takes precedence) */
   targetId?: string;
 };
 
@@ -49,8 +50,8 @@ Return ONLY valid JSON (no markdown fences):
 [{"kind": "fact"|"working", "content": "...", "importance": 0.0-1.0, "action": "new"|"replace"|"merge", "targetId": "... (existing memory ID, for replace/merge)", "targetContent": "... (fallback: exact content string, for replace/merge)"}]`;
 
 /**
- * generateMemories で LLM に送る messages を構築。
- * 直近ターン + 既存アクティブ記憶リストを提示。
+ * Builds the messages to send to the LLM in generateMemories.
+ * Presents recent turns + the list of existing active memories.
  */
 function buildExtractionMessages(
   recentTurns: { role: string; content: string }[],
@@ -77,12 +78,12 @@ function buildExtractionMessages(
 }
 
 /**
- * LLM の生レスポンスから ExtractedMemory 配列をパース。
- * 不正な場合は null を返し、呼び出し元でスキップ。
+ * Parses ExtractedMemory array from the LLM's raw response.
+ * Returns null on invalid input; the caller skips it.
  */
 function parseExtraction(raw: string | null | undefined): ExtractedMemory[] | null {
   if (!raw || !raw.trim()) return null;
-  // markdown コードフェンスを除去
+  // Remove markdown code fences
   const stripped = raw
     .trim()
     .replace(/^```(?:json)?\s*\n?/i, "")
@@ -116,10 +117,10 @@ function parseExtraction(raw: string | null | undefined): ExtractedMemory[] | nu
 }
 
 /**
- * targetId または targetContent で既存アクティブ記憶を検索。
- * targetId があれば ID で直接検索（スコープ問わず）。
- * 無ければ targetContent で完全一致検索（threadId スコープ）。
- * 見つからなければ null。
+ * Searches for an existing active memory by targetId or targetContent.
+ * If targetId is present, searches directly by ID (any scope).
+ * Otherwise, searches by exact content match (within threadId scope).
+ * Returns null if not found.
  */
 async function findExistingMemory(
   threadId: string,
@@ -151,8 +152,8 @@ async function findExistingMemory(
 }
 
 /**
- * 既存記憶の content を LLM で再統合。
- * mergeContents は LLM 呼び出し1回で統合テキストを返す。
+ * Re-integrates an existing memory's content via the LLM.
+ * mergeContents returns the merged text in a single LLM call.
  */
 async function mergeContents(
   existing: string,
@@ -179,17 +180,17 @@ async function mergeContents(
 }
 
 /**
- * 直近ターンから記憶を抽出し memories テーブルに保存。
+ * Extracts memories from recent turns and stores them in the memories table.
  *
- * - LLM が JSON を返さない → スキップ（console.error のみ）
- * - targetContent で既存記憶が見つからない → new にフォールバック
- * - embed が空配列（モデルロード中など）→ 記憶保存スキップ
- * - replace/merge で複数ヒット → 最も古い1件を対象
+ * - LLM does not return JSON → skip (logger.error only)
+ * - Existing memory not found by targetContent → fall back to new
+ * - Embed returns empty array (e.g. model loading) → skip memory storage
+ * - replace/merge with multiple hits → target the oldest one
  *
- * @param threadId 対象スレッド
- * @param recentTurns 直近の会話（user + assistant ペア）
- * @param llm LLM クライアント（テスト注入可）
- * @param model LLM モデル id
+ * @param threadId Target thread
+ * @param recentTurns Recent conversation (user + assistant pairs)
+ * @param llm LLM client (injectable for tests)
+ * @param model LLM model id
  */
 export async function generateMemories(
   threadId: string,
@@ -198,12 +199,12 @@ export async function generateMemories(
   model: string,
   userId?: string,
 ): Promise<void> {
-  // user/assistant ペアが無い場合は早期リターン
+  // Early return if no user/assistant pair
   const hasUser = recentTurns.some((t) => t.role === "user");
   const hasAssistant = recentTurns.some((t) => t.role === "assistant");
   if (!hasUser || !hasAssistant || recentTurns.length === 0) return;
 
-  // threads から folderId と userId を取得
+  // Get folderId and userId from threads
   const [thread] = await db
     .select({ folderId: threads.folderId, userId: threads.userId })
     .from(threads)
@@ -211,17 +212,17 @@ export async function generateMemories(
   const folderId = thread?.folderId ?? null;
   const effectiveUserId = userId ?? thread?.userId;
 
-  // 既存アクティブ記憶を取得（LLM へ提示用）
-  // スコープ: folder.memoryScope に従い同一フォルダ or 全スレッド横断
+  // Get existing active memories (to present to the LLM)
+  // Scope: same folder or cross-thread, depending on folder.memoryScope
   let existing: { id: string; content: string }[];
   if (folderId) {
-    // フォルダの memoryScope を取得
+    // Get the folder's memoryScope
     const [folder] = await db
       .select({ memoryScope: folders.memoryScope })
       .from(folders)
       .where(eq(folders.id, folderId));
     if (folder?.memoryScope === "folder") {
-      // 同一フォルダ内の記憶を取得
+      // Get memories within the same folder
       existing = await db
         .select({ id: memories.id, content: memories.content })
         .from(memories)
@@ -229,7 +230,7 @@ export async function generateMemories(
         .orderBy(desc(memories.updatedAt))
         .limit(20);
     } else {
-      // global: 同一ユーザーの全スレッド横断
+      // global: cross-thread for the same user
       const threadIds = effectiveUserId
         ? (await db
             .select({ id: threads.id })
@@ -250,7 +251,7 @@ export async function generateMemories(
         .limit(20);
     }
   } else {
-    // フォルダなし: 同一スレッドのみ（従来通り）
+    // No folder: same thread only (conventional behavior)
     existing = await db
       .select({ id: memories.id, content: memories.content })
       .from(memories)
@@ -258,7 +259,7 @@ export async function generateMemories(
       .orderBy(asc(memories.createdAt));
   }
 
-  // LLM で記憶抽出
+  // Extract memories via LLM
   let extracted: ExtractedMemory[] | null;
   try {
     const completion = await llm.chat.completions.create({
@@ -267,7 +268,7 @@ export async function generateMemories(
     });
     extracted = parseExtraction(completion.choices[0]?.message?.content);
   } catch (err) {
-    console.error("[memory] LLM extraction failed:", err);
+    logger.error("memory", "LLM extraction failed", { error: err instanceof Error ? err.message : String(err) });
     return;
   }
 
@@ -285,7 +286,7 @@ export async function generateMemories(
             .set({ suppressedAt: new Date(), updatedAt: new Date() })
             .where(eq(memories.id, target.id));
         }
-        // target が見つからなくても新記憶として保存（フォールバック）
+        // Even if target not found, save as a new memory (fallback)
       } else if (mem.action === "merge" && (mem.targetId || mem.targetContent)) {
         const target = await findExistingMemory(threadId, mem.targetContent, mem.targetId);
         if (target) {
@@ -293,7 +294,7 @@ export async function generateMemories(
             existing.find((m) => m.id === target.id)?.content ?? mem.targetContent ?? "";
           const mergedContent = await mergeContents(existingContent, mem.content, llm, model);
           const vector = await embedText(mergedContent, "document");
-          if (vector.length === 0) continue; // embed 失敗 → スキップ
+          if (vector.length === 0) continue; // embed failed → skip
           await db
             .update(memories)
             .set({
@@ -304,17 +305,17 @@ export async function generateMemories(
               updatedAt: new Date(),
             })
             .where(eq(memories.id, target.id));
-          continue; // merge 完了、新規 INSERT しない
+          continue; // merge complete, no new INSERT
         }
-        // target が見つからない → new にフォールバック
+        // Target not found → fall back to new
       }
 
-      // action === "new" または フォールバック
+      // action === "new" or fallback
       const vector = await embedText(mem.content, "document");
-      if (vector.length === 0) continue; // embed 失敗 → スキップ
+      if (vector.length === 0) continue; // embed failed → skip
 
       const contentHash = hashContent(mem.content);
-      // contentHash で重複回避（既存ならスキップ）
+      // Avoid duplicates via contentHash (skip if exists)
       const [dup] = await db
         .select({ id: memories.id })
         .from(memories)
@@ -339,7 +340,7 @@ export async function generateMemories(
         importance: mem.importance ?? 0.5,
       });
     } catch (err) {
-      console.error("[memory] failed to save memory:", mem.content, err);
+      logger.error("memory", "failed to save memory", { content: mem.content, error: err instanceof Error ? err.message : String(err) });
     }
   }
 }
