@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { MotionButton } from "@/components/ui/motion";
-import { authenticate, signInWithGoogle } from "@/app/actions/auth";
+import { authenticate, clearSessionCookies, signInWithGoogle } from "@/app/actions/auth";
 
 type Mode = "login" | "register";
 
@@ -11,16 +11,23 @@ export function LoginForm({
   initialMode = "login",
   firstRun = false,
   googleEnabled = false,
+  sessionInvalid = false,
 }: {
   initialMode?: Mode;
   firstRun?: boolean;
   googleEnabled?: boolean;
+  sessionInvalid?: boolean;
 }) {
   const { t } = useI18n();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [state, action, pending] = useActionState(authenticate, undefined);
   const [mismatch, setMismatch] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (sessionInvalid) {
+      clearSessionCookies();
+    }
+  }, [sessionInvalid]);
 
   const toggleMode = () => { setMismatch(false); setMode((m) => (m === "login" ? "register" : "login")); };
   return (
@@ -32,6 +39,11 @@ export function LoginForm({
           </h1>
           {firstRun && mode === "register" && (
             <p className="text-sm text-muted-foreground">{t("auth.firstRunBanner")}</p>
+          )}
+          {sessionInvalid && (
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+              {t("auth.sessionResetNotice")}
+            </p>
           )}
         </div>
         <form

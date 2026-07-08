@@ -1,5 +1,6 @@
 "use server";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { db } from "@/db";
 import { users, threads, folders } from "@/db/schema";
 import { eq, isNull, count as sqlCount } from "drizzle-orm";
@@ -96,4 +97,27 @@ export async function logout(): Promise<void> {
  */
 export async function signInWithGoogle(): Promise<void> {
   await signIn("google", { callbackUrl: "/" });
+}
+
+/**
+ * clearSessionCookies — サーバー側でAuth.js系のHttpOnly Cookieを全て削除する。
+ * マイグレーション後に古いJWTが残り、document.cookie経由ではHttpOnlyのため削除できない問題の解決。
+ * /loginページのLoginFormから呼ばれる。
+ */
+export async function clearSessionCookies(): Promise<void> {
+  const cookieStore = await cookies();
+  // authjs.* (HTTP) と __Secure-authjs.* (HTTPS) 両方をカバー
+  const cookieNames = [
+    "authjs.session-token",
+    "authjs.csrf-token",
+    "authjs.callback-url",
+    "__Secure-authjs.session-token",
+    "__Secure-authjs.csrf-token",
+    "__Secure-authjs.callback-url",
+  ];
+  for (const name of cookieNames) {
+    if (cookieStore.has(name)) {
+      cookieStore.delete(name);
+    }
+  }
 }

@@ -381,6 +381,7 @@ const ja = {
     firstRunBanner: "最初のアカウントを作成してください",
     or: "または",
     googleSignIn: "Google でログイン",
+    sessionResetNotice: "アップデートによりセッションがリセットされました。再度ログインしてください。",
   },
   skills: {
     saved: "スキルを保存しました",
@@ -851,6 +852,7 @@ const en: typeof ja = {
     firstRunBanner: "Create the first admin account",
     or: "or",
     googleSignIn: "Sign in with Google",
+    sessionResetNotice: "Your session was reset due to an update. Please log in again.",
   },
   urlInput: {
     placeholder: "Turn URL into knowledge…",

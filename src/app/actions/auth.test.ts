@@ -1,9 +1,13 @@
 // @vitest-environment node
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { redirectMock, signInMock } = vi.hoisted(() => ({
+const { redirectMock, signInMock, cookiesMock } = vi.hoisted(() => ({
   redirectMock: vi.fn(),
   signInMock: vi.fn(),
+  cookiesMock: {
+    has: vi.fn(),
+    delete: vi.fn(),
+  },
 }));
 
 // Mock next/navigation redirect — it throws a NEXT_REDIRECT error internally.
@@ -20,10 +24,15 @@ vi.mock("@/auth", () => ({
   signOut: vi.fn(),
 }));
 
+// Mock next/headers cookies — clearSessionCookies calls cookies().delete()
+vi.mock("next/headers", () => ({
+  cookies: async () => cookiesMock,
+}));
+
 import { db } from "@/db";
 import { users, threads, folders } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { register } from "@/app/actions/auth";
+import { register, clearSessionCookies } from "@/app/actions/auth";
 
 const createdUserIds: string[] = [];
 const createdThreadIds: string[] = [];
@@ -105,5 +114,40 @@ describe("register", () => {
     const result = await register(undefined, formData({ email }));
     expect(result).toEqual({ error: "auth.emailTaken" });
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("clearSessionCookies", () => {
+  beforeEach(() => {
+    cookiesMock.has.mockReturnValue(false);
+    cookiesMock.delete.mockClear();
+  });
+
+  it("deletes only cookies that exist", async () => {
+    // Simulate: session-token and csrf-token exist, callback-url does not
+    cookiesMock.has.mockImplementation((name: string) =>
+      name === "authjs.session-token" || name === "authjs.csrf-token",
+    );
+    await clearSessionCookies();
+    expect(cookiesMock.delete).toHaveBeenCalledTimes(2);
+    expect(cookiesMock.delete).toHaveBeenCalledWith("authjs.session-token");
+    expect(cookiesMock.delete).toHaveBeenCalledWith("authjs.csrf-token");
+    expect(cookiesMock.delete).not.toHaveBeenCalledWith("authjs.callback-url");
+  });
+
+  it("deletes all __Secure-* variants when present", async () => {
+    cookiesMock.has.mockReturnValue(true);
+    await clearSessionCookies();
+    // All 6 cookie names should be checked, all present → 6 deletes
+    expect(cookiesMock.delete).toHaveBeenCalledTimes(6);
+    expect(cookiesMock.delete).toHaveBeenCalledWith("__Secure-authjs.session-token");
+    expect(cookiesMock.delete).toHaveBeenCalledWith("__Secure-authjs.csrf-token");
+    expect(cookiesMock.delete).toHaveBeenCalledWith("__Secure-authjs.callback-url");
+  });
+
+  it("does nothing when no cookies exist", async () => {
+    cookiesMock.has.mockReturnValue(false);
+    await clearSessionCookies();
+    expect(cookiesMock.delete).not.toHaveBeenCalled();
   });
 });

@@ -2,23 +2,25 @@ import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
-// authenticate をモック: フォーム送信時に渡された formData の mode 値を記録し、
-// 安定した関数参照として useActionState に渡せるようにする。
-// vi.mock はファイル先頭に巻き上げられるため、vi.hoisted で事前定義する。
-const { authenticateMock, signInMock } = vi.hoisted(() => ({
+// Mock authenticate: records the mode value from formData passed on form submit,
+// and provides a stable function reference to pass to useActionState.
+// vi.mock is hoisted to the top of the file, so pre-define with vi.hoisted.
+const { authenticateMock, signInMock, clearSessionCookiesMock } = vi.hoisted(() => ({
   authenticateMock: vi.fn(async (_state: unknown, formData: FormData) => {
     return { submittedMode: String(formData.get("mode") ?? "login") };
   }),
   signInMock: vi.fn(),
+  clearSessionCookiesMock: vi.fn(async () => {}),
 }));
 
 vi.mock("@/app/actions/auth", () => ({
   authenticate: authenticateMock,
   signInWithGoogle: signInMock,
+  clearSessionCookies: clearSessionCookiesMock,
 }));
 
-// I18nProvider は localStorage / cookie を触るため、テスト用に軽量な Provider で差し替え。
-// t() は key をそのまま返す（フォールバックと同義）。
+// I18nProvider touches localStorage / cookie, so replace it with a lightweight Provider for tests.
+// t() returns the key as-is (equivalent to fallback).
 vi.mock("@/components/I18nProvider", () => ({
   useI18n: () => ({
     locale: "ja",
@@ -27,8 +29,8 @@ vi.mock("@/components/I18nProvider", () => ({
   }),
 }));
 
-// MotionButton は motion/react に依存するが、jsdom では transform が不要なので
-// プレーンな button に差し替え。type="submit" を保持する。
+// MotionButton depends on motion/react, but transform is unnecessary in jsdom,
+// so replace it with a plain button. Keep type="submit".
 vi.mock("@/components/ui/motion", () => ({
   MotionButton: ({ children, ...rest }: { children: ReactNode } & Record<string, unknown>) => (
     <button type="submit" {...rest}>{children}</button>
@@ -41,22 +43,24 @@ afterEach(() => {
   cleanup();
   authenticateMock.mockClear();
   signInMock.mockClear();
+  clearSessionCookiesMock.mockClear();
 });
 
 beforeEach(() => {
   authenticateMock.mockClear();
   signInMock.mockClear();
+  clearSessionCookiesMock.mockClear();
 });
 
-describe("LoginForm — モード切替と hidden mode フィールド", () => {
-  it("ログインモードは email + password のみ表示（nickname なし）", () => {
+describe("LoginForm — mode toggle and hidden mode field", () => {
+  it("login mode shows only email + password (no nickname)", () => {
     render(<LoginForm />);
     expect(screen.getByLabelText("auth.email")).toBeTruthy();
     expect(screen.getByLabelText("auth.password")).toBeTruthy();
     expect(screen.queryByLabelText("auth.nickname")).toBeNull();
   });
 
-  it("hidden mode フィールドがログインモードで 'login'", () => {
+  it("hidden mode field is 'login' in login mode", () => {
     render(<LoginForm />);
     const hiddenMode = document.querySelector(
       'input[type="hidden"][name="mode"]',
@@ -64,11 +68,11 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
     expect(hiddenMode).toBeTruthy();
     expect(hiddenMode.value).toBe("login");
   });
-  it("登録モードに切り替えると nickname フィールドが表示され、mode='register'", () => {
+  it("switching to register mode shows nickname field and sets mode='register'", () => {
     render(<LoginForm />);
-    // 初期状態は login
+    // Initial state is login
     expect(screen.queryByLabelText("auth.nickname")).toBeNull();
-    // トグルボタン（type="button"）をクリックしてモード切替
+    // Click the toggle button (type="button") to switch modes
     const toggleBtn = screen.getByText("auth.noAccount");
     fireEvent.click(toggleBtn);
     expect(screen.getByLabelText("auth.nickname")).toBeTruthy();
@@ -78,12 +82,12 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
     expect(hiddenMode.value).toBe("register");
   });
 
-  it("登録→ログインに戻すと mode フィールドが 'login' に戻る（stale-action バグの構造的防止）", () => {
+  it("switching register→login restores mode field to 'login' (structural prevention of stale-action bug)", () => {
     render(<LoginForm />);
-    // 登録モードへ切替
+    // Switch to register mode
     fireEvent.click(screen.getByText("auth.noAccount"));
     expect(screen.getByLabelText("auth.nickname")).toBeTruthy();
-    // ログインモードへ戻す
+    // Switch back to login mode
     fireEvent.click(screen.getByText("auth.haveAccount"));
     expect(screen.queryByLabelText("auth.nickname")).toBeNull();
     const hiddenMode = document.querySelector(
@@ -92,7 +96,7 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
     expect(hiddenMode.value).toBe("login");
   });
 
-  it("ログインモードで送信すると authenticate が mode=login で呼ばれる", async () => {
+  it("calls authenticate with mode=login when submitted in login mode", async () => {
     const mockState = { error: "auth.invalidCredentials" };
     authenticateMock.mockResolvedValueOnce(mockState);
     render(<LoginForm />);
@@ -104,7 +108,7 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
     });
     const form = screen.getByLabelText("auth.email").closest("form")!;
     fireEvent.submit(form);
-    // useActionState の action が非同期で呼ばれるのを待つ
+    // Wait for useActionState's action to be called asynchronously
     await vi.waitFor(() => {
       expect(authenticateMock).toHaveBeenCalledTimes(1);
     });
@@ -114,37 +118,61 @@ describe("LoginForm — モード切替と hidden mode フィールド", () => {
   });
 });
 
-describe("LoginForm — Google ログインボタン", () => {
-  it("ログインモード + googleEnabled で Google ボタンが表示される", () => {
+describe("LoginForm — Google sign-in button", () => {
+  it("shows Google button in login mode + googleEnabled", () => {
     render(<LoginForm googleEnabled={true} />);
     expect(screen.getByText("auth.googleSignIn")).toBeTruthy();
     expect(screen.getByText("auth.or")).toBeTruthy();
   });
 
-  it("googleEnabled=false では Google ボタンが非表示", () => {
+  it("hides Google button when googleEnabled=false", () => {
     render(<LoginForm googleEnabled={false} />);
     expect(screen.queryByText("auth.googleSignIn")).toBeNull();
     expect(screen.queryByText("auth.or")).toBeNull();
   });
 
-  it("googleEnabled 未指定（デフォルト false）では Google ボタンが非表示", () => {
+  it("hides Google button when googleEnabled is unspecified (default false)", () => {
     render(<LoginForm />);
     expect(screen.queryByText("auth.googleSignIn")).toBeNull();
   });
 
-  it("登録モードでは Google ボタンが非表示", () => {
+  it("hides Google button in register mode", () => {
     render(<LoginForm googleEnabled={true} />);
-    // 初期状態（login）では表示
+    // Shown in initial state (login)
     expect(screen.getByText("auth.googleSignIn")).toBeTruthy();
-    // 登録モードに切替
+    // Switch to register mode
     fireEvent.click(screen.getByText("auth.noAccount"));
     expect(screen.queryByText("auth.googleSignIn")).toBeNull();
   });
 
-  it("Google ボタンクリックで signInWithGoogle が呼ばれる", () => {
+  it("calls signInWithGoogle on Google button click", () => {
     render(<LoginForm googleEnabled={true} />);
     fireEvent.click(screen.getByText("auth.googleSignIn"));
     expect(signInMock).toHaveBeenCalledTimes(1);
     expect(signInMock).toHaveBeenCalledWith();
+  });
+});
+
+describe("LoginForm — sessionInvalid", () => {
+  it("calls clearSessionCookies on mount when sessionInvalid=true", async () => {
+    render(<LoginForm sessionInvalid={true} />);
+    await vi.waitFor(() => {
+      expect(clearSessionCookiesMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows session reset notice when sessionInvalid=true", () => {
+    render(<LoginForm sessionInvalid={true} />);
+    expect(screen.getByText("auth.sessionResetNotice")).toBeTruthy();
+  });
+
+  it("does not call clearSessionCookies when sessionInvalid is not set", () => {
+    render(<LoginForm />);
+    expect(clearSessionCookiesMock).not.toHaveBeenCalled();
+  });
+
+  it("does not show reset notice when sessionInvalid=false", () => {
+    render(<LoginForm sessionInvalid={false} />);
+    expect(screen.queryByText("auth.sessionResetNotice")).toBeNull();
   });
 });

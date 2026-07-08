@@ -1,10 +1,12 @@
 "use client";
 
+import { clearSessionCookies } from "@/app/actions/auth";
+
 /**
- * クライアント側 fetch ラッパー。
- * 401（未認証・セッション無効）検出時、/login へ自動リダイレクトする。
- * DB 再作成等で JWT の userId が users テーブルに存在しなくなった場合、
- * サーバーが 401 を返すため、ここで補足してログイン画面へ遷移させる。
+ * Client-side fetch wrapper.
+ * On 401 (unauthenticated / invalid session), automatically redirects to /login.
+ * When the JWT's userId no longer exists in the users table (e.g. DB recreated),
+ * the server returns 401; this catches it and navigates to the login screen.
  */
 export async function clientFetch(
   input: string,
@@ -12,16 +14,15 @@ export async function clientFetch(
 ): Promise<Response> {
   const res = await fetch(input, init);
   if (res.status === 401) {
-    // 401 = セッション無効（DB 再作成等で JWT の userId が存在しない）。
-    // 認証 Cookie を削除して /login へ遷移。
-    // Cookie 削除がないと authorized コールバックが旧 JWT を有効と判定し、
-    // /login → / → API 401 → /login の無限ループになる。
-    document.cookie.split(";").forEach((c) => {
-      const name = c.split("=")[0].trim();
-      if (name.startsWith("authjs") || name.startsWith("next-auth")) {
-        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
-      }
-    });
+    // 401 = invalid session (JWT userId not found, e.g. after DB recreation).
+    // Delete auth cookies via Server Action (HttpOnly cookies can't be deleted
+    // from document.cookie). Then full-reload to /login where the server-side
+    // page also detects invalid sessions and shows the reset notice.
+    try {
+      await clearSessionCookies();
+    } catch {
+      // Ignore — /login page will re-detect and re-delete server-side.
+    }
     window.location.href = "/login";
   }
   return res;
