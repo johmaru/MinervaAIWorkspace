@@ -131,6 +131,20 @@ On first launch the launcher creates `data/umanschat.db`, applies migrations, st
 
 > **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`, shipped in `.env.example` for `EMBED_PROVIDER=local`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected. For the HTTP Python embedder (`EMBED_PROVIDER=http`), the default model is `LiquidAI/LFM2.5-Embedding-350M` (1024-dim) and runs server-side — no client download.
 
+### Auto-Update (exe only)
+
+The standalone exe checks for updates on startup and in **Settings → System**. When a newer release exists on GitHub, an amber dot appears on the settings button.
+
+1. Open Settings → System tab
+2. Click **Download and install** — the release zip is downloaded, extracted, and a marker file is written
+3. The launcher detects the marker within 5 seconds, stops the server, swaps files (preserving `data/` and `.env`), and restarts the new exe
+4. The browser auto-reloads when the new server comes up
+
+`data/` (SQLite DB) and `.env` (API keys, settings) are preserved across updates. The old `umanschat.exe` is renamed to `.old` and cleaned up on next launch.
+
+> **Prerequisite**: The GitHub repository must be public for the Releases API and asset downloads to work without authentication.
+> **Docker** users update via `docker compose pull && docker compose up -d` — auto-update is exe-only.
+
 ## Releases (Docker + exe)
 
 Releases are produced manually via GitHub Actions. Each release publishes **both** distribution formats:

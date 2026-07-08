@@ -8,7 +8,7 @@
  *
  * Usage: bun scripts/pack-exe.ts
  */
-import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync, lstatSync, readlinkSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -130,6 +130,14 @@ cpSync(
   join(root, "package.json"),
   join(outDir, "package.json"),
 );
+
+// Override version from APP_VERSION env var (set by release workflow).
+// The dev placeholder "0.0.0" is replaced with the real release version.
+const distPkgPath = join(outDir, "package.json");
+const distPkg = JSON.parse(readFileSync(distPkgPath, "utf8"));
+distPkg.version = process.env.APP_VERSION || distPkg.version || "0.0.0";
+writeFileSync(distPkgPath, JSON.stringify(distPkg, null, 2));
+console.log(`[pack] Version set to ${distPkg.version}`);
 
 // node.exe → dist/UmansChat/node.exe (required to spawn server.js at runtime).
 // The compiled umanschat.exe bundles the launcher (run via Bun), but the app

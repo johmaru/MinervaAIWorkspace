@@ -16,7 +16,7 @@
  * does not support — Docker runs `node server.js` for parity).
  */
 const { spawn, exec } = require("child_process");
-const { mkdirSync, existsSync, readFileSync, writeFileSync } = require("fs");
+const { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, cpSync, rmSync, renameSync, unlinkSync } = require("fs");
 const { join, dirname, resolve } = require("path");
 const http = require("http");
 
@@ -154,8 +154,85 @@ function waitForServer(host, port, timeoutMs = 30000) {
   });
 }
 
+// ── Update application ──
+// Reads the marker file written by /api/update POST, swaps files from
+// staging into appRoot (preserving data/ and .env), replaces umanschat.exe
+// (rename-running → copy-new), then spawns the new exe and exits.
+async function applyUpdate() {
+  const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+  const stagingDir = marker.stagingDir;
+
+  if (!existsSync(stagingDir)) {
+    throw new Error("Staging directory not found: " + stagingDir);
+  }
+
+  console.log("[launcher] Applying update", marker.version, "...");
+
+  // 1. Stop the child node.exe (graceful, then force)
+  child.kill("SIGTERM");
+  await new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 5000);
+    child.on("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
+  // 2. Copy all files from staging to appRoot (skip data/ and .env)
+  const entries = readdirSync(stagingDir);
+  for (const entry of entries) {
+    if (entry === "data" || entry === ".env") continue;
+    if (entry === "umanschat.exe") continue; // Handle separately
+    const src = join(stagingDir, entry);
+    const dst = join(appRoot, entry);
+    cpSync(src, dst, { recursive: true, force: true });
+    console.log("[launcher] Updated:", entry);
+  }
+
+  // 3. Replace umanschat.exe (can't overwrite running exe → rename + copy)
+  const exePath = join(appRoot, "umanschat.exe");
+  const oldExePath = join(appRoot, "umanschat.exe.old");
+  const newExePath = join(stagingDir, "umanschat.exe");
+  if (existsSync(newExePath)) {
+    // Rename running exe (Windows allows renaming a running exe)
+    if (existsSync(oldExePath)) unlinkSync(oldExePath);
+    renameSync(exePath, oldExePath);
+    cpSync(newExePath, exePath);
+    console.log("[launcher] Replaced umanschat.exe");
+  }
+
+  // 4. Delete marker file
+  unlinkSync(markerPath);
+
+  // 5. Spawn new umanschat.exe (detached — survives parent exit)
+  const newProc = spawn(exePath, [], {
+    detached: true,
+    stdio: "ignore",
+    cwd: appRoot,
+  });
+  newProc.unref();
+  console.log("[launcher] Update complete. New process started.");
+
+  // 6. Exit current process
+  process.exit(0);
+}
+
 // ── Main processing ──
 console.log("[launcher] UmansChat starting...");
+// Clean up old exe from a previous update (Windows can't delete a running exe,
+// so the old one is renamed to .old and deleted on next startup)
+const oldExe = join(appRoot, "umanschat.exe.old");
+if (existsSync(oldExe)) {
+  try {
+    unlinkSync(oldExe);
+    console.log("[launcher] Cleaned up umanschat.exe.old");
+  } catch (err) {
+    console.warn("[launcher] Could not delete umanschat.exe.old:", err.message);
+  }
+}
 syncEnv();
 dbPath = resolveDbPath();
 mkdirSync(dirname(dbPath), { recursive: true });
@@ -172,21 +249,29 @@ if (!existsSync(nodeExe)) {
   process.exit(1);
 }
 const serverPath = join(appRoot, "server.js");
-const child = spawn(nodeExe, [serverPath], {
-  cwd: appRoot,
-  env: { ...process.env, PORT, DATABASE_URL: dbPath },
-  stdio: "inherit",
-});
 
-child.on("error", (err) => {
-  console.error("[launcher] Failed to start server:", err.message);
-  process.exit(1);
-});
+let updating = false;
+let child = null;
 
-child.on("exit", (code) => {
-  console.log(`[launcher] Server exited with code ${code}`);
-  process.exit(code ?? 0);
-});
+/** Spawn node.exe server.js and attach the exit handler. Reusable after update recovery. */
+function startServer() {
+  child = spawn(nodeExe, [serverPath], {
+    cwd: appRoot,
+    env: { ...process.env, PORT, DATABASE_URL: dbPath },
+    stdio: "inherit",
+  });
+  child.on("error", (err) => {
+    console.error("[launcher] Failed to start server:", err.message);
+    process.exit(1);
+  });
+  child.on("exit", (code) => {
+    if (updating) return; // Don't exit during update — applyUpdate handles lifecycle
+    console.log(`[launcher] Server exited with code ${code}`);
+    process.exit(code ?? 0);
+  });
+}
+
+startServer();
 
 // 6. Open the browser
 waitForServer("localhost", Number(PORT))
@@ -198,3 +283,18 @@ waitForServer("localhost", Number(PORT))
   .catch((err) => {
     console.error(`[launcher] ${err.message}`);
   });
+
+// 7. Poll for update marker every 5 seconds
+const markerPath = join(dataDir, ".update-pending");
+const updateInterval = setInterval(() => {
+  if (!updating && existsSync(markerPath)) {
+    updating = true;
+    clearInterval(updateInterval);
+    applyUpdate().catch((err) => {
+      console.error("[launcher] Update failed:", err.message);
+      try { unlinkSync(markerPath); } catch {}
+      updating = false;
+      startServer(); // Restart server with old files
+    });
+  }
+}, 5000);

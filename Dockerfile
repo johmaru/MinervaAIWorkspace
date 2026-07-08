@@ -14,16 +14,19 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# better-sqlite3 のネイティブバイナリを Node 用にリビルド（deps ステージは Bun でインストールしたため）
+# Rebuild better-sqlite3 native binary for Node (the deps stage installed it with Bun)
 RUN npm rebuild better-sqlite3
+# Override version from APP_VERSION build arg (for display only; Docker does not auto-update)
+ARG APP_VERSION=0.0.0
+RUN node -e "const fs=require('fs'); const p=require('./package.json'); p.version=process.env.APP_VERSION || '0.0.0'; fs.writeFileSync('package.json', JSON.stringify(p,null,2));"
 RUN DATABASE_URL=":memory:" NODE_OPTIONS="--max-old-space-size=3072" npx next build
 
 FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-# Docker CLI + Compose v2（Tor コンテナの起動/停止用。ホストの docker.sock をマウントして使用）
-# node:22-slim (Debian Bookworm) は docker-cli を公式リポジトリに持たないため、
-# Docker の apt ソースを追加してインストールする。
+# Docker CLI + Compose v2 (for starting/stopping the Tor container; uses host's docker.sock via mount)
+# node:22-slim (Debian Bookworm) does not have docker-cli in its official repos, so
+# add Docker's apt source and install from there.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg sqlite3 && \
     install -m 0755 -d /etc/apt/keyrings && \
@@ -38,9 +41,9 @@ RUN apt-get update && \
       -o /usr/local/lib/docker/cli-plugins/docker-compose && \
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 COPY --from=build /app/.next ./.next
-# Next.js standalone server.js は __dirname/.next/static と __dirname/public から
-# 静的ファイル（CSS/JS/フォント）を配信する。standalone 出力にはこれらが含まれない
-# ため明示的にコピーする（公式手順: cp -r .next/static .next/standalone/.next/）
+# Next.js standalone server.js serves static files (CSS/JS/fonts) from
+# __dirname/.next/static and __dirname/public. The standalone output does not
+# include these, so copy them explicitly (official steps: cp -r .next/static .next/standalone/.next/)
 COPY --from=build /app/.next/static ./.next/standalone/.next/static
 COPY --from=build /app/public ./.next/standalone/public
 COPY --from=build /app/public ./public

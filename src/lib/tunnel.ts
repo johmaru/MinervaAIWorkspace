@@ -79,7 +79,7 @@ export function isCloudflaredInstalled(): boolean {
 }
 
 /** SHA256 ハッシュを計算 */
-function sha256File(filePath: string): Promise<string> {
+export function sha256File(filePath: string): Promise<string> {
   const { promise, resolve, reject } = Promise.withResolvers<string>();
   const hash = createHash("sha256");
   const stream = createReadStream(filePath);
@@ -90,7 +90,7 @@ function sha256File(filePath: string): Promise<string> {
 }
 
 /** HTTPS でダウンロード（3xx リダイレクト対応） */
-function httpsDownload(
+export function httpsDownload(
   url: string,
   dest: string,
   redirects = 0,
@@ -98,7 +98,7 @@ function httpsDownload(
   const { promise, resolve, reject } = Promise.withResolvers<void>();
   const file = createWriteStream(dest);
 
-  const req = request(url, (res) => {
+  const req = request(url, { headers: { "User-Agent": "UmansChat-Updater" } }, (res) => {
     // 3xx リダイレクト対応: GitHub Releases は 302 → CDN へリダイレクトする
     if (
       res.statusCode &&

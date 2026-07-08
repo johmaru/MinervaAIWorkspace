@@ -95,6 +95,17 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   // Cloudflare Tunnel state
   const [tunnelRunning, setTunnelRunning] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
+  // Auto-update state (exe distribution only)
+  const [updateInfo, setUpdateInfo] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    updateAvailable: boolean;
+    downloadUrl: string | null;
+    releaseNotes: string | null;
+    isExe: boolean;
+  } | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [connections, setConnections] = useState<{
     id: string;
@@ -169,6 +180,62 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setConnections((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  // Auto-update: check for updates on modal open
+  const fetchUpdateInfo = useCallback(async () => {
+    setUpdateBusy(true);
+    try {
+      const res = await clientFetch("/api/update");
+      if (!res.ok) return;
+      const data = await res.json();
+      setUpdateInfo(data);
+    } catch {
+      // Ignore
+    } finally {
+      setUpdateBusy(false);
+    }
+  }, []);
+
+  const handleDownloadUpdate = useCallback(async () => {
+    if (!updateInfo?.downloadUrl) return;
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      const res = await clientFetch("/api/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          downloadUrl: updateInfo.downloadUrl,
+          version: updateInfo.latestVersion,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUpdateMessage(data.error || "Update failed");
+        return;
+      }
+      setUpdateMessage(t("settings.updateDownloaded"));
+      // Poll for server restart: reload when version changes
+      const oldVersion = updateInfo.currentVersion;
+      const poll = setInterval(async () => {
+        try {
+          const res = await clientFetch("/api/update");
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data.currentVersion !== oldVersion) {
+            clearInterval(poll);
+            window.location.reload();
+          }
+        } catch {
+          // Server down during restart — keep polling
+        }
+      }, 2000);
+    } catch (err) {
+      setUpdateMessage(err instanceof Error ? err.message : t("common.communicationError"));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }, [updateInfo, t]);
+
   useEffect(() => {
     if (open) {
       setMessage(null);
@@ -178,8 +245,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       void fetchTorStatus();
       void fetchConnections();
       void fetchInstructions();
+      void fetchUpdateInfo();
     }
-  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions]);
+  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions, fetchUpdateInfo]);
 
   const update = useCallback(<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -871,6 +939,49 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               />
             </div>
           </div>
+          {/* Update */}
+          {updateInfo?.isExe && (
+            <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="block text-xs font-medium text-foreground">
+                    {t("settings.updateVersion")}: {updateInfo.currentVersion}
+                  </span>
+                  {updateInfo.updateAvailable ? (
+                    <span className="block text-xs text-amber-500">
+                      {t("settings.updateAvailable")}: {updateInfo.latestVersion}
+                    </span>
+                  ) : (
+                    <span className="block text-xs text-muted-foreground">
+                      {t("settings.updateLatest")}
+                    </span>
+                  )}
+                </div>
+                {updateInfo.updateAvailable ? (
+                  <MotionButton
+                    type="button"
+                    onClick={handleDownloadUpdate}
+                    disabled={updateBusy}
+                    className="rounded-xl bg-foreground px-3 py-1.5 text-xs text-background transition-all duration-200 hover:opacity-90 disabled:opacity-50"
+                  >
+                    {updateBusy ? t("settings.updateProcessing") : t("settings.updateInstall")}
+                  </MotionButton>
+                ) : (
+                  <MotionButton
+                    type="button"
+                    onClick={fetchUpdateInfo}
+                    disabled={updateBusy}
+                    className="rounded-xl bg-muted px-3 py-1.5 text-xs text-foreground transition-all duration-200 hover:opacity-80 disabled:opacity-50"
+                  >
+                    {updateBusy ? t("settings.updateChecking") : t("settings.updateCheck")}
+                  </MotionButton>
+                )}
+              </div>
+              {updateMessage && (
+                <p className="text-xs text-muted-foreground">{updateMessage}</p>
+              )}
+            </div>
+          )}
           </div>
           )}
           {activeTab === 3 && (
