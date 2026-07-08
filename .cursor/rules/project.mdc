@@ -1,4 +1,7 @@
-# AI Agent Instructions
+---
+description: UmansChat project rules — always applied
+alwaysApply: true
+---
 
 Read **AGENTS.md** — it is the single source of truth for all project rules.
 Do not rely on rules from this file; it contains no rules of its own.

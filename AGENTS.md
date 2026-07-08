@@ -1,3 +1,36 @@
+<!-- BEGIN:ai-tool-adapters -->
+# AI Tool Adapters
+
+This file (`AGENTS.md`) is the **single source of truth** for all project rules.
+Tool-specific instruction files are thin pointers that redirect here — they
+contain no rules of their own. When updating rules, edit `AGENTS.md` only.
+
+| Tool | Adapter file | Notes |
+|------|-------------|-------|
+| Claude Code | `CLAUDE.md` | Pointer to AGENTS.md + context file index |
+| Cursor (modern) | `.cursor/rules/project.mdc` | `alwaysApply: true`, auto-injected on every file |
+| Cursor (legacy) | `.cursorrules` | Fallback for older Cursor versions |
+| GitHub Copilot | `.github/copilot-instructions.md` | Pointer to AGENTS.md |
+| Windsurf | `.windsurfrules` | Pointer to AGENTS.md |
+| OMP / Codex | `AGENTS.md` (this file) | Read natively — no adapter needed |
+
+**Do not duplicate rules across adapter files.** Each adapter is a static
+pointer. If a new rule is needed, add it here. If a new AI tool needs an
+adapter, create a tiny pointer file — do not copy rules into it.
+
+## Context Files for AI Agents
+
+Beyond this file, AI agents should read these for deeper context:
+
+| File | Purpose |
+|------|---------|
+| `docs/module-map.md` | Module boundaries, safety zones (🟢 safe / 🟡 caution / 🔴 high-risk) |
+| `docs/glossary.md` | Domain terms (thread, branch, leaf, memory, skill, etc.) |
+| `docs/patterns/api-route.md` | API route handler pattern with good/bad examples |
+| `docs/patterns/component.md` | React component pattern with good/bad examples |
+| `docs/patterns/test.md` | Test writing pattern with good/bad examples |
+| `docs/patterns/db-migration.md` | Database migration workflow and pitfalls |
+<!-- END:ai-tool-adapters -->
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 
@@ -113,12 +146,12 @@ Follow up later: polish, optional refactors, or larger design improvements.
 
 ## Git Workflow
 
-- 実装が1つ完了したら、`develop` に commit して `git push` する。
-  1実装 = 1コミットを基本とする。
-- 過去コミットの修正依頼が来たら、`git commit --amend` で前回コミットを
-  書き換えて `git push --force-with-lease` で再 push する。
-  （共同作業者がいる場合は履歴書き換えの同意を確認してから）
-- コミットメッセージは英語で、変更内容・検証結果を簡潔に記載する。
+- Commit and `git push` to `develop` after completing each implementation.
+  One implementation = one commit is the rule.
+- If asked to amend a past commit, rewrite the previous commit with
+  `git commit --amend` and re-push with `git push --force-with-lease`.
+  (If collaborators exist, confirm consent for history rewriting first.)
+- Commit messages must be in English, briefly describing the changes and verification results.
 
 ## Testing
 
@@ -152,18 +185,17 @@ Follow up later: polish, optional refactors, or larger design improvements.
 When the user mentions "GitHub", "the repo", "the repository", "issues", "PRs", or similar without specifying which one, assume they mean **this project's repository**: https://github.com/johmaru/UmansChat-Unofficial (private). If it is still ambiguous which repository they mean, ask for confirmation before proceeding.
 
 ## Project Rule Memory
-When the user says 「今度覚えといて」「これ覚えといて」 or similar, decide whether the content is a durable project rule, workflow rule, known pitfall, or implementation convention.
+When the user says "remember this for next time," "make sure to remember this," or similar, decide whether the content is a durable project rule, workflow rule, known pitfall, or implementation convention.
 Add it to AGENTS.md only when it should affect future work in this repository.
 Do not add personal preferences, temporary notes, random reminders, or unrelated facts to AGENTS.md.
 When adding a rule, place it in the most relevant existing section when possible.
 After editing, check for duplication, contradiction, or overly specific rules that should be generalized.
 If the instruction is ambiguous, ask whether it should be stored as a project rule before editing AGENTS.md.
 
-
 ## Skill Creation After Implementation
-開発中にハマったことやミスしたことがあったら、すべての実装が終わった後に、それ専用のスキルを作成するか既存のスキルを編集して記録すること。
-スキルはローカルの `.agents/skills` ディレクトリ（`C:\Users\Johma_sub\UmansChat-Unofficial\.agents\skills`）に配置する。
-これにより、同じ問題に再び遭遇したときの診断時間を短縮する。
+When you get stuck or make a mistake during development, after all implementation is complete, create a dedicated skill or edit an existing skill to record it.
+Skills are placed in the local `.agents/skills` directory (`C:\Users\Johma_sub\UmansChat-Unofficial\.agents\skills`).
+This reduces diagnosis time when encountering the same problem again.
 
 ### Developer Skills vs Runtime Skills
 - **Developer Skills** (`.agents/skills/`): Markdown files read by Codex/OMP/dev agents during development. Contain debugging pitfalls, project conventions, and workflow recipes. Updated manually by the developer after hitting a problem.
@@ -173,9 +205,9 @@ If the instruction is ambiguous, ask whether it should be stored as a project ru
 
 ## Release & Distribution
 
-**第一優先: Docker と exe 両方の配布を毎回リリースすること。** どちらか一方だけの
-リリースは不完全。新機能・バグ修正問わず、リリース時は必ず両方のアーティファクトを
-生成・公開すること。
+**Top priority: Always release both Docker and exe distributions.** Releasing only
+one is incomplete. Regardless of whether it's a new feature or bug fix, always
+generate and publish both artifacts on release.
 
 Two distribution formats, both produced by GitHub Actions on every release:
 
@@ -184,14 +216,14 @@ Two distribution formats, both produced by GitHub Actions on every release:
 
 ### Release trigger
 
-リリースは手動実行のみ（`workflow_dispatch`）。ユーザーが「リリースして」と指示した時だけ実行する。
-タグ push では自動リリースしない。
+Releases are manual only (`workflow_dispatch`). Run only when the user instructs to "release."
+Do not auto-release on tag push.
 
 ```
-Actions タブ → Release → Run workflow → version 入力 (例: 1.2.3)
+Actions tab → Release → Run workflow → enter version (e.g., 1.2.3)
 ```
 
-`version` 入力は必須。省略時は実行できない（誤実行で `:latest` を上書きするのを防ぐ）。
+The `version` input is required. It cannot run without it (prevents accidental overwrite of `:latest`).
 
 ### Pipeline (`.github/workflows/release.yml`)
 
@@ -236,26 +268,26 @@ forces it — and if so, document it in `skill://umanschat-debug` and here.
 
 ## Cloudflare Tunnel GUI
 
-Cloudflare Tunnel の設定・起動/停止を GUI（SettingsModal）から行う。
-アプリの再起動不要でトークン変更と AUTH_URL 切替が即時反映される。
+Configure, start, and stop Cloudflare Tunnel from the GUI (SettingsModal).
+Token changes and AUTH_URL switching take effect immediately without restarting the app.
 
-### 仕組み
+### How It Works
 
-- **API**: `/api/tunnel`（GET: 状態、POST: 起動、DELETE: 停止）
-  - トークンは GET レスポンスに平文で返さない（`hasToken` のみ）
-  - AUTH_URL は `process.env` を動的更新 → NextAuth が `reqWithEnvURL` で毎回読むため再起動不要
-  - トークン変更時は `startTunnel(token, { force: true })` で停止→再起動（古いトークンを使い続けない）
-- **プロセス管理**: `src/lib/tunnel.ts`
-  - Docker 環境: `docker compose --profile tunnel up -d --force-recreate cloudflared`
-  - exe 環境: cloudflared バイナリを `data/cloudflared/` にダウンロードして子プロセス起動
-  - セキュリティ: 固定バージョン + SHA256 検証 + HTTPS のみ + 自動更新なし
-  - 対応プラットフォーム: Windows x64（スタンドアロン exe）、Linux x64（Node/Bun 実行時）
+- **API**: `/api/tunnel` (GET: status, POST: start, DELETE: stop)
+  - Token is never returned in plaintext in GET responses (only `hasToken`)
+  - AUTH_URL updates `process.env` dynamically → NextAuth reads it via `reqWithEnvURL` on each request, so no restart needed
+  - On token change, `startTunnel(token, { force: true })` stops and restarts (avoids using stale tokens)
+- **Process management**: `src/lib/tunnel.ts`
+  - Docker environment: `docker compose --profile tunnel up -d --force-recreate cloudflared`
+  - exe environment: downloads cloudflared binary to `data/cloudflared/` and spawns a child process
+  - Security: fixed version + SHA256 verification + HTTPS only + no auto-update
+  - Supported platforms: Windows x64 (standalone exe), Linux x64 (Node/Bun runtime)
 
-### 注意点
+### Notes
 
-- Tunnel URL は自動取得できない。ユーザーが公開ホスト名（`https://your-tunnel.example.com`）を入力する必要がある
-- Google OAuth のリダイレクト URI は AUTH_URL に一致させる必要がある
-- cloudflared バイナリの SHA256 ハッシュはローカル計算で確認済みの値をハードコード（`CLOUDFLARED_HASHES`）。バージョンアップ時に更新が必要
+- The Tunnel URL cannot be auto-discovered. The user must enter the public hostname (`https://your-tunnel.example.com`)
+- Google OAuth redirect URI must match the AUTH_URL
+- The SHA256 hash of the cloudflared binary is hardcoded with locally verified values (`CLOUDFLARED_HASHES`). Must be updated on version upgrades
 
 ## Documentation Sync
 Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.

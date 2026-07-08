@@ -52,6 +52,17 @@ built with Next.js 16 + React 19 + SQLite.
 | [Deployment](./deployment.md) | Docker, standalone exe, CI/CD, Cloudflare Tunnel |
 | [Testing Guide](./testing.md) | Vitest v4 setup, conventions, mocking, DB tests |
 
+### AI Agent Development
+
+| Document | Description |
+|----------|-------------|
+| [Module Map](./module-map.md) | Module boundaries, safety zones (safe / caution / high-risk) |
+| [Glossary](./glossary.md) | Domain terms (thread, branch, leaf, memory, skill, etc.) |
+| [API Route Pattern](./patterns/api-route.md) | API route handler pattern with good/bad examples |
+| [Component Pattern](./patterns/component.md) | React component pattern with good/bad examples |
+| [Test Pattern](./patterns/test.md) | Test writing pattern with good/bad examples |
+| [DB Migration Pattern](./patterns/db-migration.md) | Database migration workflow and pitfalls |
+
 ## Quick Links
 
 - [Main README (EN)](../README.md)

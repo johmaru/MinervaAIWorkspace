@@ -1,0 +1,9 @@
+# UmansChat — AI Agent Rules
+
+Read AGENTS.md — it is the single source of truth for all project rules.
+This file contains no rules of its own.
+
+Context files: docs/module-map.md, docs/glossary.md, docs/patterns/,
+docs/contributing.md, docs/architecture.md.
+
+For newer Cursor versions, see .cursor/rules/project.mdc.

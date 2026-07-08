@@ -350,6 +350,38 @@ Before submitting, confirm:
 - [ ] Commit message is in English, describing changes and verification
 - [ ] Pushed to `develop`
 
+## Using AI Agents to Contribute
+
+UmansChat is designed for AI-assisted development. Whether you use Claude Code,
+Cursor, Copilot, Windsurf, or any other AI agent, the project has adapter files
+that point your tool to the right context.
+
+### Quick start for AI-assisted contributors
+
+1. **Clone & setup** — follow the [Getting Started](#getting-started) section above.
+2. **Your AI tool reads the rules automatically** — each tool has an adapter file
+   that points to `AGENTS.md` (the single source of truth):
+   - Claude Code → `CLAUDE.md`
+   - Cursor → `.cursor/rules/project.mdc` (modern) or `.cursorrules` (legacy)
+   - GitHub Copilot → `.github/copilot-instructions.md`
+   - Windsurf → `.windsurfrules`
+3. **Read the context files** before making changes:
+   - `docs/module-map.md` — know if you're in a safe zone or a high-risk zone
+   - `docs/glossary.md` — domain terms specific to this project
+   - `docs/patterns/` — good/bad code examples for common tasks
+4. **Follow the implementation review loop** described above (plan → implement → review → report).
+5. **Tests are mandatory** — see the [Testing](#testing) section and
+   `docs/patterns/test.md`.
+
+### What AI agents should NOT do
+
+- Do not edit existing database migration files — generate new ones via `bunx drizzle-kit generate`.
+- Do not bypass `getSessionUser()` in any API route.
+- Do not mock the database in tests — use real SQLite.
+- Do not add "use client" to components that don't need hooks or browser APIs.
+- Do not duplicate rules into tool-specific adapter files — edit `AGENTS.md` only.
+- Do not weaken or delete test assertions to make tests pass — fix the code instead.
+
 ## Where to Get Help
 
 - **[Documentation index](./README.md)** — full table of contributor docs.
