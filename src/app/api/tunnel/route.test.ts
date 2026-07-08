@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// tunnel モジュールをモック: 実際の cloudflared/Docker 操作を行わない
+// Mock the tunnel module: avoid actual cloudflared/Docker operations
 vi.mock("@/lib/tunnel", () => ({
   startTunnel: vi.fn().mockResolvedValue(undefined),
   stopTunnel: vi.fn().mockResolvedValue(undefined),
@@ -12,12 +12,12 @@ vi.mock("@/lib/tunnel", () => ({
   }),
 }));
 
-// auth-guards をモック: 認証済みユーザーを返す
+// Mock auth-guards: return an authenticated user
 vi.mock("@/lib/auth-guards", () => ({
   getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id" }),
 }));
 
-// envUtils をモック: 実際の .env ファイル操作を行わない
+// Mock envUtils: avoid actual .env file operations
 vi.mock("@/lib/envUtils", () => ({
   resolveEnvPath: vi.fn().mockReturnValue("/tmp/test.env"),
   updateEnvContent: vi.fn().mockReturnValue("TUNNEL_TOKEN=test\nAUTH_URL=https://example.com\n"),
@@ -35,7 +35,7 @@ import { getSessionUser } from "@/lib/auth-guards";
 describe("/api/tunnel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // 各テストでデフォルト実装を再設定（mockResolvedValue の変更をリセット）
+    // Reset default implementations for each test (reset mockResolvedValue changes)
     vi.mocked(getSessionUser).mockResolvedValue({ id: "test-user-id" });
     vi.mocked(getTunnelStatus).mockResolvedValue({
       running: false,
@@ -53,7 +53,7 @@ describe("/api/tunnel", () => {
   });
 
   describe("GET", () => {
-    it("トンネル状態を返す（トークンは平文で返さない）", async () => {
+    it("returns tunnel status (token is not returned in plaintext)", async () => {
       vi.mocked(getTunnelStatus).mockResolvedValue({
         running: true,
         hasToken: true,
@@ -67,12 +67,12 @@ describe("/api/tunnel", () => {
       expect(data.running).toBe(true);
       expect(data.hasToken).toBe(true);
       expect(data.authUrl).toBe("https://example.com");
-      // トークンは含まれない
+      // Token is not included
       expect(data.token).toBeUndefined();
       expect(JSON.stringify(data)).not.toContain("eyJ");
     });
 
-    it("未認証は 401", async () => {
+    it("returns 401 when unauthenticated", async () => {
       vi.mocked(getSessionUser).mockResolvedValue(null);
 
       const res = await GET();
@@ -81,7 +81,7 @@ describe("/api/tunnel", () => {
   });
 
   describe("POST", () => {
-    it("トークン + AUTH_URL でトンネルを起動", async () => {
+    it("starts the tunnel with token + AUTH_URL", async () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
@@ -99,7 +99,7 @@ describe("/api/tunnel", () => {
       expect(startTunnel).toHaveBeenCalledWith("test-token-12345", { force: true });
     });
 
-    it("トークン未指定時は既存 process.env を使用", async () => {
+    it("uses existing process.env when token is not specified", async () => {
       process.env.TUNNEL_TOKEN = "existing-token";
 
       const res = await POST(
@@ -116,7 +116,7 @@ describe("/api/tunnel", () => {
       expect(startTunnel).toHaveBeenCalledWith("existing-token", { force: true });
     });
 
-    it("トークンも AUTH_URL も未指定は 400", async () => {
+    it("returns 400 when neither token nor AUTH_URL is specified", async () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
@@ -130,7 +130,7 @@ describe("/api/tunnel", () => {
       expect(data.error).toContain("TUNNEL_TOKEN");
     });
 
-    it("AUTH_URL が https:// でない場合は 400", async () => {
+    it("returns 400 when AUTH_URL does not start with https://", async () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
@@ -147,7 +147,7 @@ describe("/api/tunnel", () => {
       expect(data.error).toContain("https://");
     });
 
-    it("無効な JSON は 400", async () => {
+    it("returns 400 for invalid JSON", async () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
@@ -159,7 +159,7 @@ describe("/api/tunnel", () => {
       expect(res.status).toBe(400);
     });
 
-    it("起動失敗時は 500 エラー", async () => {
+    it("returns 500 error on start failure", async () => {
       vi.mocked(startTunnel).mockRejectedValue(new Error("Docker not found"));
 
       const res = await POST(
@@ -178,7 +178,7 @@ describe("/api/tunnel", () => {
       expect(data.error).toContain("Docker not found");
     });
 
-    it("レスポンスにトークンを含めない", async () => {
+    it("does not include token in the response", async () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
@@ -198,8 +198,8 @@ describe("/api/tunnel", () => {
   });
 
   describe("DELETE", () => {
-    it("トンネルを停止", async () => {
-      const res = await DELETE();
+    it("stops the tunnel", async () => {
+      const res = await DELETE(new Request("http://localhost/api/tunnel", { method: "DELETE" }));
       const data = await res.json();
 
       expect(res.status).toBe(200);
@@ -207,14 +207,54 @@ describe("/api/tunnel", () => {
       expect(stopTunnel).toHaveBeenCalled();
     });
 
-    it("停止失敗時は 500 エラー", async () => {
+    it("returns 500 error on stop failure", async () => {
       vi.mocked(stopTunnel).mockRejectedValue(new Error("Stop failed"));
 
-      const res = await DELETE();
+      const res = await DELETE(new Request("http://localhost/api/tunnel", { method: "DELETE" }));
       const data = await res.json();
 
       expect(res.status).toBe(500);
       expect(data.error).toContain("Stop failed");
+    });
+  });
+  describe("i18n — locale-aware error messages", () => {
+    it("returns English error when locale=en and token is missing", async () => {
+      const res = await POST(
+        new Request("http://localhost/api/tunnel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", cookie: "umanschat-locale=en" },
+          body: JSON.stringify({ authUrl: "https://example.com" }),
+        }),
+      );
+      const data = await res.json();
+      expect(res.status).toBe(400);
+      expect(data.error).toBe("TUNNEL_TOKEN is not set");
+    });
+
+    it("returns English error when locale=en and AUTH_URL is invalid", async () => {
+      const res = await POST(
+        new Request("http://localhost/api/tunnel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", cookie: "umanschat-locale=en" },
+          body: JSON.stringify({ token: "test-token", authUrl: "http://example.com" }),
+        }),
+      );
+      const data = await res.json();
+      expect(res.status).toBe(400);
+      expect(data.error).toBe("AUTH_URL must be a public URL starting with https://");
+    });
+
+    it("returns Japanese error when locale=ja and token is missing", async () => {
+      const res = await POST(
+        new Request("http://localhost/api/tunnel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
+          body: JSON.stringify({ authUrl: "https://example.com" }),
+        }),
+      );
+      const data = await res.json();
+      expect(res.status).toBe(400);
+      expect(data.error).toBe("TUNNEL_TOKEN が設定されていません");
     });
   });
 });

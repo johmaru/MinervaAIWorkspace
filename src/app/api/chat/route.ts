@@ -42,8 +42,8 @@ import { buildPersonalizationMessage } from "@/lib/personalization";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// プロセス起動時にバックグラウンドでツールプローブを開始し、
-// 初回チャットリクエスト時の probeToolSupport 遅延（~750ms）を隠す。
+// Start the tool probe in the background at process startup,
+// hiding the probeToolSupport latency (~750ms) on the first chat request.
 warmupToolProbe();
 
 const SEARCH_RESULT_CONTENT_SLICE = 2000;
@@ -114,8 +114,8 @@ export async function POST(req: Request) {
 
   const llm = createLLM();
   const finalModel = body.model ?? thread.model ?? defaultModel();
-  // グローバルシステムインストラクション解決。
-  // 優先順位: スレッド上書き > ユーザー既定。両方 null なら body.systemPrompt へ。
+  // Resolve global system instruction.
+  // Priority: thread override > user default. If both are null, fall back to body.systemPrompt.
   let resolvedGlobalInstruction: string | null = null;
   const threadInstrId = thread.globalInstructionId ?? null;
   const [userRow] = await db
@@ -137,8 +137,8 @@ export async function POST(req: Request) {
       .where(and(eq(globalInstructions.id, effectiveInstrId), eq(globalInstructions.userId, user.id)));
     resolvedGlobalInstruction = instr?.content?.trim() || null;
   }
-  // フォルダ Instruction（folderId 経由）。空白のみは除外。
-  // 所有権チェック: folders.userId === user.id で絞り込み。
+  // Folder instruction (via folderId). Whitespace-only is excluded.
+  // Ownership check: filter by folders.userId === user.id.
   let folderInstruction: string | null = null;
   if (thread.folderId) {
     const [folder] = await db
@@ -147,14 +147,14 @@ export async function POST(req: Request) {
       .where(and(eq(folders.id, thread.folderId), eq(folders.userId, user.id)));
     folderInstruction = folder?.instruction?.trim() || null;
   }
-  // 優先順位: スレッド個別 systemPrompt > グローバル(スレッド上書き or ユーザー既定) > body
+  // Priority: thread-specific systemPrompt > global (thread override or user default) > body
   const baseSystemContent = thread.systemPrompt ?? resolvedGlobalInstruction ?? body.systemPrompt;
-  // フォルダ Instruction がある場合は先頭に結合（instruction → systemPrompt の順）。
+  // If a folder instruction exists, prepend it (instruction → systemPrompt order).
   const systemContent = folderInstruction
     ? [folderInstruction, baseSystemContent].filter(Boolean).join("\n")
     : baseSystemContent;
 
-  // パーソナライズメッセージ（ユーザー単位）。personalStyle が null なら無効。
+  // Personalization message (per user). Disabled if personalStyle is null.
   const personalizationContent = buildPersonalizationMessage(
     userRow?.personalStyle ?? null,
     userRow?.personalWarmth ?? 1,
@@ -163,16 +163,17 @@ export async function POST(req: Request) {
     userRow?.personalEmoji ?? 1,
   );
 
-  // ツールプローブを早期開始し、ストリーム内の並列処理とオーバーラップさせる。
-  // warmupToolProbe() がモジュール読み込み時にプローブを開始済みだが、
-  // まだ完了していない場合に備えてここでも開始（キャッシュ済みなら即座に解決）。
-  // rapid モード・dual モードでは使用しないが、プローブ自体は無害（キャッシュされる）。
+  // Start the tool probe early to overlap with in-stream parallel processing.
+  // warmupToolProbe() already started the probe at module load, but we also
+  // start it here in case it hasn't completed yet (resolves immediately if cached).
+  // Not used in rapid/dual mode, but the probe itself is harmless (cached).
   const toolSupportPromise: Promise<ToolSupport | null> = body.rapid
     ? Promise.resolve(null)
     : probeToolSupport(llm, finalModel).catch(() => null);
 
-  // ストリーム完了を待つ Promise。after() コールバックがリクエストコンテキスト内で
-  // generateMemories を実行するため、ストリーム完了後に内容を引き渡す。
+  // Promise to wait for stream completion. after() callback runs
+  // generateMemories within the request context, so we pass the
+  // content after the stream completes.
   let resolveStream!: () => void;
   const streamDone = new Promise<void>((resolve) => {
     resolveStream = resolve;
@@ -193,9 +194,9 @@ export async function POST(req: Request) {
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
-        // プリストーム処理を並列実行し、first-token レイテンシを削減。
-        // 各 build* は .catch(() => null) で包み、1つの失敗が他へ波及しないよう分離。
-        // rapid モードは全スキップ（null）。
+        // Run pre-stream processing in parallel to reduce first-token latency.
+        // Each build* is wrapped with .catch(() => null) to isolate failures.
+        // rapid mode skips all (null).
         const [searchContextMessage, urlContextMessage, memoryMessage, skillMessage] =
           body.rapid
             ? [null, null, null, null]
@@ -214,6 +215,7 @@ export async function POST(req: Request) {
                 buildUrlContext({
                   content: prepared.content,
                   send,
+                  locale,
                 }).catch((err) => {
                   console.error("[chat] buildUrlContext failed:", err);
                   return null;
@@ -237,9 +239,9 @@ export async function POST(req: Request) {
                 }),
               ]);
 
-        // MCP サーバー接続: スレッドで有効化されたサーバーに接続し、ツールを取得。
-        // 接続失敗時はスキップし、チャットは継続（非ブロッキング）。
-        // ライフサイクルはリクエスト内で完結し、finally で close する。
+        // MCP server connections: connect to servers enabled on the thread and fetch tools.
+        // On failure, skip and continue chat (non-blocking).
+        // Lifecycle is contained within the request, closed in finally.
         mcpConnections = [];
         let mcpTools: McpTool[] = [];
         const activeMcpServerIds = thread.mcpServerIds ?? [];
@@ -270,9 +272,9 @@ export async function POST(req: Request) {
           }
         }
 
-        // コネクション読み込み: スレッドで有効化されたコネクションのツールを取得。
-        // MCP と異なりステートレスな HTTP API のため接続ハンドル不要。
-        // 失敗時はスキップし、チャットは継続（非ブロッキング）。
+        // Load connections: fetch tools for connections enabled on the thread.
+        // Unlike MCP, these are stateless HTTP APIs requiring no connection handle.
+        // On failure, skip and continue chat (non-blocking).
         const activeConnectionIds = thread.connectionIds ?? [];
         let connectionRows: ConnectionRow[] = [];
         let connectionTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
@@ -306,6 +308,7 @@ export async function POST(req: Request) {
             finalModel,
             thread,
             send,
+            locale,
           });
           dualTrace = dual.trace;
           send("dual_trace", { dualTrace });
@@ -326,8 +329,8 @@ export async function POST(req: Request) {
           });
         } else {
           if (body.rapid) {
-            // rapid モード: ツール使用プローブ・MCP・接続ツールをすべてスキップし、
-            // 純粋な LLM 即時回答のみ行う。
+            // rapid mode: skip tool probe, MCP, and connection tools,
+            // performing only pure LLM immediate response.
             await streamCompletion({
               llm,
               model: finalModel,
@@ -344,14 +347,14 @@ export async function POST(req: Request) {
               locale,
             });
           } else {
-            // 関数呼び出し（ツール使用）プローブ: モデルがツール使用をサポートするか判定。
-            // サポート時はストリーディング中に自律的に検索/スクレイプを実行。
-            // 非サポート時は decideSearch ルーター方式（buildSearchContext）にフォールバック。
-            // プローブは POST 本体で早期開始済み（warmupToolProbe + 早期呼び出し）。
-            // ここでは結果を待つだけ（並列処理とオーバーラップしてレイテンシ隠蔽）。
+            // Function calling (tool use) probe: determine if the model supports tool use.
+            // If supported, autonomously search/scrape during streaming.
+            // If unsupported, fall back to the decideSearch router (buildSearchContext).
+            // The probe was started early in the POST body (warmupToolProbe + early call).
+            // Here we just await the result (overlapped with parallel processing for latency hiding).
             const toolSupport: ToolSupport | null = await toolSupportPromise;
-            // ツール使用モード時は事前検索のsystemメッセージを除外:
-            // 「検索完了・再検索禁止」メッセージがLLMのツール呼び出し結果の参照を阻害するため。
+            // In tool-use mode, exclude the pre-search system message:
+            // the "search complete, do not re-search" message hinders the LLM's tool call result reference.
             const effectiveMessages = toolSupport?.supported
               ? buildFinalMessages({
                   systemContent,
@@ -386,14 +389,14 @@ export async function POST(req: Request) {
           }
         }
 
-        // GLM-5.2 等のツール非対応モデルがツール呼び出し構文をテキストとして
-        // 出力し、そこで生成を停止する問題への対処。
-        // 検出時は構文を除去し、続行プロンプトで再生成する（最大1回）。
+        // Workaround for non-tool-supporting models (e.g. GLM-5.2) that output
+        // tool-call syntax as text and halt generation there.
+        // On detection, remove the syntax and regenerate with a continuation prompt (max 1 time).
         if (hasToolCallMarkup(assistantContent)) {
-          send("status", { label: "検索結果に基づいて回答を生成しています。" });
+          send("status", { label: t(locale, "chat.statusRegenerating") });
           assistantContent = sanitizeToolCallMarkup(assistantContent);
-          // クライアントの表示内容をサニタイズ後の内容で置換。
-          // ストリーミング中に送信された tool-call マークアップを UI から除去する。
+          // Replace the client's displayed content with the sanitized version.
+          // Removes tool-call markup emitted during streaming from the UI.
           send("replace_content", { content: assistantContent });
           const continuationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
             ...finalMessages,
@@ -470,34 +473,34 @@ export async function POST(req: Request) {
           .set({ updatedAt: new Date() })
           .where(eq(threads.id, body.threadId));
 
-        // ストリーム完了内容を after() コールバックへ引き渡す。
+        // Pass stream completion content to the after() callback.
         streamResult.assistantContent = assistantContent;
 
-        // MCP 接続を閉じる（stdio 子プロセスの終了を含む）。
+        // Close MCP connections (including stdio child process termination).
         for (const conn of mcpConnections) {
           try { await conn.client.close(); } catch { /* ignore close errors */ }
         }
 
-        // ストリームを即座に閉じる（クライアントの isStreaming を下げる）。
+        // Close the stream immediately (lower client's isStreaming).
         controller.close();
 
-        // after() コールバックに完了を通知。
+        // Notify the after() callback of completion.
         resolveStream();
       }
     },
   });
 
-  // 記憶生成: after() で HTTP レスポンス完遂後にバックグラウンド実行。
-  // after() はリクエストコンテキスト内（POST 本体）で呼ぶ必要がある。
-  // ReadableStream の start() 内で呼ぶとリクエストコンテキストが失われ、
-  // waitUntil が機能せずコールバックが実行されない。
-  // done 送信後に close しているため、クライアント UX はブロックしない。
-  // after() が Next.js の waitUntil を使うため、close 後もプロセスは維持される。
-  // エラーは握りつぶす（ストリーム既に完了済み、ログのみ）。
+  // Memory generation: run in the background via after() after HTTP response completes.
+  // after() must be called within the request context (POST body).
+  // Calling it inside ReadableStream's start() loses the request context,
+  // so waitUntil doesn't work and the callback never executes.
+  // Since we close after sending "done", client UX is not blocked.
+  // after() uses Next.js's waitUntil, so the process persists after close.
+  // Errors are swallowed (stream already complete, log only).
   after(async () => {
     await streamDone;
     if (!streamResult.assistantContent) return;
-    // ラピッドモード: 記憶・スキル生成をスキップし、即座に終了する。
+    // Rapid mode: skip memory and skill generation, exit immediately.
     if (body.rapid) return;
     try {
       await generateMemories(
@@ -514,7 +517,7 @@ export async function POST(req: Request) {
       console.error("[memory] generation failed:", err);
     }
 
-    // スキル保存トリガー検出: ユーザーが「スキルで保存」「save as skill」等を要求
+    // Skill save trigger detection: user requests "save as skill" etc.
     if (/(スキルで保存|スキルとして保存|save\s+as\s+skill)/i.test(prepared.content)) {
       try {
         await generateSkillFromConversation(body.threadId, user.id, llm, finalModel);
@@ -522,9 +525,9 @@ export async function POST(req: Request) {
         console.error("[skill] generation failed:", err);
       }
     } else {
-      // スキル候補自動抽出: 明示的保存要求がない場合、会話から候補を抽出
-      // ヒューリスティック: ユーザー+アシスタント内容の合計が 200 字超、
-      // またはコード/エラー/設定キーワードを含む場合のみ実行
+      // Auto-extract skill candidates: when no explicit save request, extract candidates from the conversation.
+      // Heuristic: only run when user+assistant content totals over 200 chars,
+      // or contains code/error/config keywords.
       const totalLen = prepared.content.length + streamResult.assistantContent.length;
       const hasSubstantiveContent =
         totalLen > 200 ||
@@ -620,28 +623,30 @@ function buildChain(allMessages: DbMessage[], leafId: string | null): DbMessage[
 }
 
 /**
- * ユーザー発言に含まれる URL をスクレイプし、コンテキストとして注入する。
+ * Scrape URLs contained in the user's message and inject them as context.
  *
- * - extractUrls で URL 抽出（上限10件、重複排除）
- * - 各 URL を scrapeUrl で並列スクレイプ（1件失敗でも他は継続: Promise.allSettled）
- * - 成功結果を system message として構築
- * - 全件失敗/0件 → null（何もしない）
- * - SSE 進捗: status → sources
+ * - Extract URLs via extractUrls (max 10, deduplicated)
+ * - Scrape each URL in parallel via scrapeUrl (one failure doesn't stop others: Promise.allSettled)
+ * - Build a system message from successful results
+ * - All failures / 0 results → null (do nothing)
+ * - SSE progress: status → sources
  */
 async function buildUrlContext({
   content,
   send,
+  locale,
 }: {
   content: string;
   send: StreamSend;
+  locale: Locale;
 }): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam | null> {
   const urls = extractUrls(content);
   if (urls.length === 0) return null;
 
   if (urls.length >= 10) {
-    send("status", { label: "最初の10件のURLを取得します。" });
+    send("status", { label: t(locale, "chat.statusUrlFetchFirst") });
   } else {
-    send("status", { label: "URLの内容を取得しています。" });
+    send("status", { label: t(locale, "chat.statusUrlFetch") });
   }
 
   const settled = await Promise.allSettled(urls.map((u) => scrapeUrl(u)));
@@ -705,8 +710,8 @@ async function buildSearchContext({
     return null;
   }
 
-  // wiki レベル: Wikipedia REST API で軽量参照（SearXNG/スクレイパー不使用）。
-  // 記事が見つからない場合はトレーニングデータで回答（フル Web 検索にはフォールバックしない）。
+  // wiki level: lightweight lookup via Wikipedia REST API (no SearXNG/scraper).
+  // If no article is found, answer from training data (does not fall back to full web search).
   if (decision.searchLevel === "wiki") {
     const tWiki = Date.now();
     const wikiResults = await Promise.all(
@@ -742,7 +747,7 @@ async function buildSearchContext({
   const allResults: { url: string; title: string; snippet: string; content: string }[] = [];
 
   const queries = decision.queries.slice(0, maxRounds);
-  // クエリを並列実行してレイテンシを短縮（直列だと最大 maxRounds 倍かかる）
+  // Execute queries in parallel to reduce latency (serial would take up to maxRounds times longer)
   const tParallel = Date.now();
   const queryResults = await Promise.all(
     queries.map(async (query, qi) => {
@@ -776,19 +781,19 @@ async function buildSearchContext({
   if (allSources.length > 0) send("sources", { sources: allSources });
   if (allResults.length === 0) {
     send("status", { label: t(locale, "chat.statusWebEmpty") });
-    // このメッセージは tool 非対応モデルにのみ到達する（tool 対応モデルは
-    // effectiveMessages で searchContextMessage が除外され、自律的に検索する）。
-    // 検索失敗を伝えてトレーニングデータで回答させ、情報が取得できなかったことを
-    // 明示させる。null を返すと検索未実行として扱われ、情報欠落の認知も消える。
+    // This message only reaches non-tool-supporting models (tool-supporting models
+    // have searchContextMessage excluded in effectiveMessages and search autonomously).
+    // Communicate the search failure and have the model answer from training data,
+    // making it explicit that information could not be retrieved.
+    // Returning null would be treated as search not executed, also losing failure awareness.
     console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (no results)`);
     return {
       role: "system",
       content: "Web search was attempted but returned no results. Answer from your training data and acknowledge that you could not retrieve current information.",
     };
   }
-
-  // 要約ステップは廃止: 生検索結果をそのまま system メッセージに埋め込む。
-  // 各結果の content は SEARCH_RESULT_CONTENT_SLICE で切ってあるため、生 JSON でも十分短い。
+  // Summarization step is deprecated: raw search results are embedded directly into the system message.
+  // Each result's content is sliced by SEARCH_RESULT_CONTENT_SLICE, so even raw JSON is short enough.
   const tSummarize = Date.now();
   const contextContent = JSON.stringify(allResults, null, 2);
   console.log(`[search-timing] skip-summarize duration=${Date.now() - tSummarize}ms chars=${contextContent.length}`);
@@ -800,15 +805,15 @@ async function buildSearchContext({
   };
 }
 /**
- * プロンプト先頭に注入する環境コンテキスト（現在日時 + 実行環境）を構築。
+ * Build environment context (current date/time + execution environment) to inject at the prompt head.
  *
- * - HOST_OS env があればそれを使用（GUI で上書き可能）
- * - 未設定時は /proc/version からホストOS を自動検出:
- *   - "microsoft" or "WSL" を含む → "Windows"（WSL2 上の Docker Desktop）
- *   - "Darwin" を含む → "macOS"
- *   - それ以外 → "Linux"
- * - アーキテクチャは process.arch（x64 / arm64 等）
- * - タイムゾーンは TZ env（未設定時は Asia/Tokyo）
+ * - Uses HOST_OS env if set (overridable via GUI)
+ * - If unset, auto-detects host OS from /proc/version:
+ *   - Contains "microsoft" or "WSL" → "Windows" (Docker Desktop on WSL2)
+ *   - Contains "Darwin" → "macOS"
+ *   - Otherwise → "Linux"
+ * - Architecture from process.arch (x64 / arm64 etc.)
+ * - Timezone from TZ env (defaults to Asia/Tokyo if unset)
  */
 function getEnvContext(): string {
   const os = process.env.HOST_OS || detectHostOs();
@@ -874,23 +879,24 @@ async function runDualModelFlow({
   finalModel,
   thread,
   send,
+  locale,
 }: {
   llm: OpenAI;
   baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   finalModel: string;
   thread: typeof threads.$inferSelect;
   send: StreamSend;
+  locale: Locale;
 }): Promise<{ trace: DualTrace; finalMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] }> {
   const { modelA, modelB } = await resolveDualModels(thread, finalModel);
 
-  send("status", { label: `モデルA（${modelA}）が回答中…` });
+  send("status", { label: t(locale, "chat.statusDualModelA", { model: modelA }) });
   const answerA = await completeText(llm, modelA, withDualInstruction(baseMessages, "You are model A. Give your best independent answer."));
 
-  send("status", { label: `モデルB（${modelB}）が回答中…` });
+  send("status", { label: t(locale, "chat.statusDualModelB", { model: modelB }) });
   const answerB = await completeText(llm, modelB, withDualInstruction(baseMessages, "You are model B. Give your best independent answer."));
-
   if (thread.dualStrategy === "debate") {
-    const debateTurns = await runDebateTurns({ llm, baseMessages, modelA, modelB, answerA, answerB, rounds: thread.dualDebateRounds, send });
+    const debateTurns = await runDebateTurns({ llm, baseMessages, modelA, modelB, answerA, answerB, rounds: thread.dualDebateRounds, send, locale });
     const trace: DualTrace = {
       strategy: "debate",
       modelA,
@@ -903,7 +909,7 @@ async function runDualModelFlow({
     return { trace, finalMessages: buildSynthesisMessages(baseMessages, trace) };
   }
 
-  send("status", { label: "モデルAがモデルBの回答をレビュー中…" });
+  send("status", { label: t(locale, "chat.statusReviewA") });
   const reviewA = await completeText(llm, modelA, [
     ...baseMessages,
     { role: "assistant", content: `Model A answer:\n${answerA}` },
@@ -911,14 +917,13 @@ async function runDualModelFlow({
     { role: "user", content: "Review Model B's answer. Identify strengths, gaps, and corrections. Be concise." },
   ]);
 
-  send("status", { label: "モデルBがモデルAの回答をレビュー中…" });
+  send("status", { label: t(locale, "chat.statusReviewB") });
   const reviewB = await completeText(llm, modelB, [
     ...baseMessages,
     { role: "assistant", content: `Model A answer:\n${answerA}` },
     { role: "assistant", content: `Model B answer:\n${answerB}` },
     { role: "user", content: "Review Model A's answer. Identify strengths, gaps, and corrections. Be concise." },
   ]);
-
   const trace: DualTrace = {
     strategy: "cross_review",
     modelA,
@@ -962,6 +967,7 @@ async function runDebateTurns({
   answerB,
   rounds,
   send,
+  locale,
 }: {
   llm: OpenAI;
   baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
@@ -971,12 +977,13 @@ async function runDebateTurns({
   answerB: string;
   rounds: number;
   send: StreamSend;
+  locale: Locale;
 }): Promise<{ speaker: "A" | "B"; model: string; content: string }[]> {
   const debateTurns: { speaker: "A" | "B"; model: string; content: string }[] = [];
   const clampedRounds = Math.min(5, Math.max(1, Math.trunc(rounds || 2)));
 
   for (let round = 1; round <= clampedRounds; round++) {
-    send("status", { label: `デュアルモデル議論中… ${round}/${clampedRounds}` });
+    send("status", { label: t(locale, "chat.statusDebateRound", { round: String(round), total: String(clampedRounds) }) });
     const transcript = formatDebateTranscript(answerA, answerB, debateTurns);
     const speakerA = await completeText(llm, modelA, [
       ...baseMessages,
@@ -1043,8 +1050,8 @@ async function completeText(
 }
 
 /**
- * ストリーミング完了用のツール定義。
- * probeToolSupport で supported:true の場合のみ使用される。
+ * Tool definitions for streaming completion.
+ * Used only when probeToolSupport returns supported:true.
  */
 const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -1136,9 +1143,9 @@ async function streamCompletion({
   let currentMessages = messagesForModel;
   let rounds = 0;
 
-  // ツール使用モード: ストリーミング中に tool_calls を検知したら
- // ツールを実行し、結果を tool role メッセージとして追加して再ストリーミング。
-  // 最大 MAX_TOOL_ROUNDS 回まで。超えたら残りはツール無しで回答継続。
+  // Tool-use mode: when tool_calls are detected during streaming,
+  // execute the tools, append results as tool role messages, and re-stream.
+  // Up to MAX_TOOL_ROUNDS times. Beyond that, continue answering without tools.
   while (true) {
     const useToolsThisRound = useTools && rounds < MAX_TOOL_ROUNDS;
 
@@ -1156,9 +1163,9 @@ async function streamCompletion({
         : {}),
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
-    // ストリーミング中に tool_calls の delta を蓄積する。
-    // OpenAI のストリーミング形式では tool_calls が分割されて届くため、
-    // index ごとに結合する。
+    // Accumulate tool_calls deltas during streaming.
+    // In OpenAI's streaming format, tool_calls arrive split across chunks,
+    // so we join them by index.
     const toolCallAccumulator: Record<
       number,
       { id: string; name: string; arguments: string }
@@ -1175,7 +1182,7 @@ async function streamCompletion({
       const contentDelta = choice.delta?.content;
       if (contentDelta) onDelta(contentDelta);
 
-      // tool_calls の delta を蓄積
+      // Accumulate tool_calls delta
       const deltaToolCalls = (
         choice.delta as Record<string, unknown> as {
           tool_calls?: Array<{
@@ -1202,16 +1209,16 @@ async function streamCompletion({
     }
 
     if (!hadToolCalls || !useToolsThisRound) {
-      // ツール呼び出しなし、または上限超過でツール無しラウンド → 完了
+      // No tool calls, or max rounds exceeded → done
       break;
     }
 
     rounds++;
 
-    // ツール呼び出しを実行
+    // Execute tool calls
     const toolCalls = Object.values(toolCallAccumulator).filter((tc) => tc.name);
 
-    // assistant メッセージ（tool_calls 含む）を履歴に追加
+    // Add assistant message (including tool_calls) to history
     currentMessages = [
       ...currentMessages,
       {
@@ -1227,7 +1234,7 @@ async function streamCompletion({
 
     const sources: SourceInfo[] = [];
 
-    // 各ツール呼び出しを実行し、結果を tool role メッセージとして追加
+    // Execute each tool call and append the result as a tool role message
     for (const tc of toolCalls) {
       let toolContent: string;
       let parsedArgs: { url?: string; query?: string };
@@ -1238,7 +1245,7 @@ async function streamCompletion({
       }
 
       if (tc.name === "scrape_webpage" && parsedArgs.url) {
-        send?.("status", { label: "URLの内容を取得しています。" });
+        send?.("status", { label: t(locale, "chat.statusToolScrape") });
         const tTool = Date.now();
         try {
           const result = await scrapeUrl(parsedArgs.url);
@@ -1253,7 +1260,7 @@ async function streamCompletion({
         }
         console.log(`[search-timing] tool scrape_webpage round=${rounds} duration=${Date.now() - tTool}ms`);
       } else if (tc.name === "search_web" && parsedArgs.query) {
-        send?.("status", { label: "Webで検索しています。" });
+        send?.("status", { label: t(locale, "chat.statusToolSearch") });
         const tTool = Date.now();
         try {
           const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange);
@@ -1291,12 +1298,12 @@ async function streamCompletion({
         }
         console.log(`[search-timing] tool search_wikipedia round=${rounds} duration=${Date.now() - tTool}ms`);
       } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
-        // MCP ツール: 関数名形式 "{serverName}__{toolName}"
+        // MCP tool: function name format "{serverName}__{toolName}"
         const parsed = parseMcpToolFunctionName(tc.name);
         if (parsed) {
           const conn = mcpConnections.find((c) => c.serverName === parsed.serverName);
           if (conn) {
-            send?.("status", { label: `MCP: ${parsed.serverName}/${parsed.toolName} を実行中` });
+            send?.("status", { label: t(locale, "chat.statusToolMcp", { server: parsed.serverName, tool: parsed.toolName }) });
             try {
               let mcpArgs: Record<string, unknown>;
               try {
@@ -1315,10 +1322,10 @@ async function streamCompletion({
           toolContent = `Unknown tool: ${tc.name}`;
         }
       } else if (tc.name.startsWith("notion_") && connectionRows && connectionRows.length > 0) {
-        // コネクションツール: "notion_" プレフィックスでプロバイダーを識別。
-        // Notion は現状唯一のプロバイダーなので最初のマッチするコネクションを使用。
+        // Connection tool: identify provider by "notion_" prefix.
+        // Notion is currently the only provider, so use the first matching connection.
         const conn = connectionRows[0];
-        send?.("status", { label: `Notion: ${tc.name} を実行中` });
+        send?.("status", { label: t(locale, "chat.statusToolNotion", { tool: tc.name }) });
         try {
           let connArgs: Record<string, unknown>;
           try {
@@ -1328,14 +1335,14 @@ async function streamCompletion({
           }
           const result = await dispatchConnectionTool(conn, tc.name, connArgs);
           toolContent = result.content;
-          // リフレッシュされたトークンがあれば DB へ永続化
+          // Persist refreshed token to DB if present
           if (result.newAccessToken && result.newRefreshToken) {
             try {
               await db.update(connections)
                 .set({ accessToken: result.newAccessToken, refreshToken: result.newRefreshToken, updatedAt: new Date() })
                 .where(eq(connections.id, conn.id));
             } catch {
-              // 永続化エラーは無視 — 次回呼び出しで再度リフレッシュされる
+              // Ignore persistence errors — will be refreshed again on next call
             }
           }
         } catch {
@@ -1358,9 +1365,9 @@ async function streamCompletion({
     if (sources.length > 0) send?.("sources", { sources });
 
     if (rounds >= MAX_TOOL_ROUNDS) {
-      send?.("status", { label: "検索回数上限に達しました。" });
+      send?.("status", { label: t(locale, "chat.statusSearchLimit") });
     }
 
-    // 再ストリーミング（次のラウンド）
+    // Re-stream (next round)
   }
 }

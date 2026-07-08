@@ -27,16 +27,16 @@ type SettingsResponse = {
   embedModelOptions: readonly EmbedModelOption[];
   dbVectorDim: number;
   dbPageEmbeddingsDim: number;
-  // Web 検索
+  // Web search
   webSearchModel: string;
   webSearchMaxResults: number;
   webSearchMaxRounds: number;
   scraperUrl: string;
   searxngUrl: string;
-  // Tor プロキシ
+  // Tor proxy
   torProxy: string;
   scrapeProxy: string;
-  // Database / 実行環境
+  // Database / runtime environment
   databaseUrl: string;
   hostOs: string;
   tz: string;
@@ -48,9 +48,9 @@ type SettingsResponse = {
   // Cloudflare Tunnel
   tunnelToken: string;
   hasTunnelToken: boolean;
-  // 既定グローバルインストラクション選択（ユーザー単位、DB）
+  // Default global instruction selection (per user, DB)
   activeInstructionId: string | null;
-  // パーソナライズ（ユーザー単位、DB）
+  // Personalization (per user, DB)
   personalStyle: string | null;
   personalWarmth: number;
   personalEnergy: number;
@@ -72,13 +72,13 @@ type Props = {
 };
 
 /**
- * アプリ設定モーダル（サイドバーの⚙️ボタンから開く）。
+ * App settings modal (opened from the ⚙️ button in the sidebar).
  *
- * 全 .env 設定を GUI で編集可能:
- * - LLM 設定（BASE_URL, API_KEY, MODEL, MODELS, Thinking Effort）
- * - 埋め込みモデル（次元変更時はマイグレーション確認）
- * - Web 検索（参照元件数, SCRAPER_URL, SEARXNG_URL）
- * - Tor プロキシ（TOR_PROXY, SCRAPE_PROXY）
+ * All .env settings are editable via GUI:
+ * - LLM settings (BASE_URL, API_KEY, MODEL, MODELS, Thinking Effort)
+ * - Embedding model (migration confirmation on dimension change)
+ * - Web search (max results, SCRAPER_URL, SEARXNG_URL)
+ * - Tor proxy (TOR_PROXY, SCRAPE_PROXY)
  * - Database URL
  */
 export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
@@ -92,7 +92,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const [torBusy, setTorBusy] = useState(false);
   const [torConnection, setTorConnection] = useState<TorConnection | null>(null);
   const [torChecking, setTorChecking] = useState(false);
-  // Cloudflare Tunnel 状態
+  // Cloudflare Tunnel state
   const [tunnelRunning, setTunnelRunning] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
@@ -123,7 +123,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setTorConnection(data.connection);
       return data.connection;
     } catch {
-      // 無視
+      // Ignore
       return null;
     }
   }, []);
@@ -146,7 +146,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       if (!res.ok) return;
       setConnections(await res.json());
     } catch {
-      // 無視
+      // Ignore
     }
   }, []);
 
@@ -156,7 +156,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       if (!res.ok) return;
       setInstructions(await res.json());
     } catch {
-      // 無視
+      // Ignore
     }
   }, []);
 
@@ -203,9 +203,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          // シークレットフィールドは空文字の場合送信しない（既存値を保持）。
-          // GET で llmApiKey/notionClientSecret は空文字で返るため、
-          // ユーザーが新値を入力した場合のみ送信する。
+          // Secret fields are not sent when empty (existing values are preserved).
+          // GET returns llmApiKey/notionClientSecret as empty strings,
+          // so only send when the user enters a new value.
           llmApiKey: form.llmApiKey || undefined,
           notionClientSecret: form.notionClientSecret || undefined,
           embedDim: selectedOption?.dim ?? form.embedDim,
@@ -240,7 +240,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       } else {
         setMessage({ type: "success", text: t("settings.saved") });
       }
-      // サーバー状態とフォームを再同期（保存後の最新値を反映）
+      // Re-sync server state and form (reflect latest values after save)
       await fetchSettings();
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
@@ -273,7 +273,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       if (data.scrapeProxy !== undefined) {
         setForm((prev) => ({ ...prev, scrapeProxy: data.scrapeProxy!, torProxy: data.scrapeProxy! }));
       }
-      // 起動時は scraper の再起動が必要なため、接続確認は後で手動で実行
+      // Scraper restart is needed on startup, so connection check is done manually later
       if (data.running) {
         setMessage({
           type: "success",
@@ -293,8 +293,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setTorChecking(true);
     setMessage(null);
     try {
-      // Tor の on/off に関わらず scraper は最新の SCRAPE_PROXY で起動しているので
-      // 接続確認のみ実行（不要な再起動を省く）
+      // Regardless of Tor on/off, the scraper is already running with the latest SCRAPE_PROXY,
+      // so only run a connection check (skip unnecessary restart)
       const result = await fetchTorStatus();
       if (result?.connected) {
         setMessage({ type: "success", text: t("settings.torConnSuccess", { torIp: result.torIp ?? "", directIp: result.directIp ?? "" }) });
@@ -310,30 +310,30 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     }
   }, [fetchTorStatus, t]);
 
-  // Cloudflare Tunnel 起動/停止
+  // Cloudflare Tunnel start/stop
   const handleTunnelToggle = useCallback(async () => {
     setTunnelBusy(true);
     setMessage(null);
     try {
       if (tunnelRunning) {
-        // 停止
+        // Stop
         const res = await clientFetch("/api/tunnel", { method: "DELETE" });
         const data = (await res.json()) as { success?: boolean; error?: string; running?: boolean };
         if (!res.ok) {
-          setMessage({ type: "error", text: data.error || "トンネル停止に失敗しました" });
+          setMessage({ type: "error", text: data.error || t("settings.tunnelStopFailed") });
           return;
         }
         setTunnelRunning(false);
-        setMessage({ type: "success", text: "トンネルを停止しました" });
+        setMessage({ type: "success", text: t("settings.tunnelStopped") });
       } else {
-        // 起動: トークン + AUTH_URL を送信
+        // Start: send token + AUTH_URL
         const token = form.tunnelToken ?? "";
         const authUrl = form.authUrl ?? "";
         if (!authUrl.startsWith("https://")) {
-          setMessage({ type: "error", text: "AUTH_URL は https:// で始まる公開 URL が必要です" });
+          setMessage({ type: "error", text: t("settings.authUrlHttpsRequired") });
           return;
         }
-        // トークンが未入力の場合は既存の .env の値を使用（API 側でフォールバック）
+        // If no token is entered, use the existing .env value (API-side fallback)
         const body: Record<string, string> = { authUrl };
         if (token) body.token = token;
         const res = await clientFetch("/api/tunnel", {
@@ -343,11 +343,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         });
         const data = (await res.json()) as { success?: boolean; error?: string; running?: boolean };
         if (!res.ok) {
-          setMessage({ type: "error", text: data.error || "トンネル起動に失敗しました" });
+          setMessage({ type: "error", text: data.error || t("settings.tunnelStartFailed") });
           return;
         }
         setTunnelRunning(data.running ?? true);
-        setMessage({ type: "success", text: "トンネルを起動しました" });
+        setMessage({ type: "success", text: t("settings.tunnelStarted") });
       }
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
@@ -356,7 +356,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     }
   }, [tunnelRunning, form.tunnelToken, form.authUrl, t]);
 
-  // 初期ロード時にトンネル状態を取得
+  // Fetch tunnel state on initial load
   useEffect(() => {
     clientFetch("/api/tunnel")
       .then((res) => res.json())
@@ -418,7 +418,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       try {
         const res = await clientFetch(`/api/global-instructions/${id}`, { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        // 削除された行が active だったら選択解除
+        // Clear selection if the deleted row was active
         if (form.activeInstructionId === id) update("activeInstructionId", null);
         await fetchInstructions();
       } catch (err) {
@@ -472,7 +472,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         <div className="flex-1 overflow-y-auto pr-1">
           {activeTab === 0 && (
           <div className="space-y-6">
-        {/* LLM 設定 */}
+        {/* LLM settings */}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block">
@@ -495,7 +495,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 type="password"
                 value={form.llmApiKey ?? ""}
                 onChange={(e) => update("llmApiKey", e.target.value)}
-                placeholder={settings?.hasLlmApiKey ? "••••••••（入力で更新）" : ""}
+                placeholder={settings?.hasLlmApiKey ? t("settings.placeholderUpdate") : ""}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
@@ -570,7 +570,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               </select>
               {settings && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t("settings.dbDimension", { current: String(settings.dbVectorDim || "(空)"), new: String(selectedOption?.dim ?? form.embedDim) })}
+                  {t("settings.dbDimension", { current: String(settings.dbVectorDim || t("settings.dbVectorDimEmpty")), new: String(selectedOption?.dim ?? form.embedDim) })}
                 </p>
               )}
             </div>
@@ -593,7 +593,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             )}
           </div>
 
-          {/* グローバルシステムインストラクション — 複数保存・選択 */}
+          {/* Global system instructions — save multiple and select */}
           <div className="mt-3">
             <span className="mb-1 block text-xs font-medium text-foreground">
               {t("settings.globalSystemInstruction")}
@@ -621,13 +621,13 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 ))}
               </div>
             )}
-            {/* 選択解除 */}
+            {/* Clear selection */}
             {form.activeInstructionId && (
               <button type="button" onClick={() => update("activeInstructionId", null)} className="mt-1 rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
                 {t("settings.gsiClearSelection")}
               </button>
             )}
-            {/* 追加/編集フォーム トグル */}
+            {/* Add/edit form toggle */}
             <button type="button" onClick={() => { setInstrFormOpen(v => !v); setEditingInstrId(null); setInstrFormName(""); setInstrFormContent(""); }} className="rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
               {t("settings.gsiAdd")}
             </button>
@@ -645,7 +645,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           )}
           {activeTab === 1 && (
           <div className="space-y-6">
-        {/* Web 検索 */}
+        {/* Web search */}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="mb-1 block">
@@ -716,7 +716,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {/* Tor 起動/停止トグル */}
+            {/* Tor start/stop toggle */}
             <div className="flex items-center justify-between rounded-2xl bg-muted/40 p-3 sm:col-span-2">
               <div>
                 <p className="text-sm font-medium">
@@ -742,7 +742,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               </button>
             </div>
 
-            {/* Tor 接続確認 */}
+            {/* Tor connection check */}
             {torRunning && (
               <div className="rounded-2xl bg-muted/40 p-3 sm:col-span-2">
                 <div className="flex items-center justify-between">
@@ -796,7 +796,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 )}
               </div>
             )}
-            {/* 手動プロキシ設定（詳細） */}
+            {/* Manual proxy settings (advanced) */}
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.torProxyLabelManual")}</span>
@@ -828,7 +828,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           )}
           {activeTab === 2 && (
           <div className="space-y-6">
-        {/* 実行環境 */}
+        {/* Runtime environment */}
           <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
@@ -875,7 +875,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           )}
           {activeTab === 3 && (
           <div className="space-y-6">
-        {/* コネクション */}
+        {/* Connections */}
           <div className="mt-3 space-y-3">
             <div className="rounded-xl bg-muted/40 p-3">
               <p className="text-xs text-muted-foreground">
@@ -894,11 +894,11 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 Notion Developers ↗
               </a>
             </div>
-            {/* Notion OAuth 設定 */}
+            {/* Notion OAuth settings */}
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_ID</span>
-                <span className="block text-[10px] text-muted-foreground">https://www.notion.so/developers で取得</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.notionClientIdHint")}</span>
               </label>
               <input
                 type="text"
@@ -911,20 +911,20 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_SECRET</span>
-                <span className="block text-[10px] text-muted-foreground">Integration secrets (本番環境用)</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.notionClientSecretHint")}</span>
               </label>
               <input
                 type="password"
                 value={form.notionClientSecret ?? ""}
                 onChange={(e) => update("notionClientSecret", e.target.value)}
-                placeholder={settings?.hasNotionClientSecret ? "••••••••（入力で更新）" : "secret_..."}
+                placeholder={settings?.hasNotionClientSecret ? t("settings.placeholderUpdate") : "secret_..."}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">AUTH_URL</span>
-                <span className="block text-[10px] text-muted-foreground">Notion の Redirect URI と一致させる。Cloudflare Tunnel 使用時は https:// で始まる公開 URL を設定</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.authUrlHint")}</span>
               </label>
               <input
                 type="text"
@@ -943,8 +943,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {tunnelRunning
-                      ? "トンネル経由で公開中"
-                      : "トークンを入力して起動"}
+                      ? t("settings.tunnelRunningDesc")
+                      : t("settings.tunnelTokenPrompt")}
                   </p>
                 </div>
                 <button
@@ -958,17 +958,17 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   }`}
                 >
                   {tunnelBusy
-                    ? "処理中..."
+                    ? t("settings.tunnelProcessingBtn")
                     : tunnelRunning
-                      ? "停止"
-                      : "起動"}
+                      ? t("settings.tunnelStopBtn")
+                      : t("settings.tunnelStartBtn")}
                 </button>
               </div>
               <div>
                 <label className="mb-1 block">
                   <span className="block text-xs font-medium text-foreground">Tunnel Token</span>
                   <span className="block text-[10px] text-muted-foreground">
-                    Cloudflare Zero Trust → Networks → Tunnels → トークンをコピー
+                    {t("settings.tunnelTokenCopyHint")}
                   </span>
                 </label>
                 <input
@@ -977,14 +977,14 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   onChange={(e) => update("tunnelToken", e.target.value)}
                   placeholder={
                     settings?.hasTunnelToken
-                      ? "••••••••（入力で更新）"
+                      ? t("settings.placeholderUpdate")
                       : "eyJhIjoi..."
                   }
                   className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
                 />
               </div>
             </div>
-            {/* 保存後に「Notion に接続」ボタンが使える */}
+            {/* "Connect to Notion" button becomes available after saving */}
             {connections.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
             ) : (
@@ -1014,7 +1014,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           {activeTab === 4 && (
           <div className="space-y-6">
             <div className="mt-3 space-y-4">
-              {/* スタイル・トーン プリセット */}
+              {/* Style/tone presets */}
               <div>
                 <label className="mb-2 block text-xs font-medium text-foreground">
                   {t("personalization.style")}
@@ -1057,7 +1057,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 </div>
               </div>
 
-              {/* トレイトスライダー */}
+              {/* Trait sliders */}
               {([
                 { key: "personalWarmth", label: "warmth" },
                 { key: "personalEnergy", label: "energy" },
@@ -1093,7 +1093,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         </div>
       </div>
 
-        {/* メッセージ */}
+        {/* Message */}
         {message && (
           <div
             className={`mb-4 rounded-2xl p-3 text-sm ${
@@ -1108,7 +1108,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           </div>
         )}
 
-        {/* ボタン */}
+        {/* Buttons */}
         <div className="flex justify-end gap-2">
           <MotionButton
             type="button"

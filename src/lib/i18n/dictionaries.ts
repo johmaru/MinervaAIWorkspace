@@ -1,14 +1,14 @@
 /**
- * i18n 辞書。ja が正、en は ja と同じキー構造を持つ（`en: typeof ja` で型チェック）。
- * key 命名規則: `namespace.camelCase`。
+ * i18n dictionaries. `ja` is the source of truth; `en` has the same key structure (type-checked via `en: typeof ja`).
+ * Key naming convention: `namespace.camelCase`.
  *
- * 補間プレースホルダは `{name}` 形式。`t(locale, key, { name: value })` で置換される。
+ * Interpolation placeholders use `{name}` format. Replaced via `t(locale, key, { name: value })`.
  *
- * 翻訳しない文字列（この辞書に含めない）:
- * - ブランド名 `UmansChat`
- * - 環境変数名（LLM_BASE_URL, LLM_API_KEY, ...）・技術値（none/low/medium/high/max, socks5://tor:9050）
- * - API バリデーションエラーの英語文字列（開発者向け）
- * - DB に保存されるデフォルトタイトル "New chat" / "New folder"
+ * Strings NOT translated (excluded from this dictionary):
+ * - Brand name `UmansChat`
+ * - Environment variable names (LLM_BASE_URL, LLM_API_KEY, ...) and technical values (none/low/medium/high/max, socks5://tor:9050)
+ * - English API validation error strings (for developers)
+ * - Default titles stored in DB: "New chat" / "New folder"
  */
 
 const ja = {
@@ -70,7 +70,7 @@ const ja = {
     prevBranch: "前の枝へ",
     nextBranch: "次の枝へ",
     deleteAttachment: "{filename} を削除",
-    // SSE status labels（chat route が送信）
+    // SSE status labels (sent by chat route)
     statusQuerying: "検索クエリを考え中…",
     statusSearching: "Web検索中…",
     statusScraping: "検索結果を読み込み中…",
@@ -81,6 +81,19 @@ const ja = {
     statusWikiMiss: "Wikipediaに該当記事が見つかりませんでした。知識で回答します。",
     statusWikiLooking: "Wikipediaで調べています。",
     statusWebEmpty: "Web検索で結果が見つかりませんでした。トレーニングデータで回答します。",
+    statusToolScrape: "URLの内容を取得しています。",
+    statusToolSearch: "Webで検索しています。",
+    statusUrlFetchFirst: "最初の10件のURLを取得します。",
+    statusUrlFetch: "URLの内容を取得しています。",
+    statusToolMcp: "MCP: {server}/{tool} を実行中",
+    statusToolNotion: "Notion: {tool} を実行中",
+    statusSearchLimit: "検索回数上限に達しました。",
+    statusRegenerating: "検索結果に基づいて回答を生成しています。",
+    statusDualModelA: "モデルA（{model}）が回答中…",
+    statusDualModelB: "モデルB（{model}）が回答中…",
+    statusReviewA: "モデルAがモデルBの回答をレビュー中…",
+    statusReviewB: "モデルBがモデルAの回答をレビュー中…",
+    statusDebateRound: "デュアルモデル議論中… {round}/{total}",
     noticeSearchDefault: "最新の情報をWebで確認します。",
     noticeSearchFallback: "検索判定を定型ルールで補完し、Webで最新情報を確認します。",
     noticeSearchReview: "最新の評価やレビューをWebで確認します。",
@@ -93,7 +106,7 @@ const ja = {
     dualReviewB: "モデルBによるレビュー",
     dualDebate: "議論ログ",
     dualFinalModel: "統合モデル: {model}",
-    // hooks フォールバック
+    // hooks fallback
     loadError: "load error",
     streamError: "stream error",
     fetchError: "fetch error",
@@ -120,7 +133,7 @@ const ja = {
     hasInstruction: "Instruction あり",
     folderActions: "フォルダアクション",
     memory: "メモリ",
-    // hooks フォールバック
+    // hooks fallback
     loadError: "load error",
     createError: "create error",
     renameError: "rename error",
@@ -213,7 +226,7 @@ const ja = {
     tzEnv: "TZ",
     tzPlaceholder: "空 = Asia/Tokyo",
     database: "Database",
-    // API からのメッセージ（settings/route.ts が返す）
+    // Messages from API (returned by settings/route.ts)
     apiTorStarted: "Tor を起動し、スクレイピングを Tor 経由に切り替えました。scraper コンテナの再起動が必要です。",
     apiTorStopped: "Tor を停止し、スクレイピングを直接接続に切り替えました。scraper コンテナの再起動が必要です。",
     apiTorOperationFailed: "Tor の操作に失敗",
@@ -222,7 +235,7 @@ const ja = {
     apiTorRestartScraperFail: "scraper の再起動に失敗: {error}",
     apiTorContainerFail: "Tor コンテナの{action}に失敗: {error}",
     apiEnvUpdateFail: ".env の更新に失敗: {error}",
-    // EMBED_MODEL_OPTIONS の label（settings/route.ts が返す）
+    // EMBED_MODEL_OPTIONS labels (returned by settings/route.ts)
     embedLabelMiniLM: "all-MiniLM-L6-v2 (384次元, 英語中心, 高速)",
     embedLabelMultilingual: "paraphrase-multilingual-MiniLM-L12-v2 (384次元, 多言語・日本語対応, 推奨)",
     embedLabelE5Small: "multilingual-e5-small (384次元, 多言語)",
@@ -246,6 +259,27 @@ const ja = {
     gsiNamePlaceholder: "インストラクション名（例: 丁寧な敬語）",
     gsiContentPlaceholder: "システムプロンプトの内容",
     gsiNameContentRequired: "名前と内容は必須です",
+    tunnelStartFailed: "トンネル起動に失敗しました",
+    tunnelStopFailed: "トンネル停止に失敗しました",
+    tunnelStarted: "トンネルを起動しました",
+    tunnelStopped: "トンネルを停止しました",
+    authUrlHttpsRequired: "AUTH_URL は https:// で始まる公開 URL が必要です",
+    tunnelRunningDesc: "トンネル経由で公開中",
+    tunnelTokenPrompt: "トークンを入力して起動",
+    tunnelProcessingBtn: "処理中...",
+    tunnelStartBtn: "起動",
+    tunnelStopBtn: "停止",
+    tunnelTokenCopyHint: "Cloudflare Zero Trust → Networks → Tunnels → トークンをコピー",
+    placeholderUpdate: "••••••••（入力で更新）",
+    dbVectorDimEmpty: "(空)",
+    notionClientIdHint: "https://www.notion.so/developers で取得",
+    notionClientSecretHint: "Integration secrets (本番環境用)",
+    authUrlHint: "Notion の Redirect URI と一致させる。Cloudflare Tunnel 使用時は https:// で始まる公開 URL を設定",
+    apiTunnelTokenMissing: "TUNNEL_TOKEN が設定されていません",
+    apiTunnelAuthUrlInvalid: "AUTH_URL は https:// で始まる公開 URL である必要があります",
+    apiEnvSaveFailed: ".env の保存に失敗: {error}",
+    apiTunnelStartFailed: "トンネル起動に失敗: {error}",
+    apiTunnelStopFailed: "トンネル停止に失敗: {error}",
   },
   threadSettings: {
     toggle: "スレッド設定を開閉",
@@ -539,6 +573,19 @@ const en: typeof ja = {
     statusWikiMiss: "No Wikipedia article found. I'll answer from my knowledge.",
     statusWikiLooking: "Looking it up on Wikipedia.",
     statusWebEmpty: "Web search returned no results. I'll answer from my training data.",
+    statusToolScrape: "Fetching URL content…",
+    statusToolSearch: "Searching the web…",
+    statusUrlFetchFirst: "Fetching the first 10 URLs…",
+    statusUrlFetch: "Fetching URL content…",
+    statusToolMcp: "Running MCP: {server}/{tool}",
+    statusToolNotion: "Running Notion: {tool}",
+    statusSearchLimit: "Reached the search round limit.",
+    statusRegenerating: "Generating answer based on search results…",
+    statusDualModelA: "Model A ({model}) is answering…",
+    statusDualModelB: "Model B ({model}) is answering…",
+    statusReviewA: "Model A is reviewing Model B's answer…",
+    statusReviewB: "Model B is reviewing Model A's answer…",
+    statusDebateRound: "Dual-model debate in progress… {round}/{total}",
     noticeSearchDefault: "I'll check the latest information on the web.",
     noticeSearchFallback: "Filling in the search decision with a fixed rule; checking the latest on the web.",
     noticeSearchReview: "I'll check the latest reviews and ratings on the web.",
@@ -691,6 +738,27 @@ const en: typeof ja = {
     gsiNamePlaceholder: "Instruction name (e.g. polite keigo)",
     gsiContentPlaceholder: "System prompt content",
     gsiNameContentRequired: "Name and content are required",
+    tunnelStartFailed: "Failed to start tunnel",
+    tunnelStopFailed: "Failed to stop tunnel",
+    tunnelStarted: "Tunnel started",
+    tunnelStopped: "Tunnel stopped",
+    authUrlHttpsRequired: "AUTH_URL must be a public URL starting with https://",
+    tunnelRunningDesc: "Published via tunnel",
+    tunnelTokenPrompt: "Enter a token to start",
+    tunnelProcessingBtn: "Processing…",
+    tunnelStartBtn: "Start",
+    tunnelStopBtn: "Stop",
+    tunnelTokenCopyHint: "Cloudflare Zero Trust → Networks → Tunnels → copy the token",
+    placeholderUpdate: "•••••••• (enter to update)",
+    dbVectorDimEmpty: "(empty)",
+    notionClientIdHint: "Obtain from https://www.notion.so/developers",
+    notionClientSecretHint: "Integration secrets (for production)",
+    authUrlHint: "Match the Notion Redirect URI. When using Cloudflare Tunnel, set a public URL starting with https://",
+    apiTunnelTokenMissing: "TUNNEL_TOKEN is not set",
+    apiTunnelAuthUrlInvalid: "AUTH_URL must be a public URL starting with https://",
+    apiEnvSaveFailed: "Failed to save .env: {error}",
+    apiTunnelStartFailed: "Failed to start tunnel: {error}",
+    apiTunnelStopFailed: "Failed to stop tunnel: {error}",
     embedLabelE5Base: "multilingual-e5-base (768-dim, multilingual, high accuracy)",
     embedLabelLFM2: "LFM2.5-Embedding-350M (1024-dim, multilingual, requires Python backend)",
     connections: "Connections",

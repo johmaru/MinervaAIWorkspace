@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { folders, threads, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// searchWeb / upsertPage / decideSearch をモック: SearXNG/DB/LLM副作用なしで sources イベントを検証
+// Mock searchWeb / upsertPage / decideSearch: verify sources event without SearXNG/DB/LLM side effects
 vi.mock("@/lib/scraper", () => ({
   searchWeb: vi.fn(),
   scrapeUrl: vi.fn(),
@@ -31,19 +31,19 @@ vi.mock("@/lib/toolProbe", () => ({
   warmupToolProbe: vi.fn(),
 }));
 vi.mock("@/lib/auth-guards", () => ({
-  // テスト用の固定ユーザー。createThread はこの userId でスレッドを作成する。
+  // Fixed test user. createThread creates a thread with this userId.
   getSessionUser: vi.fn().mockResolvedValue({ id: "test-user-id", name: "tester", email: "t@example.com" }),
 }));
 vi.mock("next/server", () => ({
-  // route.ts は next/server から after() のみをインポートする。
-  // importOriginal() は next-auth が next/server (ESM) を解決できず
-  // Next 16 で失敗するため、ファクトリで最小モックを返す。
+  // route.ts only imports after() from next/server.
+  // importOriginal() fails on Next 16 because next-auth cannot resolve
+  // next/server (ESM), so the factory returns a minimal mock.
   after: () => {},
 }));
 
-// LLM クライアント: createLLM のみ上書き可能にする。それ以外は実装を維持し、
-// itReal テストが実 API を叩けるようにする。createLLM は unit test で差し替える。
-// vi.mock は hoist されるため、モック内で参照する変数は vi.hoisted で囲む。
+// LLM client: only createLLM is overridable. Other implementations are kept as-is,
+// so itReal tests can call the real API. createLLM is replaced in unit tests.
+// vi.mock is hoisted, so variables referenced in mocks are wrapped with vi.hoisted.
 const { capturedMessages, fakeLlm, useFakeLlm } = vi.hoisted(() => {
   const captured: Record<string, unknown>[][] = [];
   const stream = async function* () {
@@ -62,8 +62,8 @@ const { capturedMessages, fakeLlm, useFakeLlm } = vi.hoisted(() => {
       },
     },
   };
-  // unit test なら true にして fakeLlm を使う。itReal なら false で実装に戻す。
   let useFake = false;
+  // For unit tests, set to true to use fakeLlm. For itReal, set to false to use the real implementation.
   return { capturedMessages: captured, fakeLlm: fake, useFakeLlm: { get: () => useFake, set: (v: boolean) => (useFake = v) } };
 });
 vi.mock("@/lib/llm", async (importOriginal) => {
@@ -74,7 +74,7 @@ vi.mock("@/lib/llm", async (importOriginal) => {
   };
 });
 
-import { searchWeb } from "@/lib/scraper";
+import { searchWeb, scrapeUrl } from "@/lib/scraper";
 import { decideSearch } from "@/lib/searchDecision";
 import { searchWikipedia } from "@/lib/wikipedia";
 import { buildMemoryContext } from "@/lib/memoryStore";
@@ -82,27 +82,27 @@ import { probeToolSupport } from "@/lib/toolProbe";
 import { POST } from "@/app/api/chat/route";
 import { createLLM } from "@/lib/llm";
 
-// テスト間でモックの呼び出し履歴・戻り値をリセット（leak 防止）
+// Reset mock call history and return values between tests (prevent leaks)
 beforeEach(() => {
   vi.mocked(searchWeb).mockReset();
   vi.mocked(searchWikipedia).mockReset();
   capturedMessages.length = 0;
   vi.mocked(decideSearch).mockReset();
   vi.mocked(buildMemoryContext).mockReset();
-  // デフォルト: 検索不要（通常チャットのテストで実 LLM ルーターを呼ばない）
+  // Default: no search needed (don't call real LLM router in normal chat tests)
   vi.mocked(decideSearch).mockResolvedValue({
     searchLevel: "none",
     reason: "default mock",
     userNotice: null,
     queries: [],
   });
-  // デフォルト: 記憶なし（null = 注入しない）
+  // Default: no memory (null = not injected)
   vi.mocked(buildMemoryContext).mockResolvedValue(null);
 });
 
-// Phase 2: /api/chat は DB 永続化 + 実 API ストリーミング。
-// .env の LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を使用（vitest.setup.ts で読み込み済み）。
-// テストごとにスレッドを作成し、afterAll で掃除。
+// Phase 2: /api/chat uses DB persistence + real API streaming.
+// Uses .env LLM_BASE_URL / LLM_API_KEY / LLM_MODEL (loaded in vitest.setup.ts).
+// Creates a thread per test, cleans up in afterAll.
 
 const hasCreds = Boolean(process.env.LLM_BASE_URL && process.env.LLM_API_KEY);
 const itReal = hasCreds ? it : it.skip;
@@ -111,7 +111,7 @@ const createdIds: string[] = [];
 const createdFolderIds: string[] = [];
 
 beforeAll(async () => {
-  // threads.userId は users.id を参照するため、テストユーザーを事前作成。
+  // threads.userId references users.id, so create a test user beforehand.
   await db.insert(users).values({ id: "test-user-id", nickname: "tester", email: "t@example.com" }).onConflictDoNothing();
 });
 
@@ -133,7 +133,7 @@ async function createThread(): Promise<string> {
 function chatReq(
   threadId: string,
   content: string,
-  opts?: { systemPrompt?: string; rapid?: boolean; timeRange?: "day" | "week" | "month" | "year" },
+  opts?: { systemPrompt?: string; rapid?: boolean; timeRange?: "day" | "week" | "month" | "year"; locale?: string },
 ): Request {
   return new Request("http://localhost/api/chat", {
     method: "POST",
@@ -144,7 +144,7 @@ function chatReq(
       rapid: opts?.rapid,
       timeRange: opts?.timeRange,
     }),
-    headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
+    headers: { "Content-Type": "application/json", cookie: `umanschat-locale=${opts?.locale ?? "ja"}` },
   });
 }
 
@@ -166,19 +166,19 @@ function parseEvents(raw: string): { event: string; data: Record<string, unknown
     try {
       out.push({ event, data: JSON.parse(dataLine) });
     } catch {
-      // 無視
+      // Ignore
     }
   }
   return out;
 }
 
-describe("POST /api/chat — バリデーション", () => {
-  it("空ボディは 400", async () => {
+describe("POST /api/chat — validation", () => {
+  it("empty body returns 400", async () => {
     const res = await POST(new Request("http://localhost/api/chat", { method: "POST" }));
     expect(res.status).toBe(400);
   });
 
-  it("不正 JSON は 400", async () => {
+  it("invalid JSON returns 400", async () => {
     const res = await POST(
       new Request("http://localhost/api/chat", {
         method: "POST",
@@ -189,7 +189,7 @@ describe("POST /api/chat — バリデーション", () => {
     expect(res.status).toBe(400);
   });
 
-  it("threadId 未指定は 400", async () => {
+  it("missing threadId returns 400", async () => {
     const res = await POST(
       new Request("http://localhost/api/chat", {
         method: "POST",
@@ -200,7 +200,7 @@ describe("POST /api/chat — バリデーション", () => {
     expect(res.status).toBe(400);
   });
 
-  it("content 未指定は 400", async () => {
+  it("missing content returns 400", async () => {
     const id = await createThread();
     const res = await POST(
       new Request("http://localhost/api/chat", {
@@ -212,14 +212,14 @@ describe("POST /api/chat — バリデーション", () => {
     expect(res.status).toBe(400);
   });
 
-  it("存在しない threadId は 404", async () => {
+  it("nonexistent threadId returns 404", async () => {
     const res = await POST(chatReq("00000000-0000-0000-0000-000000000000", "hi"));
     expect(res.status).toBe(404);
   });
 });
 
-describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () => {
-  itReal("SSE で start/delta/done を返し user/assistant を DB に保存", async () => {
+describe("POST /api/chat — real API streaming + DB persistence", () => {
+  itReal("returns start/delta/done via SSE and saves user/assistant to DB", async () => {
     const id = await createThread();
     const res = await POST(chatReq(id, "「OK」とだけ2文字で返して。"));
 
@@ -249,7 +249,7 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
     expect(text.length).toBeGreaterThan(0);
   }, 120_000);
 
-  itReal("title が New chat のとき初回送信で自動生成される", async () => {
+  itReal("title auto-generated on first send when title is 'New chat'", async () => {
     const [row0] = await db.insert(threads).values({ title: "New chat", userId: "test-user-id" }).returning();
     createdIds.push(row0.id);
     const id = row0.id;
@@ -261,11 +261,11 @@ describe("POST /api/chat — 実 API ストリーミング + DB 永続化", () =
   }, 120_000);
 });
 
-describe("POST /api/chat — Web 検索 sources イベント", () => {
-  itReal("検索判定 → status → sources の順でイベントを送信", async () => {
+describe("POST /api/chat — Web search sources event", () => {
+  itReal("sends events in order: search decision → status → sources", async () => {
     const id = await createThread();
 
-    // 検索判定ルーターをモック: searchLevel:"web" でクエリを返す
+    // Mock search decision router: returns searchLevel:"web" with a query
     vi.mocked(decideSearch).mockResolvedValueOnce({
       searchLevel: "web",
       reason: "latest info",
@@ -294,12 +294,11 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // status イベント（userNotice）が送信される
+    // status event (userNotice) is sent
     const statusEvents = events.filter((e) => e.event === "status");
     expect(statusEvents.length).toBeGreaterThanOrEqual(1);
     expect(statusEvents[0].data.label).toBe("最新情報を確認するね。");
-
-    // sources イベント
+    // sources event
     const sources = events.filter((e) => e.event === "sources");
     expect(sources).toHaveLength(1);
     const srcs = sources[0].data.sources as Array<{ url: string; title: string }>;
@@ -307,18 +306,16 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     expect(srcs[0].url).toBe("https://example.com/python");
     expect(srcs[0].title).toBe("Python");
 
-    // start → status → sources → ... → done の順序
+    // Order: start → status → sources → ... → done
     const startIdx = events.findIndex((e) => e.event === "start");
     const statusIdx = events.findIndex((e) => e.event === "status");
     const sourcesIdx = events.findIndex((e) => e.event === "sources");
     expect(statusIdx).toBeGreaterThan(startIdx);
     expect(sourcesIdx).toBeGreaterThan(statusIdx);
   }, 120_000);
-
-  itReal("検索不要時は status/sources イベントを出さない", async () => {
+  itReal("does not send status/sources events when search is unnecessary", async () => {
     const id = await createThread();
-
-    // 検索判定ルーターをモック: searchLevel:"none"
+    // Mock search decision router: searchLevel:"none"
     vi.mocked(decideSearch).mockResolvedValueOnce({
       searchLevel: "none",
       reason: "stable knowledge",
@@ -332,15 +329,15 @@ describe("POST /api/chat — Web 検索 sources イベント", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // status / sources は出ない
+    // status / sources are not sent
     expect(events.filter((e) => e.event === "status")).toHaveLength(0);
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
-    // searchWeb は呼ばれない
+    // searchWeb is not called
     expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
   }, 120_000);
 });
 
-describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () => {
+describe("POST /api/chat — calls decideSearch with WEB_SEARCH_MODEL", () => {
   const origSearchModel = process.env.WEB_SEARCH_MODEL;
 
   afterEach(() => {
@@ -348,7 +345,7 @@ describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () =>
     else process.env.WEB_SEARCH_MODEL = origSearchModel;
   });
 
-  itReal("検索必要時 → WEB_SEARCH_MODEL で decideSearch を呼ぶ", async () => {
+  itReal("when search needed → calls decideSearch with WEB_SEARCH_MODEL", async () => {
     process.env.WEB_SEARCH_MODEL = "umans-test-search";
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
@@ -378,20 +375,20 @@ describe("POST /api/chat — WEB_SEARCH_MODEL で decideSearch を呼ぶ", () =>
 
     await sseChunks(res);
 
-    // decideSearch の第2引数（model）が WEB_SEARCH_MODEL の値であること
+    // Verify decideSearch's 2nd argument (model) equals the WEB_SEARCH_MODEL value
     expect(vi.mocked(decideSearch)).toHaveBeenCalled();
     const callArgs = vi.mocked(decideSearch).mock.calls[0];
     expect(callArgs[1]).toBe("umans-test-search");
-    // searchWeb も呼ばれる（SearXNG パス経由）
+    // searchWeb is also called (via SearXNG path)
     expect(vi.mocked(searchWeb)).toHaveBeenCalled();
   }, 120_000);
 });
 
-describe("POST /api/chat — 記憶注入", () => {
-  itReal("記憶がある場合、LLM への messages に memory system message が含まれる", async () => {
+describe("POST /api/chat — memory injection", () => {
+  itReal("when memories exist, LLM messages include a memory system message", async () => {
     const id = await createThread();
 
-    // 記憶注入をモック: 記憶あり
+    // Mock memory injection: with memories
     vi.mocked(buildMemoryContext).mockResolvedValueOnce({
       role: "system",
       content: "Past memories from previous conversations. Use these to provide context for the user's question. If the user asks what you discussed before, summarize the relevant memories.\n- [fact] User uses FPGA",
@@ -400,38 +397,38 @@ describe("POST /api/chat — 記憶注入", () => {
     const res = await POST(chatReq(id, "私の得意分野は？"));
     expect(res.status).toBe(200);
 
-    // ストリームを消費してからアサート（buildMemoryContext は start() 内で呼ばれる）
+    // Consume stream before asserting (buildMemoryContext is called inside start())
     await sseChunks(res);
 
-    // buildMemoryContext が呼ばれた
+    // buildMemoryContext was called
     expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
   }, 120_000);
 
-  itReal("記憶が無い場合は buildMemoryContext が呼ばれるが null を返す", async () => {
+  itReal("when no memories, buildMemoryContext is called but returns null", async () => {
     const id = await createThread();
 
-    // 記憶なし（デフォルト mock のまま）
+    // No memories (default mock)
     const res = await POST(chatReq(id, "こんにちは"));
     expect(res.status).toBe(200);
 
     await sseChunks(res);
-    // buildMemoryContext は呼ばれる（結果は null）
+    // buildMemoryContext is called (result is null)
     expect(vi.mocked(buildMemoryContext)).toHaveBeenCalled();
   }, 120_000);
 });
 
 describe("POST /api/chat — rapid mode", () => {
-  itReal("rapid:true で検索・記憶・URL をスキップしつつ start/delta/done は送信する", async () => {
+  itReal("rapid:true skips search/memory/URL while still sending start/delta/done", async () => {
     const id = await createThread();
 
-    // 検索が必要な設定にしておき、rapid でスキップされることを検証
+    // Set up search-needed config to verify it's skipped in rapid mode
     vi.mocked(decideSearch).mockResolvedValueOnce({
       searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
       queries: ["python programming language"],
     });
-    // 記憶ありの戻り値を設定しておき、rapid で呼ばれないことを検証
+    // Set up memory-present return to verify it's not called in rapid mode
     vi.mocked(buildMemoryContext).mockResolvedValueOnce({
       role: "system",
       content: "Past memories from previous conversations.",
@@ -463,12 +460,12 @@ describe("POST /api/chat — rapid mode", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // ラピッドモード: 検索・記憶・URL スクレイプは一切呼ばれない
+    // Rapid mode: search/memory/URL scrape are never called
     expect(vi.mocked(decideSearch)).not.toHaveBeenCalled();
     expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
     expect(vi.mocked(buildMemoryContext)).not.toHaveBeenCalled();
 
-    // ただしストリーミング自体は動作する
+    // But streaming itself still works
     const start = events.filter((e) => e.event === "start");
     const deltas = events.filter((e) => e.event === "delta" && typeof e.data.delta === "string");
     const done = events.filter((e) => e.event === "done");
@@ -479,11 +476,11 @@ describe("POST /api/chat — rapid mode", () => {
   }, 120_000);
 });
 
-describe("POST /api/chat — time_range 透過", () => {
-  itReal("body.timeRange が searchWeb の第3引数に渡される", async () => {
+describe("POST /api/chat — time_range passthrough", () => {
+  itReal("body.timeRange is passed as the 3rd argument to searchWeb", async () => {
     const id = await createThread();
 
-    // 検索判定ルーターをモック: searchLevel:"web" でクエリ1件
+    // Mock search decision router: searchLevel:"web" with 1 query
     vi.mocked(decideSearch).mockResolvedValueOnce({
       searchLevel: "web",
       reason: "latest info",
@@ -510,7 +507,7 @@ describe("POST /api/chat — time_range 透過", () => {
 
     await sseChunks(res);
 
-    // searchWeb の第3引数（timeRange）が body.timeRange と一致すること
+    // Verify searchWeb's 3rd argument (timeRange) matches body.timeRange
     expect(vi.mocked(searchWeb)).toHaveBeenCalled();
     const callArgs = vi.mocked(searchWeb).mock.calls[0];
     expect(callArgs[0]).toBe("latest news today");
@@ -518,8 +515,8 @@ describe("POST /api/chat — time_range 透過", () => {
   }, 120_000);
 });
 
-describe("POST /api/chat — 検索結果0件時のステータス通知", () => {
-  itReal("searchWeb が空結果を返した場合、status イベントで通知する", async () => {
+describe("POST /api/chat — status notification when search returns 0 results", () => {
+  itReal("when searchWeb returns empty results, sends a status event notification", async () => {
     const id = await createThread();
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
@@ -539,23 +536,23 @@ describe("POST /api/chat — 検索結果0件時のステータス通知", () =>
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // 検索開始の status（userNotice）が送信される
+    // Search start status (userNotice) is sent
     const statusEvents = events.filter((e) => e.event === "status");
     expect(statusEvents.length).toBeGreaterThanOrEqual(1);
 
-    // 最後の status が「結果が見つからなかった」通知であること
+    // The last status should be a "no results found" notification
     const lastStatus = statusEvents[statusEvents.length - 1];
     expect(lastStatus.data.label).toContain("Web検索で結果が見つかりませんでした");
 
-    // sources イベントは送信されない（結果0件なので）
+    // sources event is not sent (0 results)
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
   }, 120_000);
 });
 
-describe("POST /api/chat — ツール使用時に事前検索メッセージを除外", () => {
-  // ツール使用モードでは buildSearchContext の「検索完了・再検索禁止」system メッセージが
-  // LLM のツール呼び出し結果の参照を阻害するため、effectiveMessages から除外される。
-  // ツール非使用モードでは従来通り searchContextMessage が LLM に渡される。
+describe("POST /api/chat — exclude pre-search message during tool use", () => {
+  // In tool-use mode, buildSearchContext's "search complete, do not re-search" system message
+  // hinders the LLM's tool call result reference, so it is excluded from effectiveMessages.
+  // In non-tool-use mode, searchContextMessage is passed to the LLM as before.
 
   beforeAll(() => useFakeLlm.set(true));
   afterAll(() => useFakeLlm.set(false));
@@ -581,7 +578,7 @@ describe("POST /api/chat — ツール使用時に事前検索メッセージを
     ],
   };
 
-  it("ツール対応モデル → LLM の messages に「検索完了」メッセージが含まれない", async () => {
+  it("tool-supporting model → LLM messages do not contain 'search complete' message", async () => {
     const id = await createThread();
     vi.mocked(decideSearch).mockResolvedValueOnce(searchDecided);
     vi.mocked(searchWeb).mockResolvedValueOnce(searchHit);
@@ -594,7 +591,7 @@ describe("POST /api/chat — ツール使用時に事前検索メッセージを
     expect(res.status).toBe(200);
     await sseChunks(res);
 
-    // LLM に渡された全呼び出しの messages から「検索完了・再検索禁止」を探す
+    // Search all LLM call messages for "search complete, do not re-search"
     const forbidden = "Web search has already been completed";
     const found = capturedMessages.some((msgs) =>
       msgs.some(
@@ -604,7 +601,7 @@ describe("POST /api/chat — ツール使用時に事前検索メッセージを
     expect(found).toBe(false);
   }, 30_000);
 
-  it("ツール非対応モデル → LLM の messages に「検索完了」メッセージが含まれる", async () => {
+  it("non-tool-supporting model → LLM messages contain 'search complete' message", async () => {
     const id = await createThread();
     vi.mocked(decideSearch).mockResolvedValueOnce(searchDecided);
     vi.mocked(searchWeb).mockResolvedValueOnce(searchHit);
@@ -679,11 +676,11 @@ describe("POST /api/chat — tool-call markup leak prevention", () => {
   }, 30_000);
 });
 
-describe("POST /api/chat — searchLevel:wiki で Wikipedia 参照", () => {
+describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
   beforeAll(() => useFakeLlm.set(true));
   afterAll(() => useFakeLlm.set(false));
 
-  it("searchLevel:wiki → searchWikipedia が呼ばれ searchWeb は呼ばれない", async () => {
+  it("searchLevel:wiki → searchWikipedia is called, searchWeb is not", async () => {
     const id = await createThread();
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
@@ -706,20 +703,20 @@ describe("POST /api/chat — searchLevel:wiki で Wikipedia 参照", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // searchWikipedia が呼ばれる
+    // searchWikipedia is called
     expect(vi.mocked(searchWikipedia)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(searchWikipedia).mock.calls[0][0]).toBe("マグナ・カルタ");
-    // searchWeb は呼ばれない（フル Web 検索パスに入らない）
+    // searchWeb is not called (does not enter the full web search path)
     expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
 
-    // sources イベントで Wikipedia URL が送信される
+    // sources event sends the Wikipedia URL
     const sources = events.filter((e) => e.event === "sources");
     expect(sources).toHaveLength(1);
     const srcs = sources[0].data.sources as Array<{ url: string }>;
     expect(srcs[0].url).toBe("https://ja.wikipedia.org/wiki/マグナ・カルタ");
   }, 30_000);
 
-  it("searchLevel:wiki で Wikipedia に記事が無い → searchWeb は呼ばず知識で回答", async () => {
+  it("searchLevel:wiki with no Wikipedia article → does not call searchWeb, answers from knowledge", async () => {
     const id = await createThread();
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
@@ -736,14 +733,41 @@ describe("POST /api/chat — searchLevel:wiki で Wikipedia 参照", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // searchWikipedia は呼ばれるが結果 null
+    // searchWikipedia is called but returns null
     expect(vi.mocked(searchWikipedia)).toHaveBeenCalledTimes(1);
-    // searchWeb にはフォールバックしない
+    // Does not fall back to searchWeb
     expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
-    // sources イベントは送信されない（記事なし）
+    // sources event is not sent (no article)
     expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
-    // 「記事が見つからなかった」status 通知が出る
+    // A "no article found" status notification appears
     const statusEvents = events.filter((e) => e.event === "status");
     expect(statusEvents.some((e) => e.data.label.includes("Wikipediaに該当記事が見つかりません"))).toBe(true);
   }, 30_000);
+});
+
+describe("POST /api/chat — English locale status labels", () => {
+  // Regression: hardcoded Japanese status labels must be localized via t(locale, ...).
+  // Exercises buildUrlContext with locale=en and asserts the newly-i18n'd
+  // statusUrlFetch label is English ("Fetching URL content…").
+  it("URL scraping sends an English status label when locale=en", async () => {
+    const id = await createThread();
+
+    vi.mocked(scrapeUrl).mockResolvedValueOnce({
+      url: "https://example.com/article",
+      title: "Example Article",
+      content: "This is the article body.",
+    });
+
+    const res = await POST(chatReq(id, "Check this out: https://example.com/article", { locale: "en" }));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    const statusEvents = events.filter((e) => e.event === "status");
+    const fetchStatus = statusEvents.find(
+      (e) => e.data.label === "Fetching URL content…",
+    );
+    expect(fetchStatus).toBeDefined();
+  }, 120_000);
 });
