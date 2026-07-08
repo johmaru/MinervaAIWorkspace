@@ -16,13 +16,22 @@ const root = process.cwd();
 const distDir = join(root, "dist");
 const outDir = join(distDir, "UmansChat");
 
+// Clean up dist/ and .next/ BEFORE build so output-file-tracing does not pick
+// up a stale dist/ (which causes recursive dist/UmansChat/dist/... nesting).
+// Deleting the entire dist/ (not just dist/UmansChat) ensures the trace sees
+// no dist tree at all. .next is cleaned to avoid reusing stale tracing output.
+if (existsSync(distDir)) {
+  rmSync(distDir, { recursive: true, force: true });
+}
+const nextDir = join(root, ".next");
+if (existsSync(nextDir)) {
+  rmSync(nextDir, { recursive: true, force: true });
+}
+
 console.log("[pack] Building standalone server...");
 execSync("bun run build", { cwd: root, stdio: "inherit", env: { ...process.env, DATABASE_URL: ":memory:" } });
 
-// Clean up dist/UmansChat/
-if (existsSync(outDir)) {
-  rmSync(outDir, { recursive: true, force: true });
-}
+// Create output directory AFTER build so tracing never sees it.
 mkdirSync(outDir, { recursive: true });
 
 console.log("[pack] Copying files...");
