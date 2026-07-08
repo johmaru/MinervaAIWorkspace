@@ -4,6 +4,10 @@ A self-hosted, open-source AI workspace for high-resource OpenAI-compatible prov
 
 [日本語 / Japanese](./README.ja.md)
 
+## Contributor Documentation
+
+Comprehensive documentation for contributors is available in the [`docs/`](./docs/) folder. It covers architecture, database schema, chat streaming, memory/skills systems, tool calling, frontend components, deployment, testing, and more. See [`docs/README.md`](./docs/README.md) for the full index.
+
 ## Features
 
 - **Streaming chat** with SSE (token-by-token output)
