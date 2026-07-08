@@ -2,16 +2,16 @@
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { users, threads, folders } from "@/db/schema";
-import { eq, isNull } from "drizzle-orm";
+import { eq, isNull, count as sqlCount } from "drizzle-orm";
 import { hashPassword } from "@/lib/password";
 import { signIn, signOut } from "@/auth";
 
 type FormState = { error?: string } | undefined;
 
 /**
- * register — アカウント作成。
- * 最初のユーザーの場合、既存のオーナー無しスレッド/フォルダを全て移行する。
- * 作成後は自動ログインして / にリダイレクト。
+ * register — Create an account.
+ * If this is the first user, migrate all ownerless threads/folders.
+ * After creation, automatically log in and redirect to /.
  */
 export async function register(state: FormState, formData: FormData): Promise<FormState> {
   const nickname = String(formData.get("nickname") ?? "").trim();
@@ -22,39 +22,41 @@ export async function register(state: FormState, formData: FormData): Promise<Fo
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "auth.emailInvalid" };
   if (password.length < 8) return { error: "auth.passwordTooShort" };
 
-  // 既存ユーザーチェック
+  // Check for existing user
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
   if (existing) return { error: "auth.emailTaken" };
 
   const passwordHash = await hashPassword(password);
 
-  // ユーザー作成 + 初回ユーザー判定をトランザクション内で行い、
-  // 並行登録時の競合状態（両者とも userCount=0 を観測してオーナー無しデータを
-  // 二重移行する問題）を防止する。
-  const [user, userCount] = await db.transaction(async (tx) => {
-    const count = await tx.$count(users);
-    const [inserted] = await tx
+  // Create user + determine if first user within a transaction,
+  // preventing a race condition on concurrent registration
+  // (both observers see userCount=0 and double-migrate ownerless data).
+  // better-sqlite3 is a sync driver: transaction callback must be sync.
+  const [user, userCount] = db.transaction((tx) => {
+    const count = tx.select({ value: sqlCount() }).from(users).get()?.value ?? 0;
+    const inserted = tx
       .insert(users)
       .values({ nickname, email, passwordHash })
-      .returning({ id: users.id, nickname: users.nickname, email: users.email });
+      .returning({ id: users.id, nickname: users.nickname, email: users.email })
+      .all()[0];
     return [inserted, count] as const;
   });
 
   if (!user) return { error: "auth.createFailed" };
 
   if (userCount === 0) {
-    // 最初のユーザー: オーナー無しスレッド + フォルダを全て移行
+    // First user: migrate all ownerless threads + folders
     await db.update(threads).set({ userId: user.id }).where(isNull(threads.userId));
     await db.update(folders).set({ userId: user.id }).where(isNull(folders.userId));
   }
 
-  // 自動ログイン
+  // Auto-login
   await signIn("credentials", { email, password, redirect: false });
   redirect("/");
 }
 
 /**
- * login — Credentials でログイン。
+ * login — Log in with credentials.
  */
 export async function login(state: FormState, formData: FormData): Promise<FormState> {
   const email = String(formData.get("email") ?? "").toLowerCase().trim();
@@ -68,10 +70,10 @@ export async function login(state: FormState, formData: FormData): Promise<FormS
 }
 
 /**
- * authenticate — ログイン/登録を統合したサーバーアクション。
- * useActionState に単一の安定した関数参照を渡すため、
- * モード切替で action が切り替わる問題を回避する。
- * formData の mode フィールドで login/register を判定。
+ * authenticate — Unified server action for login/registration.
+ * Passing a single stable function reference to useActionState
+ * avoids the issue of the action switching on mode change.
+ * Determines login/register via the formData mode field.
  */
 export async function authenticate(state: FormState, formData: FormData): Promise<FormState> {
   const mode = String(formData.get("mode") ?? "login");
@@ -80,7 +82,7 @@ export async function authenticate(state: FormState, formData: FormData): Promis
 }
 
 /**
- * logout — セッション破棄して /login にリダイレクト。
+ * logout — Destroy session and redirect to /login.
  */
 export async function logout(): Promise<void> {
   await signOut();
@@ -88,9 +90,9 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * signInWithGoogle — Google OAuth ログインを開始するサーバーアクション。
- * Client Component から直接 signIn("google") を呼ぶと auth.ts → db → pg が
- * ブラウザバンドルに巻き込まれるため、サーバーアクション経由で呼ぶ。
+ * signInWithGoogle — Server action to start Google OAuth login.
+ * Calling signIn("google") directly from a Client Component would
+ * pull auth.ts → db → pg into the browser bundle, so we call via a server action.
  */
 export async function signInWithGoogle(): Promise<void> {
   await signIn("google", { callbackUrl: "/" });

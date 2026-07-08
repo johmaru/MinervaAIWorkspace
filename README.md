@@ -114,7 +114,7 @@ On first run, database migrations are applied automatically by the app, and you'
 
 ## Quick Start (Standalone Windows exe)
 
-A no-Docker, double-clickable Windows experience. The resulting `dist/UmansChat/umanschat.exe` bundles the standalone server, a SQLite database file, the ONNX runtime, and a launcher — no Docker, Node, or Bun install required on the target machine.
+A no-Docker, double-clickable Windows experience. The resulting `dist/UmansChat/umanschat.exe` bundles the standalone server, a SQLite database file, the ONNX runtime, a launcher, and a bundled `node.exe` — no Docker, Node, or Bun install required on the target machine.
 > **Build machine requires** Windows + [Bun](https://bun.sh) installed. The target machine needs nothing.
 
 ```bash

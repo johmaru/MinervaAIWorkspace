@@ -1,44 +1,47 @@
 /**
- * umanschat-launcher.cjs — スタンドアロン配布用ランチャー。
+ * umanschat-launcher.cjs — Launcher for the standalone distribution.
  *
- * 1. アプリルート（server.js のディレクトリ）を解決
- * 2. data/ ディレクトリを確保
- * 3. .env の同期（.env.example の不足キーを追記）
- * 4. Drizzle マイグレーションを実行
- * 5. スタンドアロンサーバーを起動（PORT=3001）
- * 6. サーバー準備完了を待ってブラウザを開く
- * 7. サーバー終了までプロセスを維持
+ * 1. Resolve the app root (the directory of server.js)
+ * 2. Ensure the data/ directory exists
+ * 3. Sync .env (append any missing keys from .env.example)
+ * 4. Run Drizzle migrations
+ * 5. Start the standalone server (PORT=3001)
+ * 6. Wait for the server to be ready, then open the browser
+ * 7. Keep the process alive until the server exits
  *
- * bun build --compile で単一 exe にコンパイル可能。
- * その場合 process.execPath は Bun ランタイムを指す。
+ * Can be compiled into a single exe via bun build --compile.
+ * The compiled exe runs this launcher via the embedded Bun runtime.
+ * The launcher runs migrations via bun:sqlite, then spawns a bundled
+ * node.exe to execute server.js (the app uses better-sqlite3, which Bun
+ * does not support — Docker runs `node server.js` for parity).
  */
-const { spawn, execSync, exec } = require("child_process");
+const { spawn, exec } = require("child_process");
 const { mkdirSync, existsSync, readFileSync, writeFileSync } = require("fs");
 const { join, dirname, resolve } = require("path");
 const http = require("http");
 
 const PORT = process.env.PORT || "3001";
 
-// appRoot 解決: コンパイル済み exe の場合は process.execPath のディレクトリ、
-// node/bun で直接実行の場合は __dirname を使う
-// bun build --compile でコンパイルされた exe は __dirname が一時展開先を指す可能性がある
+// appRoot resolution: for a compiled exe, use the directory of process.execPath;
+// when running directly under node/bun, use __dirname.
+// An exe compiled with bun build --compile may have __dirname point to a temp extraction dir.
 const isCompiled = process.execPath.endsWith("umanschat.exe") ||
                    process.execPath.endsWith("umanschat");
 const appRoot = isCompiled
   ? dirname(process.execPath)
   : __dirname;
 
-// 1. data/ ディレクトリ確保
+// 1. Ensure the data/ directory exists
 const dataDir = join(appRoot, "data");
 mkdirSync(dataDir, { recursive: true });
 
-// DATABASE_URL の絶対パス（.env 同期後に解決）。マイグレーションと
-// サーバー起動で同じ SQLite ファイルを開くために共有する。
-// server.js は process.chdir(__dirname) を呼ぶため、相対パスだと
-// 異なるファイルを開いてしまう。絶対パスなら CWD に依存しない。
+// Absolute path for DATABASE_URL (resolved after .env sync). Shared between
+// migrations and server startup so they open the same SQLite file.
+// server.js calls process.chdir(__dirname), so a relative path would open a
+// different file. An absolute path is independent of the CWD.
 let dbPath = null;
 
-// 2. .env 同期: .env.example のキーを .env に追記（既存キーは変更しない）
+// 2. .env sync: append keys from .env.example to .env (existing keys are not modified)
 function syncEnv() {
   const examplePath = join(appRoot, ".env.example");
   const envPath = join(appRoot, ".env");
@@ -75,10 +78,10 @@ function syncEnv() {
   }
 }
 
-// .env の DATABASE_URL を絶対パスで解決（デフォルト: data/umanschat.db）。
-// server.js が process.chdir(__dirname) で CWD を変えるため、
-// 相対パスのままではマイグレーション先と異なるファイルを開いてしまう。
-// appRoot 基準で絶対パスにすることで CWD に依存せず同一ファイルを保証する。
+// Resolve DATABASE_URL in .env to an absolute path (default: data/umanschat.db).
+// server.js changes the CWD via process.chdir(__dirname), so a relative path
+// would open a different file than the migration target.
+// Using an absolute path relative to appRoot guarantees the same file regardless of CWD.
 function resolveDbPath() {
   let dbUrl = `data/umanschat.db`;
   const envPath = join(appRoot, ".env");
@@ -87,25 +90,28 @@ function resolveDbPath() {
     const m = envRaw.match(/^DATABASE_URL=(.+)$/m);
     if (m) dbUrl = m[1].trim().replace(/^["']|["']$/g, "");
   }
-  // :memory: は絶対パスにせずそのまま返す（インメモリ DB）
+  // Return :memory: as-is without making it absolute (in-memory DB)
   if (dbUrl === ":memory:") return dbUrl;
   return resolve(appRoot, dbUrl);
 }
 
-// 3. マイグレーション実行: drizzle-orm の migrator をプログラム的に使用
+// 3. Run migrations: use drizzle-orm's bun-sqlite migrator (no native addon).
+// better-sqlite3 is a native addon that cannot be loaded from inside a
+// bun build --compile exe (bindings resolves to a virtual B:/~BUN/root path).
+// bun:sqlite is built into the Bun runtime and bundles cleanly.
 function runMigrations() {
   try {
-    const Database = require("better-sqlite3");
-    const { drizzle } = require("drizzle-orm/better-sqlite3");
-    const { migrate } = require("drizzle-orm/better-sqlite3/migrator");
+    const { Database } = require("bun:sqlite");
+    const { drizzle } = require("drizzle-orm/bun-sqlite");
+    const { migrate } = require("drizzle-orm/bun-sqlite/migrator");
 
-    // モジュールスコープの dbPath（resolveDbPath で .env 同期後に解決済み）を使用
+    // Use the module-scope dbPath (resolved by resolveDbPath after .env sync)
     if (!dbPath) dbPath = resolveDbPath();
     mkdirSync(dirname(dbPath), { recursive: true });
 
     const sqlite = new Database(dbPath);
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("foreign_keys = ON");
+    sqlite.exec("PRAGMA journal_mode = WAL;");
+    sqlite.exec("PRAGMA foreign_keys = ON;");
     const db = drizzle(sqlite);
     const migrationsFolder = join(appRoot, "drizzle");
     if (existsSync(migrationsFolder)) {
@@ -115,11 +121,11 @@ function runMigrations() {
     sqlite.close();
   } catch (err) {
     console.error("[launcher] Migration error:", err.message);
-    // マイグレーション失敗でも起動を試みる（初回はテーブル作成が必要だが）
+    // Attempt startup even if migration fails (first run needs table creation, though)
   }
 }
 
-// 4. サーバー起動準備完了をポーリング
+// 4. Poll until the server is ready
 function waitForServer(host, port, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -148,22 +154,26 @@ function waitForServer(host, port, timeoutMs = 30000) {
   });
 }
 
-// ── メイン処理 ──
+// ── Main processing ──
 console.log("[launcher] UmansChat starting...");
 syncEnv();
 dbPath = resolveDbPath();
 mkdirSync(dirname(dbPath), { recursive: true });
 runMigrations();
 
-// 5. スタンドアロンサーバー起動
-// process.execPath: bun build --compile の場合は Bun ランタイム、
-// node で実行の場合は node。
+// 5. Start the standalone server.
+// The compiled umanschat.exe runs the launcher via Bun, but the app uses
+// better-sqlite3 which Bun does not support. Docker runs `node server.js`,
+// so the exe distribution does the same: spawn the bundled node.exe.
+const nodeExe = join(appRoot, "node.exe");
+if (!existsSync(nodeExe)) {
+  console.error(`[launcher] FATAL: node.exe not found at ${nodeExe}`);
+  console.error("[launcher] The standalone distribution is incomplete. Please re-download or rebuild.");
+  process.exit(1);
+}
 const serverPath = join(appRoot, "server.js");
-const child = spawn(process.execPath, [serverPath], {
+const child = spawn(nodeExe, [serverPath], {
   cwd: appRoot,
-  // DATABASE_URL を絶対パスで渡す: server.js は process.chdir(__dirname)
-  // で CWD を変更するため、相対パスだとマイグレーション先と異なる
-  // SQLite ファイルを開いてしまう。絶対パスなら CWD に依存しない。
   env: { ...process.env, PORT, DATABASE_URL: dbPath },
   stdio: "inherit",
 });
@@ -178,11 +188,11 @@ child.on("exit", (code) => {
   process.exit(code ?? 0);
 });
 
-// 6. ブラウザを開く
+// 6. Open the browser
 waitForServer("localhost", Number(PORT))
   .then(() => {
     console.log(`[launcher] Server ready, opening browser at http://localhost:${PORT}`);
-    // Windows: start コマンドでデフォルトブラウザを開く
+    // Windows: open the default browser via the start command
     exec(`start http://localhost:${PORT}`);
   })
   .catch((err) => {

@@ -113,7 +113,7 @@ docker compose up -d
 
 ## クイックスタート（スタンドアロン Windows exe）
 
-Docker を使わずに配布・実行するもう一つの方法です。Docker や Node.js、Bun をユーザー環境に用意する必要はありません。ビルド環境でのみ Bun が必要です。
+Docker を使わずに配布・実行するもう一つの方法です。配布フォルダには `umanschat.exe` と同梱の `node.exe` が含まれ、Docker や Node.js、Bun をユーザー環境に用意する必要はありません。ビルド環境でのみ Bun が必要です。
 
 ```bash
 # 1. 依存パッケージをインストール（ビルド環境）

@@ -1,12 +1,19 @@
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "@/db";
 import { pages, pageEmbeddings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { hashContent } from "@/lib/embed";
 import { upsertPage } from "@/lib/pageStore";
 
-// テスト用 URL（実在しないダミードメインで衝突回避）
+// Mock embedText to avoid external embedder/transformers.js dependency.
+// hashContent stays real (deterministic SHA-256) so assertions are not weakened.
+vi.mock("@/lib/embed", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/embed")>();
+  return { ...actual, embedText: vi.fn(async () => [0.1, 0.2, 0.3]) };
+});
+
+// Test URLs (dummy domains to avoid collisions with real ones)
 const URL_NEW = "https://pagestore-test-new.example";
 const URL_CACHE = "https://pagestore-test-cache.example";
 const URL_UPDATE = "https://pagestore-test-update.example";
@@ -41,7 +48,7 @@ afterAll(async () => {
 });
 
 describe("upsertPage", () => {
-  it("新規URLを挿入し id を返す", async () => {
+  it("inserts a new URL and returns its id", async () => {
     const id = await upsertPage(URL_NEW, "New Page", "fresh content for new page");
     expect(id).toBeTruthy();
     createdPageIds.push(id);
@@ -52,7 +59,7 @@ describe("upsertPage", () => {
     expect(row!.title).toBe("New Page");
     expect(row!.content).toBe("fresh content for new page");
 
-    // page_embeddings も生成されている
+    // page_embeddings is also generated
     const [emb] = await db
       .select()
       .from(pageEmbeddings)
@@ -61,29 +68,29 @@ describe("upsertPage", () => {
     expect(emb!.contentHash).toBe(hashContent("fresh content for new page"));
   });
 
-  it("同一URLで同一内容ならキャッシュヒット（再 embed 不要）", async () => {
+  it("same URL with same content is a cache hit (no re-embed)", async () => {
     const id1 = await upsertPage(URL_CACHE, "Cache", "cached content");
     createdPageIds.push(id1);
     const id2 = await upsertPage(URL_CACHE, "Cache", "cached content");
 
-    // 同じ id を返す（再 embed スキップ）
+    // Returns the same id (re-embed skipped)
     expect(id2).toBe(id1);
   });
 
-  it("同一URLで内容変更時は upsert + 再 embed", async () => {
+  it("same URL with changed content triggers upsert + re-embed", async () => {
     const id1 = await upsertPage(URL_UPDATE, "V1", "version one");
     createdPageIds.push(id1);
 
-    // 内容変更
+    // Content changed
     const id2 = await upsertPage(URL_UPDATE, "V2", "version two");
-    expect(id2).toBe(id1); // 同じ id（update）
+    expect(id2).toBe(id1); // Same id (update)
 
     const [row] = await db.select().from(pages).where(eq(pages.id, id1));
     expect(row!.title).toBe("V2");
     expect(row!.content).toBe("version two");
     expect(row!.contentHash).toBe(hashContent("version two"));
 
-    // page_embeddings も更新されている
+    // page_embeddings is also updated
     const [emb] = await db
       .select()
       .from(pageEmbeddings)

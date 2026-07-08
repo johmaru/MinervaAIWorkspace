@@ -92,7 +92,7 @@ See [Cloudflare Tunnel](#cloudflare-tunnel) below for tunnel setup.
 
 ## Standalone exe (Windows)
 
-The standalone distribution is a single double-clickable `umanschat.exe` plus its supporting files, built with Bun's `--compile` feature. It bundles the Bun runtime so end users need nothing else installed.
+The standalone distribution is a single double-clickable `umanschat.exe` plus its supporting files, built with Bun's `--compile` feature. The launcher (compiled into the exe) runs via the embedded Bun runtime, but spawns a bundled `node.exe` to run `server.js` — the app uses `better-sqlite3`, which Bun does not support. Both `umanschat.exe` and `node.exe` are included in the distribution, so end users need nothing else installed.
 
 ### pack-exe.ts pipeline
 
@@ -106,9 +106,11 @@ The standalone distribution is a single double-clickable `umanschat.exe` plus it
 
 4. **Copy assets** — copies `public/`, `.next/static/`, `drizzle/` (migrations), `drizzle.config.ts`, `scripts/sync-env.ts`, `.env.example`, `launcher/umanschat-launcher.cjs` (renamed to `umanschat.cjs`), and `package.json` (required by `bun build --compile`).
 
-5. **Prune tests** — recursively deletes `*.test.ts` and `*.test.tsx` files (Next.js's file tracing also copies these into standalone; they're not needed at runtime and bloat the package).
+5. **Copy `node.exe`** — resolves `node` from PATH (via `where node`) and copies it into `dist/UmansChat/node.exe`. The launcher spawns this to run `server.js`, since the app uses `better-sqlite3` (unsupported by Bun).
 
-6. **Compile** — runs `bun build --compile` on `umanschat.cjs`, producing `umanschat.exe`. This embeds the Bun runtime. If compilation fails (e.g. Bun version mismatch), it falls back to writing `umanschat.bat` (`@echo off\r\nbun umanschat.cjs`) which requires Bun on the user's PATH.
+6. **Prune tests** — recursively deletes `*.test.ts` and `*.test.tsx` files (Next.js's file tracing also copies these into standalone; they're not needed at runtime and bloat the package).
+
+7. **Compile** — runs `bun build --compile` on `umanschat.cjs`, producing `umanschat.exe`. This embeds the Bun runtime. If compilation fails (e.g. Bun version mismatch), it falls back to writing `umanschat.bat` (`@echo off\r\nbun umanschat.cjs`) which requires Bun on the user's PATH.
 
 ### Launcher sequence
 
@@ -122,9 +124,9 @@ The standalone distribution is a single double-clickable `umanschat.exe` plus it
 
 4. **Resolve `DATABASE_URL`** — converts the `.env` value to an absolute path (default `data/umanschat.db`). Like the Docker entrypoint, this is necessary because the standalone server calls `process.chdir(__dirname)`.
 
-5. **Run migrations** — uses Drizzle's programmatic migrator (`drizzle-orm/better-sqlite3/migrator`) instead of the `drizzle-kit` CLI. Opens the SQLite file, sets `journal_mode=WAL` (the exe doesn't suffer from Docker's bind-mount WAL corruption), runs migrations, then closes the connection. The server reopens the file on startup.
+5. **Run migrations** — uses Drizzle's programmatic migrator (`drizzle-orm/bun-sqlite/migrator`) with the built-in `bun:sqlite` module. `better-sqlite3` cannot be loaded from inside a `bun build --compile` exe (its `bindings` module resolves to a virtual path). Opens the SQLite file, sets `journal_mode=WAL` (the exe doesn't suffer from Docker's bind-mount WAL corruption), runs migrations, then closes the connection. The server reopens the file on startup via `better-sqlite3` under Node.
 
-6. **Start the server** — spawns `process.execPath` (the Bun runtime when compiled, or node) with `server.js`, inheriting stdio and passing `PORT` and the absolute `DATABASE_URL`.
+6. **Start the server** — spawns the bundled `node.exe` (not `process.execPath`, which is the compiled launcher, not a general JS runtime) with `server.js`, inheriting stdio and passing `PORT` and the absolute `DATABASE_URL`. The app uses `better-sqlite3`, which Bun does not support — Docker runs `node server.js` for parity.
 
 7. **Poll for readiness** — `GET http://localhost:<PORT>/` every 500ms (30s timeout). On success, opens the default browser via `start http://localhost:<PORT>` (Windows). On timeout, logs an error but leaves the server running.
 
