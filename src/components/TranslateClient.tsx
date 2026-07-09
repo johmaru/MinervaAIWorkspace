@@ -52,6 +52,8 @@ export function TranslateClient() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [history, setHistory] = useState<TranslationEntry[]>([]);
   const [copied, setCopied] = useState(false);
+  const langLabel = (lang: Language) =>
+    locale === "en" ? lang.enName : lang.name;
 
   const sourceLangObj = SOURCE_LANGUAGES.find((l) => l.code === sourceLang);
   const targetLangObj = TARGET_LANGUAGES.find((l) => l.code === targetLang);
@@ -115,11 +117,11 @@ export function TranslateClient() {
 
   const sourceLangLabel = (code: string) => {
     const lang = SOURCE_LANGUAGES.find((l) => l.code === code);
-    return lang ? lang.name : code;
+    return lang ? langLabel(lang) : code;
   };
   const targetLangLabel = (code: string) => {
     const lang = TARGET_LANGUAGES.find((l) => l.code === code);
-    return lang ? lang.name : code;
+    return lang ? langLabel(lang) : code;
   };
 
   const canTranslate = sourceText.trim().length > 0 && status !== "loading";
@@ -157,7 +159,7 @@ export function TranslateClient() {
             >
               {SOURCE_LANGUAGES.map((lang) => (
                 <option key={lang.code} value={lang.code}>
-                  {lang.name}
+                  {langLabel(lang)}
                 </option>
               ))}
             </select>
@@ -204,7 +206,7 @@ export function TranslateClient() {
               >
                 {TARGET_LANGUAGES.map((lang) => (
                   <option key={lang.code} value={lang.code}>
-                    {lang.name}
+                    {langLabel(lang)}
                   </option>
                 ))}
               </select>
