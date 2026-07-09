@@ -19,6 +19,7 @@ const { spawn, exec } = require("child_process");
 const { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, cpSync, rmSync, renameSync, unlinkSync } = require("fs");
 const { join, dirname, resolve } = require("path");
 const http = require("http");
+const { resolveUserDataRoot, migrateLegacyData, resolveDataPaths } = require("./user-data.cjs");
 
 const PORT = process.env.PORT || "3001";
 
@@ -31,8 +32,14 @@ const appRoot = isCompiled
   ? dirname(process.execPath)
   : __dirname;
 
-// 1. Ensure the data/ directory exists
-const dataDir = join(appRoot, "data");
+// 1. Resolve user data root (~/.umans_chat_unofficial) and migrate legacy appRoot data.
+// The exe folder becomes purely application binaries — safe to delete/replace.
+// On first launch with legacy appRoot/.env + appRoot/data, copies them to user folder.
+const userDataRoot = resolveUserDataRoot();
+mkdirSync(userDataRoot, { recursive: true });
+migrateLegacyData(appRoot, userDataRoot);
+const paths = resolveDataPaths(userDataRoot);
+const dataDir = paths.dataDir;
 mkdirSync(dataDir, { recursive: true });
 
 // Absolute path for DATABASE_URL (resolved after .env sync). Shared between
@@ -44,7 +51,7 @@ let dbPath = null;
 // 2. .env sync: append keys from .env.example to .env (existing keys are not modified)
 function syncEnv() {
   const examplePath = join(appRoot, ".env.example");
-  const envPath = join(appRoot, ".env");
+  const envPath = paths.envPath;
   if (!existsSync(examplePath)) return;
 
   const exampleRaw = readFileSync(examplePath, "utf8");
@@ -84,7 +91,7 @@ function syncEnv() {
 // Using an absolute path relative to appRoot guarantees the same file regardless of CWD.
 function resolveDbPath() {
   let dbUrl = `data/umanschat.db`;
-  const envPath = join(appRoot, ".env");
+  const envPath = paths.envPath;
   if (existsSync(envPath)) {
     const envRaw = readFileSync(envPath, "utf8");
     const m = envRaw.match(/^DATABASE_URL=(.+)$/m);
@@ -92,7 +99,7 @@ function resolveDbPath() {
   }
   // Return :memory: as-is without making it absolute (in-memory DB)
   if (dbUrl === ":memory:") return dbUrl;
-  return resolve(appRoot, dbUrl);
+  return resolve(userDataRoot, dbUrl);
 }
 
 // 3. Run migrations: use drizzle-orm's bun-sqlite migrator (no native addon).
@@ -238,6 +245,32 @@ dbPath = resolveDbPath();
 mkdirSync(dirname(dbPath), { recursive: true });
 runMigrations();
 
+// Load .env into process.env (Next.js standalone doesn't load .env in production).
+// The server inherits process.env via spawn({ env: { ...process.env } }),
+// so .env values (EMBED_PROVIDER, EMBEDDER_URL, LLM_API_KEY, etc.) must be
+// loaded here before spawning the server.
+// Uses inline parsing instead of @next/env (Bun --compile doesn't resolve
+// external packages at runtime the same way Node does).
+// .env values always override inherited system env — the dist .env is the
+// authoritative config for the exe distribution (e.g., EMBED_PROVIDER=local
+// must override a leaked EMBED_PROVIDER=http from a Docker/dev session).
+const envPath = paths.envPath;
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (key) process.env[key] = val;
+  }
+}
+
+// Set UMANS_USER_ROOT so the server (and its helpers getDataDir/resolveEnvPath)
+// locate .env, data/, cloudflared, and update staging in the user folder.
+process.env.UMANS_USER_ROOT = userDataRoot;
+
 // 5. Start the standalone server.
 // The compiled umanschat.exe runs the launcher via Bun, but the app uses
 // better-sqlite3 which Bun does not support. Docker runs `node server.js`,
@@ -257,7 +290,7 @@ let child = null;
 function startServer() {
   child = spawn(nodeExe, [serverPath], {
     cwd: appRoot,
-    env: { ...process.env, PORT, DATABASE_URL: dbPath },
+    env: { ...process.env, PORT, DATABASE_URL: dbPath, UMANS_USER_ROOT: userDataRoot },
     stdio: "inherit",
   });
   child.on("error", (err) => {
@@ -285,7 +318,7 @@ waitForServer("localhost", Number(PORT))
   });
 
 // 7. Poll for update marker every 5 seconds
-const markerPath = join(dataDir, ".update-pending");
+const markerPath = paths.markerPath;
 const updateInterval = setInterval(() => {
   if (!updating && existsSync(markerPath)) {
     updating = true;
