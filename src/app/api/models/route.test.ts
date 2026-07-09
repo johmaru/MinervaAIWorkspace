@@ -5,7 +5,7 @@ vi.mock("@/lib/auth-guards", () => ({
 }));
 import { GET } from "@/app/api/models/route";
 
-// process.env を一時的に上書き
+// Temporarily override process.env
 const originalEnv = { ...process.env };
 
 afterEach(() => {
@@ -13,9 +13,9 @@ afterEach(() => {
 });
 
 describe("GET /api/models", () => {
-  // OAI互換モード（isUmansProvider() === false）で検証するため、
-  // 各テストで LLM_BASE_URL を UmansAPI 以外に固定。
-  it("LLM_MODELS からモデルリストを構築", async () => {
+  // To test in OAI-compatible mode (isUmansProvider() === false),
+  // LLM_BASE_URL is fixed to a non-UmansAPI value in each test.
+  it("builds model list from LLM_MODELS", async () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     process.env.LLM_MODELS = "umans-glm-5.2,gpt-4o-mini,gpt-4o";
     process.env.LLM_MODEL = "umans-glm-5.2";
@@ -28,11 +28,11 @@ describe("GET /api/models", () => {
     };
     expect(data.models).toEqual(["umans-glm-5.2", "gpt-4o-mini", "gpt-4o"]);
     expect(data.default).toBe("umans-glm-5.2");
-    // OAIモード時は displayNames は空
+    // In OAI mode, displayNames is empty
     expect(data.displayNames).toEqual({});
   });
 
-  it("LLM_MODELS 未設定時は defaultModel のみ", async () => {
+  it("returns only defaultModel when LLM_MODELS is unset", async () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     delete process.env.LLM_MODELS;
     process.env.LLM_MODEL = "gpt-4o-mini";
@@ -42,7 +42,7 @@ describe("GET /api/models", () => {
     expect(data.default).toBe("gpt-4o-mini");
   });
 
-  it("空白のみの LLM_MODELS は defaultModel にフォールバック", async () => {
+  it("falls back to defaultModel when LLM_MODELS is whitespace-only", async () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     process.env.LLM_MODELS = "  ,  ,  ";
     process.env.LLM_MODEL = "umans-glm-5.2";
@@ -51,7 +51,7 @@ describe("GET /api/models", () => {
     expect(data.models).toEqual(["umans-glm-5.2"]);
   });
 
-  it("LLM_MODEL も未設定時はハードコードのデフォルト", async () => {
+  it("uses hardcoded default when LLM_MODEL is also unset", async () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     delete process.env.LLM_MODELS;
     delete process.env.LLM_MODEL;

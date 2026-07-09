@@ -26,7 +26,7 @@ function makeCtx(id: string) {
 }
 
 describe("DELETE /api/memories/[id]", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await DELETE(new Request("http://localhost"), makeCtx("m1"));
     expect(res.status).toBe(401);
@@ -34,7 +34,7 @@ describe("DELETE /api/memories/[id]", () => {
 });
 
 describe("PATCH /api/memories/[id]", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await PATCH(
       new Request("http://localhost", {

@@ -9,10 +9,10 @@ type Props = {
 };
 
 /**
- * 添付ファイル一覧バー。
- * - 画像: サムネイル表示
- * - テキスト/PDF: ファイルアイコン + ファイル名
- * onRemove があれば削除ボタンを表示（送信前の pending 添付ファイル用）。
+ * Attachment list bar.
+ * - Images: thumbnail display
+ * - Text/PDF: file icon + filename
+ * Shows a remove button when onRemove is provided (for pending attachments before sending).
  */
 export function AttachmentBar({ attachments, onRemove }: Props) {
   const { t } = useI18n();

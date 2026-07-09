@@ -96,15 +96,15 @@ type SseData = {
 };
 
 /**
- * 単一スレッドのストリーミングチャット（Phase 5: 枝分かれ対応）。
+ * Single-thread streaming chat (Phase 5: branching support).
  *
- * - 全メッセージを GET /api/threads/[id] から取得し、
- *   thread.currentLeafId から parent chain を遡って表示用の線形リストを構築。
- * - send(content): 新規 user → assistant を生成。
- * - regenerate(userMsgId): 既存 user の下に新しい assistant を生成。
- * - editMessage(userMsgId, newContent): 新しい user の兄弟を作り assistant を生成。
- * - 各メッセージの兄弟（same parentId）を siblings として保持し、
- *   UI で "< 1/2 >" の枝ナビを表示する。
+ * - Fetches all messages from GET /api/threads/[id],
+ *   traces the parent chain from thread.currentLeafId to build a linear list for display.
+ * - send(content): generates a new user → assistant.
+ * - regenerate(userMsgId): generates a new assistant under an existing user.
+ * - editMessage(userMsgId, newContent): creates a sibling of the user and generates an assistant.
+ * - Each message's siblings (same parentId) are kept as siblings,
+ *   and the UI displays a "< 1/2 >" branch navigation.
  */
 export function useChat(threadId: string | null) {
   const { t } = useI18n();
@@ -119,11 +119,11 @@ export function useChat(threadId: string | null) {
   const [timeRange, setTimeRange] = useState<"day" | "week" | "month" | "year" | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // 全メッセージを byId マップで保持（枝分かれの全ノード）
+  // Keep all messages in a byId map (all branch nodes)
   const byIdRef = useRef<Map<string, RawMessage>>(new Map());
   const attachmentsByMsgIdRef = useRef<Map<string, RawAttachment[]>>(new Map());
 
-  // leafId から root まで parent chain を遡り、昇順の ChatMessage[] を構築する。
+  // Trace the parent chain from leafId to root, building an ascending ChatMessage[].
   function buildChain(leafId: string): ChatMessage[] {
     const chain: ChatMessage[] = [];
     let currentId: string | null = leafId;
@@ -147,7 +147,7 @@ export function useChat(threadId: string | null) {
     return chain;
   }
 
-  // スレッド切替時にロード。
+  // Load on thread switch.
   useEffect(() => {
     if (!threadId) {
       byIdRef.current = new Map();
@@ -174,14 +174,14 @@ export function useChat(threadId: string | null) {
         };
         if (cancelled) return;
 
-        // byId マップを構築
+        // Build byId map
         const byId = new Map<string, RawMessage>();
         for (const m of data.messages) {
           byId.set(m.id, m);
         }
         byIdRef.current = byId;
 
-        // attachments マップを構築
+        // Build attachments map
         const attMap = new Map<string, RawAttachment[]>();
         if (data.attachments) {
           for (const att of data.attachments) {
@@ -207,8 +207,8 @@ export function useChat(threadId: string | null) {
 
     return () => {
       cancelled = true;
-      // スレッド切替時に進行中のストリームを abort し、
-      // 旧スレッドの SSE が新スレッドの state を上書きするのを防ぐ。
+      // Abort in-flight stream on thread switch,
+      // preventing the old thread's SSE from overwriting the new thread's state.
       abortRef.current?.abort();
     };
   }, [threadId, t]);
@@ -224,14 +224,14 @@ export function useChat(threadId: string | null) {
     setSources([]);
   }, [isStreaming]);
 
-  // SSE ストリーミングを処理する共通関数
+  // Common function to process SSE streaming
   async function streamChat(
     body: Record<string, unknown>,
     optimisticUser: ChatMessage | null,
     assistantId: string,
   ) {
     if (optimisticUser) {
-      // byId に楽観 user を追加
+      // Add optimistic user to byId
       byIdRef.current.set(optimisticUser.id, {
         id: optimisticUser.id,
         parentId: optimisticUser.parentId,
@@ -246,7 +246,7 @@ export function useChat(threadId: string | null) {
       content: "",
     });
 
-    // 現在の leafId を更新して chain を再構築
+    // Update current leafId and rebuild chain
     if (thread) {
       const newThread = { ...thread, currentLeafId: assistantId };
       setThread(newThread);
@@ -295,7 +295,7 @@ export function useChat(threadId: string | null) {
                 byIdRef.current.delete(optimisticUser.id);
                 byIdRef.current.set(realId, { ...oldMsg, id: realId });
               }
-              // assistant の parent も更新
+              // Update assistant's parent too
               const asstMsg = byIdRef.current.get(assistantId);
               if (asstMsg) {
                 byIdRef.current.set(assistantId, { ...asstMsg, parentId: realId });
@@ -364,7 +364,7 @@ export function useChat(threadId: string | null) {
                 elapsedMs: event.data.elapsedMs,
               });
             }
-            // thread の currentLeafId を更新
+            // Update thread's currentLeafId
             if (thread) {
               setThread({ ...thread, currentLeafId: realId });
             }
@@ -376,7 +376,7 @@ export function useChat(threadId: string | null) {
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
-        // 停止: 部分回答をそのまま残す
+        // Stopped: keep partial response as-is
       } else {
         setError(err instanceof Error ? err.message : t("chat.fetchError"));
       }
@@ -480,13 +480,13 @@ export function useChat(threadId: string | null) {
     (messageId: string) => {
       if (thread) {
         setThread({ ...thread, currentLeafId: messageId });
-        // currentLeafId をサーバーに永続化（リロード後も同じ枝を表示）。
-        // fire-and-forget: UI の即時切り替えをブロックしない。
+        // Persist currentLeafId to server (show the same branch after reload).
+        // Fire-and-forget: does not block instant UI switching.
         clientFetch(`/api/threads?id=${encodeURIComponent(thread.id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ currentLeafId: messageId }),
-        }).catch(() => { /* silent: UI は既に切り替わっている */ });
+        }).catch(() => { /* silent: UI has already switched */ });
       }
       setMessages(buildChain(messageId));
     },
@@ -497,19 +497,19 @@ export function useChat(threadId: string | null) {
     (messageId: string): { siblings: string[]; currentIndex: number } => {
       const msg = byIdRef.current.get(messageId);
       if (!msg) return { siblings: [messageId], currentIndex: 0 };
-      // parentId が null のルートメッセージは、messageId 自身のみを兄弟とする。
-      // （null === null で全ルートが兄弟扱いになるのを防ぐ）
+      // Root messages with null parentId are siblings only with themselves.
+      // (prevents all roots from being treated as siblings due to null === null)
       if (msg.parentId === null) {
         return { siblings: [messageId], currentIndex: 0 };
       }
       const siblings: string[] = [];
       for (const [id, m] of byIdRef.current) {
-        // 厳密な parentId 一致で兄弟判定。null 同士は兄弟としない。
+        // Determine siblings by exact parentId match. null values are not siblings.
         if (m.parentId !== null && m.parentId === msg.parentId) {
           siblings.push(id);
         }
       }
-      // byIdRef は Map で挿入順を保持するため、sort は不要（作成順が維持される）。
+      // byIdRef is a Map that preserves insertion order, so no sort is needed (creation order is maintained).
       return {
         siblings,
         currentIndex: siblings.indexOf(messageId),

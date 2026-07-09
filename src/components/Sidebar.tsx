@@ -2,6 +2,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
+import { Languages } from "lucide-react";
 
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -200,9 +202,17 @@ export const Sidebar = memo(function Sidebar({
       aria-label={t("sidebar.threadList")}
     >
       <div className="flex items-center justify-between px-3 py-3">
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <ThemeToggle />
           <LanguageToggle />
+          <Link
+            href="/translate"
+            className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+            aria-label={t("sidebar.translate")}
+            title={t("sidebar.translate")}
+          >
+            <Languages className="h-4 w-4" />
+          </Link>
           <div className="relative">
             <MotionButton
               type="button"
@@ -616,7 +626,7 @@ const ThreadRow = memo(function ThreadRow({
         type="button"
         onClick={() => onDelete(thread.id)}
         aria-label={t("common.delete")}
-        className="hidden shrink-0 rounded px-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-red-500/10 hover:text-red-500 group-hover:block"
+        className="shrink-0 whitespace-nowrap rounded px-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-red-500/10 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
       >
         ×
       </button>

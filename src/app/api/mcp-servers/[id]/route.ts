@@ -15,7 +15,7 @@ type PatchBody = {
 };
 
 /**
- * DELETE /api/mcp-servers/[id] — MCP サーバー削除。
+ * DELETE /api/mcp-servers/[id] — Delete an MCP server.
  */
 export async function DELETE(
   _req: Request,
@@ -33,8 +33,8 @@ export async function DELETE(
 }
 
 /**
- * PATCH /api/mcp-servers/[id] — MCP サーバー部分更新。
- * name, url, command, args, env を個別に更新可能。
+ * PATCH /api/mcp-servers/[id] — Partial update of an MCP server.
+ * name, url, command, args, env can be updated individually.
  */
 export async function PATCH(
   req: Request,

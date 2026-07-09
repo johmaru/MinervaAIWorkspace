@@ -7,8 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/global-instructions — ログインユーザーの名前付きグローバル
- * システムインストラクション一覧（更新順）。content も返す。
+ * GET /api/global-instructions — Named global system instructions
+ * of the logged-in user (newest first). Includes content.
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -33,8 +33,8 @@ type CreateBody = {
 };
 
 /**
- * POST /api/global-instructions — 名前付きグローバルインストラクション新規作成。
- * 同名も許容（ユーザーが明示的に複数作れる）。空名/空内容は却下。
+ * POST /api/global-instructions — Create a new named global instruction.
+ * Duplicate names are allowed (users can explicitly create multiple). Empty name/content are rejected.
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();

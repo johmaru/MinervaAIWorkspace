@@ -8,9 +8,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/memories — ログインユーザーの全メモリ（更新順）。
- * suppressedAt IS NULL（論理削除されていない）もののみ返す。
- * embedding は含まず、メタ + threadTitle のみ。
+ * GET /api/memories — All memories of the logged-in user (newest first).
+ * Returns only those where suppressedAt IS NULL (not soft-deleted).
+ * Excludes embedding; returns metadata + threadTitle only.
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -42,10 +42,10 @@ type CreateBody = {
 };
 
 /**
- * POST /api/memories — メモリ手動作成。
- * content + threadId を受け取り、embedding + contentHash を生成して保存。
- * スレッド所有権を確認し、他ユーザーのスレッドには追加できない。
- * 重複チェックはしない（手動追加は同一内容でも異なる文脈を許容）。
+ * POST /api/memories — Manual memory creation.
+ * Accepts content + threadId, generates embedding + contentHash, and saves.
+ * Verifies thread ownership; cannot add to another user's thread.
+ * No duplicate check (manual additions allow identical content in different contexts).
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
   const importance =
     typeof body.importance === "number" ? Math.max(0, Math.min(1, body.importance)) : 0.5;
 
-  // スレッド所有権確認
+  // Verify thread ownership
   const [thread] = await db
     .select({ id: threads.id })
     .from(threads)

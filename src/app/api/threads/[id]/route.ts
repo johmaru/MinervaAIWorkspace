@@ -7,10 +7,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/threads/[id] — スレッド本体 + メッセージ一覧（枝分かれ情報付き）。
+ * GET /api/threads/[id] — Thread body + message list (with branching info).
  *
- * Phase 5: 全メッセージを返し、各メッセージに parentId を含める。
- * クライアント側で parent chain を辿り currentLeafId の枝を表示する。
+ * Phase 5: Returns all messages, each including parentId.
+ * The client traverses the parent chain to display the currentLeafId branch.
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -34,7 +34,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     .where(eq(messages.threadId, id))
     .orderBy(asc(messages.createdAt), asc(messages.id));
 
-  // 添付ファイルを取得（messageId に紐づくもののみ）
+  // Fetch attachments (only those linked to a messageId)
   const atts = await db
     .select({
       id: attachments.id,
@@ -50,7 +50,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 /**
- * DELETE /api/threads/[id] — スレッド削除。messages は cascade で消える。
+ * DELETE /api/threads/[id] — Delete a thread. Messages are removed via cascade.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

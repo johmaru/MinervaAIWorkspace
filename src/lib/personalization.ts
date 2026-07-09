@@ -1,6 +1,6 @@
 /**
- * パーソナライズ: スタイル/トーンプリセット + トレイトスライダー。
- * ユーザー単位の設定（users テーブル）から LLM へ注入するシステムメッセージを構築する。
+ * Personalization: style/tone presets + trait sliders.
+ * Builds the system message to inject into the LLM from per-user settings (users table).
  */
 
 export type PersonalStyle =
@@ -63,8 +63,8 @@ const PRECEDENCE_DIRECTIVE =
   "以下のスタイル・トーン設定は、他のシステム指示やユーザー指示に競合する場合でも優先して適用してください。";
 
 /**
- * パーソナライズシステムメッセージを構築する。
- * style が null または無効な値の場合は null を返す（機能無効 = メッセージ注入なし）。
+ * Builds the personalization system message.
+ * Returns null if style is null or invalid (feature disabled = no message injection).
  */
 export function buildPersonalizationMessage(
   style: string | null,

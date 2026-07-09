@@ -9,20 +9,20 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
-/** タイムスタンプ列の共通ヘルパー: Unix epoch ms（integer）で保存し Date で読み書き。 */
+/** Common helper for timestamp columns: stored as Unix epoch ms (integer), read/written as Date. */
 function ts(name: string) {
   return integer(name, { mode: "timestamp_ms" });
 }
-/** NOT NULL タイムスタンプ列 + デフォルト now()。 */
+/** NOT NULL timestamp column + default now(). */
 function tsNow(name: string) {
   return integer(name, { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date());
 }
 
 // ── Auth.js tables ──
 /**
- * global_instructions — ユーザー単位の名前付きグローバルシステムインストラクション。
- * 複数作成可。users.activeInstructionId で既定、threads.globalInstructionId でスレッド上書き。
- * users の前に定義（users.activeInstructionId が本テーブルを前方参照するため）。
+ * global_instructions — per-user named global system instructions.
+ * Multiple can be created. Default via users.activeInstructionId, overridden per-thread via threads.globalInstructionId.
+ * Defined before users (because users.activeInstructionId forward-references this table).
  */
 export const globalInstructions = sqliteTable("global_instructions", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -33,20 +33,20 @@ export const globalInstructions = sqliteTable("global_instructions", {
   updatedAt: tsNow("updated_at"),
 });
 
-// users: アプリユーザー。emailUnique でログイン。passwordHash で Credentials 認証。
+// users: App users. Log in via emailUnique. Credentials auth via passwordHash.
 export const users = sqliteTable("users", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   nickname: text("nickname").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash"),
   activeInstructionId: text("active_instruction_id"),
-  // パーソナライズ設定（ユーザー単位）。personalStyle が null なら機能無効。
+  // Personalization settings (per-user). If personalStyle is null, the feature is disabled.
   personalStyle: text("personal_style"),
   personalWarmth: integer("personal_warmth").notNull().default(1),
   personalEnergy: integer("personal_energy").notNull().default(1),
   personalStructure: integer("personal_structure").notNull().default(1),
   personalEmoji: integer("personal_emoji").notNull().default(1),
-  // DrizzleAdapter が OAuth createUser で書き込む列（Google ログイン用）
+  // Columns written by DrizzleAdapter on OAuth createUser (for Google login)
   name: text("name"),
   emailVerified: ts("email_verified"),
   image: text("image"),
@@ -58,7 +58,7 @@ export const accounts = sqliteTable(
   {
     id: text("id").primaryKey().$defaultFn(() => randomUUID()),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    type: text("type"),  // DrizzleAdapter linkAccount 用（oauth / oidc / email）
+    type: text("type"),  // For DrizzleAdapter linkAccount (oauth / oidc / email)
     provider: text("provider").notNull(),
     providerAccountId: text("provider_account_id").notNull(),
     accessToken: text("access_token"),
@@ -69,9 +69,9 @@ export const accounts = sqliteTable(
     idToken: text("id_token"),
   },
   (t) => ({
-    // (provider, providerAccountId) の複合一意制約。
-    // Auth.js DrizzleAdapter はこの制約を前提として upsert を行う。
-    // これにより同一 OAuth アカウントへの重複 accounts 行生成を防ぐ。
+    // (provider, providerAccountId) composite unique constraint.
+    // Auth.js DrizzleAdapter assumes this constraint for upsert.
+    // This prevents duplicate accounts rows for the same OAuth account.
     providerUnique: uniqueIndex("accounts_provider_unique").on(t.provider, t.providerAccountId),
   }),
 );
@@ -89,21 +89,20 @@ export const verificationTokens = sqliteTable("verification_tokens", {
   expires: ts("expires").notNull(),
 });
 
-// 埋め込み次元数: env EMBED_DIM（デフォルト 1024 = LFM2.5-Embedding-350M）。
-// SQLite では embedding は text（JSON 配列）で保存するため、次元は列型ではなく
-// アプリ側の cosine 関数（vectorSearch.ts）で検証用として使われる。
-export const EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
+// Embedding dimensions: env EMBED_DIM (default 1024 = LFM2.5-Embedding-350M).
+// In SQLite, embeddings are stored as text (JSON array), so the dimension is
+// not a column type but used for validation by the client-side cosine function (vectorSearch.ts).
 
 /**
- * skills — ユーザー単位の再利用可能なプロシージャ/ルール。
+ * skills — per-user reusable procedures/rules.
  *
- * 会話から LLM で抽出・命名し、embedding 付きで保存。
- * 次回以降の全スレッドでアプリ側 cosine 検索 → system context に注入。
- * ユーザーが「〇〇スキルを使って」と指定すれば名前で直接適用。
- * 「スキルで保存して」で現在の会話からスキルを生成。
+ * Extracted and named from conversations via LLM, stored with embeddings.
+ * On all subsequent threads, searched via client-side cosine → injected into system context.
+ * If the user says "use skill X", it is applied directly by name.
+ * "Save as skill" generates a skill from the current conversation.
  *
- * persona/knowledge は memories で管理し、skills は再利用可能な手順・ルールに特化。
- * kind でカテゴリ分け、trigger で発動条件、tags で検索性を向上。
+ * persona/knowledge are managed by memories; skills specialize in reusable procedures/rules.
+ * Categorized by kind, triggered by trigger, searchability improved by tags.
  */
 export const skills = sqliteTable("skills", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -130,8 +129,8 @@ export const skills = sqliteTable("skills", {
 });
 
 /**
- * skill_candidates — 会話から自動抽出されたスキル候補。
- * ユーザーが承認するまで draft。承認で skills テーブルに昇格。
+ * skill_candidates — skill candidates automatically extracted from conversations.
+ * Remain as draft until approved by the user. On approval, promoted to the skills table.
  * status: draft → approved/rejected/merged
  */
 export const skillCandidates = sqliteTable("skill_candidates", {
@@ -159,10 +158,10 @@ export const skillCandidates = sqliteTable("skill_candidates", {
 });
 
 /**
- * skill_usage_events — スキル使用ログ。
- * buildSkillContext で注入されたスキル毎に記録。
- * activationType: semantic (検索一致) or manual (名前指定)
- * outcome: unknown (初期) → helpful / not_helpful (将来のフィードバック用)
+ * skill_usage_events — skill usage log.
+ * Recorded for each skill injected by buildSkillContext.
+ * activationType: semantic (search match) or manual (name-specified)
+ * outcome: unknown (initial) → helpful / not_helpful (for future feedback)
  */
 export const skillUsageEvents = sqliteTable("skill_usage_events", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -179,11 +178,11 @@ export const skillUsageEvents = sqliteTable("skill_usage_events", {
 });
 
 /**
- * mcpServers — ユーザー単位の MCP (Model Context Protocol) サーバー接続定義。
+ * mcpServers — per-user MCP (Model Context Protocol) server connection definitions.
  *
- * transport="http" の場合は url を使用（Streamable HTTP / SSE 自動フォールバック）。
- * transport="stdio" の場合は command + args + env でローカルプロセスを起動。
- * スレッド単位で有効/無効を切り替え（threads.mcpServerIds に id 配列を保持）。
+ * When transport="http", uses url (Streamable HTTP / SSE auto-fallback).
+ * When transport="stdio", launches a local process via command + args + env.
+ * Enabled/disabled per thread (threads.mcpServerIds holds an array of ids).
  */
 export const mcpServers = sqliteTable("mcp_servers", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -200,12 +199,12 @@ export const mcpServers = sqliteTable("mcp_servers", {
 
 
 /**
- * connections — ユーザーが OAuth 認証した外部サービス（Notion 等）。
+ * connections — external services OAuth-authorized by the user (e.g. Notion).
  *
- * provider は enum で拡張可能（"notion" → 将来 "google", "github" 等）。
- * accessToken / refreshToken はトークン取得済みの行のみ存在（NOT NULL）。
- * workspaceName / workspaceIcon / ownerName / ownerEmail は表示用メタデータ。
- * スレッド単位で有効/無効を切り替え（threads.connectionIds に id 配列を保持）。
+ * provider is an extensible enum ("notion" → future "google", "github", etc.).
+ * accessToken / refreshToken exist only for rows with tokens obtained (NOT NULL).
+ * workspaceName / workspaceIcon / ownerName / ownerEmail are display metadata.
+ * Enabled/disabled per thread (threads.connectionIds holds an array of ids).
  */
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -224,8 +223,8 @@ export const connections = sqliteTable("connections", {
 
 
 /**
- * threads — 会話スレッド
- * current_leaf_id: 現在表示中の枝の末端 message id。枝分かれナビで切替。
+ * threads — conversation threads
+ * current_leaf_id: The leaf message id of the currently displayed branch. Switched via the branching navigator.
  */
 export const threads = sqliteTable("threads", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -242,8 +241,8 @@ export const threads = sqliteTable("threads", {
   connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   globalInstructionId: text("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
   currentLeafId: text("current_leaf_id"),
-  // 0002 マイグレーションで追加された列（schema.ts に反映されていなかった）。
-  // 現在コードから参照されていないが、schema と DB の整合性を保つために定義。
+  // Columns added in the 0002 migration (were not reflected in schema.ts).
+  // Not currently referenced by code, but defined to maintain schema-DB consistency.
   temperature: real("temperature"),
   maxTokens: integer("max_tokens"),
   contextLength: integer("context_length"),
@@ -254,11 +253,11 @@ export const threads = sqliteTable("threads", {
 });
 
 /**
- * folders — スレッドを束ねるフォルダ。
- * instruction は所属スレッドの systemPrompt 先頭に結合される。
- * memoryScope が "folder" の場合、会話メモリ(RAG)検索を同一フォルダ内に限定。
- * "global" の場合は従来通り全スレッド横断（デフォルト、後方互換）。
- * フォルダ階層は1階層のみ（自己参照なし）。
+ * folders — folders that group threads.
+ * instruction is prepended to the systemPrompt of member threads.
+ * If memoryScope is "folder", conversation memory (RAG) search is limited to the same folder.
+ * "global" searches across all threads as before (default, backward-compatible).
+ * Folder hierarchy is one level only (no self-reference).
  */
 export const folders = sqliteTable("folders", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
@@ -271,10 +270,10 @@ export const folders = sqliteTable("folders", {
 });
 
 /**
- * messages — 枝分かれツリー
- * parent_id が NULL ならスレッドのルート発言。
- * 編集/再生成は新しい行を作り parent_id で親に繋ぐ。
- * 古い枝も残す（ChatGPT 式）。
+ * messages — branching tree
+ * If parent_id is NULL, it's the root message of the thread.
+ * Edits/regenerations create a new row linked to the parent via parent_id.
+ * Old branches are kept (ChatGPT-style).
  */
 export const messages = sqliteTable(
   "messages",
@@ -283,10 +282,10 @@ export const messages = sqliteTable(
     threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
-    parentId: text("parent_id"), // 自己参照（ルートは NULL）
+    parentId: text("parent_id"), // Self-referencing (NULL for root)
     role: text("role", { enum: ["user", "assistant", "system"] }).notNull(),
     content: text("content").notNull(),
-    reasoning: text("reasoning"), // assistant の思考プロセス（折りたたみ表示用）
+    reasoning: text("reasoning"), // Assistant's thought process (for collapsible display)
     metadata: text("metadata", { mode: "json" }).$type<{
       dualTrace?: {
         strategy: "cross_review" | "debate";
@@ -311,17 +310,17 @@ export const messages = sqliteTable(
 );
 
 /**
- * memories — 会話記憶（fact / working）。
+ * memories — conversation memories (fact / working).
  *
- * アシスタント応答完了後に LLM で会話を要約・分類し、embedding 付きで保存。
- * 次回送信時にアプリ側 cosine 検索 → LLM rerank → recency スコアで並べ替え →
- * top-5 を system context に注入（RAG）。
+ * After an assistant response completes, the conversation is summarized and classified via LLM, then stored with an embedding.
+ * On the next send, client-side cosine search (similarity > 0.3) → top-30 by similarity →
+ * top-5 by recency score (importance × 0.6 + exp(-ageDays/14) × 0.4) → injected into system context (RAG).
  *
- * - kind: "fact" = 不変のユーザー情報・環境・設定。"working" = 現在のタスク・一時文脈。
- * - suppressedAt: 論理削除。replace/merge で古い記憶を無効化。
- * - folderId: folders.memoryScope が "folder" の場合、検索を同一フォルダに限定。
- *   "global" の場合は全スレッド横断（デフォルト）。
- * - embedding: JSON 配列（text 列, mode: json）。vectorSearch.ts で cosine 計算。
+ * - kind: "fact" = immutable user info/environment/settings. "working" = current task/temporary context.
+ * - suppressedAt: soft delete. Invalidates old memories on replace/merge.
+ * - folderId: When folders.memoryScope is "folder", search is limited to the same folder.
+ *   "global" searches across all threads (default).
+ * - embedding: JSON array (text column, mode: json). Cosine computed in vectorSearch.ts.
  */
 export const memories = sqliteTable(
   "memories",
@@ -351,9 +350,9 @@ export const memories = sqliteTable(
 );
 
 /**
- * attachments — メッセージ添付ファイル
- * 画像は base64 を dataURL として保存（vision モデルへ inline 渡し）。
- * PDF/テキストはサーバ側でテキスト抽出し extractedText に保存。
+ * attachments — message attached files
+ * Images are stored as base64 dataURLs (passed inline to vision models).
+ * PDF/text files have text extracted server-side and saved in extractedText.
  */
 export const attachments = sqliteTable(
   "attachments",
@@ -366,9 +365,9 @@ export const attachments = sqliteTable(
       .references(() => messages.id, { onDelete: "cascade" }),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
-    // 画像の場合: dataURL（base64）。テキストの場合: null
+    // For images: dataURL (base64). For text: null
     dataUrl: text("data_url"),
-    // PDF/テキストの場合: 抽出されたテキスト。画像の場合: null
+    // For PDF/text: extracted text. For images: null
     extractedText: text("extracted_text"),
     createdAt: tsNow("created_at"),
   },
@@ -379,19 +378,19 @@ export const attachments = sqliteTable(
 );
 
 /**
- * pages — スクレイピングした Web ページの恒久ナレッジ。
- * URL 単位で1行。contentHash が一致すれば再取得スキップ。
- * page_embeddings でスレッド横断の RAG/検索に供給。
+ * pages — permanent knowledge from scraped web pages.
+ * One row per URL. If contentHash matches, re-fetch is skipped.
+ * Feeds cross-thread RAG/search via page_embeddings.
  */
 export const pages = sqliteTable(
   "pages",
   {
     id: text("id").primaryKey().$defaultFn(() => randomUUID()),
     url: text("url").notNull().unique(),
-    urlHash: text("url_hash").notNull().unique(), // SHA-256(normalized URL), 取得キャッシュ判定
+    urlHash: text("url_hash").notNull().unique(), // SHA-256(normalized URL), used for fetch cache check
     title: text("title"),
     content: text("content").notNull(),
-    contentHash: text("content_hash").notNull(), // SHA-256(content), 変更検知
+    contentHash: text("content_hash").notNull(), // SHA-256(content), change detection
     fetchedAt: tsNow("fetched_at"),
     status: integer("status").notNull().default(200),
     errorMessage: text("error_message"),
@@ -402,9 +401,9 @@ export const pages = sqliteTable(
 );
 
 /**
- * page_embeddings — ページ本文の埋め込みベクトル。
- * memories テーブルの embedding 列と同次元。EMBED_DIM（env で変更可能）。
- * embedding は JSON 配列（text 列, mode: json）。vectorSearch.ts で cosine 計算。
+ * page_embeddings — embedding vectors for page body text.
+ * Same dimensions as the embedding column in the memories table. EMBED_DIM (configurable via env).
+ * embedding is a JSON array (text column, mode: json). Cosine computed in vectorSearch.ts.
  */
 export const pageEmbeddings = sqliteTable(
   "page_embeddings",

@@ -10,6 +10,7 @@ import { getSessionUser } from "@/lib/auth-guards";
 import { resetEmbedPipeline, embedText } from "@/lib/embed";
 import { PERSONAL_STYLES } from "@/lib/personalization";
 import { resolveEnvPath, updateEnvContent } from "@/lib/envUtils";
+import { getConfiguredAuthUrl, setConfiguredAuthUrl } from "@/lib/auth-env";
 import { getLogFilePath } from "@/lib/logger";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -140,7 +141,7 @@ export async function GET(req: Request) {
     // Do not return secrets in plaintext; return only whether they are set.
     notionClientSecret: "",
     hasNotionClientSecret: !!process.env.NOTION_CLIENT_SECRET,
-    authUrl: process.env.AUTH_URL || "http://localhost:3001",
+    authUrl: getConfiguredAuthUrl(),
     // Cloudflare Tunnel — do not return token in plaintext; return only whether it is set
     tunnelToken: "",
     hasTunnelToken: !!process.env.TUNNEL_TOKEN,
@@ -384,6 +385,12 @@ export async function POST(req: Request) {
     // Also reflect in process.env
     for (const [key, value] of Object.entries(updates)) {
       process.env[key] = value;
+    }
+    // AUTH_URL is written to .env for persistence, but Auth.js must NOT read a
+    // sticky process.env.AUTH_URL (dual local + Cloudflare access). Mirror it
+    // to UMANS_CONFIGURED_AUTH_URL and delete AUTH_URL from process.env.
+    if (body.authUrl !== undefined) {
+      setConfiguredAuthUrl(body.authUrl);
     }
     // Invalidate in-process cache when LLM-related settings change (no restart needed)
     const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS"].some(

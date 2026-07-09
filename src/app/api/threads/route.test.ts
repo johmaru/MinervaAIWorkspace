@@ -8,9 +8,9 @@ import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { GET, PATCH, POST } from "@/app/api/threads/route";
 
-// Phase 2: /api/threads CRUD は純粋に DB を叩く（LLM なし）。
-// 各テストで作成したスレッドは afterAll で一括掃除する。
-// 並列実行で id が衝突しないよう、作成した id を記録して最後に削除。
+// Phase 2: /api/threads CRUD directly hits the DB (no LLM).
+// Threads created in each test are cleaned up in bulk in afterAll.
+// IDs are tracked and deleted at the end to avoid collisions in parallel execution.
 
 const createdIds: string[] = [];
 const createdFolderIds: string[] = [];
@@ -34,7 +34,7 @@ function jsonReq(method: string, body?: unknown, query?: string): Request {
 }
 
 describe("GET /api/threads", () => {
-  it("空でも 200 + 配列を返す", async () => {
+  it("returns 200 + array even when empty", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const data = (await res.json()) as unknown[];
@@ -43,7 +43,7 @@ describe("GET /api/threads", () => {
 });
 
 describe("POST /api/threads", () => {
-  it("title 省略時は 'New chat' で作成", async () => {
+  it("creates with 'New chat' when title is omitted", async () => {
     const res = await POST(jsonReq("POST", {}));
     expect(res.status).toBe(201);
     const thread = (await res.json()) as { id: string; title: string };
@@ -51,7 +51,7 @@ describe("POST /api/threads", () => {
     createdIds.push(thread.id);
   });
 
-  it("title を指定して作成", async () => {
+  it("creates with specified title", async () => {
     const res = await POST(jsonReq("POST", { title: "テスト用スレッド" }));
     expect(res.status).toBe(201);
     const thread = (await res.json()) as { id: string; title: string };
@@ -59,7 +59,7 @@ describe("POST /api/threads", () => {
     createdIds.push(thread.id);
   });
 
-  it("空白 title は 'New chat' にフォールバック", async () => {
+  it("blank title falls back to 'New chat'", async () => {
     const res = await POST(jsonReq("POST", { title: "   " }));
     expect(res.status).toBe(201);
     const thread = (await res.json()) as { id: string; title: string };
@@ -67,7 +67,7 @@ describe("POST /api/threads", () => {
     createdIds.push(thread.id);
   });
 
-  it("不正 JSON は 400", async () => {
+  it("invalid JSON returns 400", async () => {
     const res = await POST(
       new Request("http://localhost/api/threads", {
         method: "POST",
@@ -80,12 +80,12 @@ describe("POST /api/threads", () => {
 });
 
 describe("PATCH /api/threads", () => {
-  it("id 必須、未指定は 400", async () => {
+  it("id is required, missing returns 400", async () => {
     const res = await PATCH(jsonReq("PATCH", { title: "x" }));
     expect(res.status).toBe(400);
   });
 
-  it("title を更新", async () => {
+  it("updates title", async () => {
     const create = await POST(jsonReq("POST", {}));
     const created = (await create.json()) as { id: string };
     createdIds.push(created.id);
@@ -96,14 +96,14 @@ describe("PATCH /api/threads", () => {
     expect(updated.title).toBe("リネーム後");
   });
 
-  it("存在しない id は 404", async () => {
+  it("nonexistent id returns 404", async () => {
     const res = await PATCH(
       jsonReq("PATCH", { title: "x" }, "id=00000000-0000-0000-0000-000000000000"),
     );
     expect(res.status).toBe(404);
   });
 
-  it("model も更新可能", async () => {
+  it("can also update model", async () => {
     const create = await POST(jsonReq("POST", {}));
     const created = (await create.json()) as { id: string };
     createdIds.push(created.id);
@@ -116,15 +116,15 @@ describe("PATCH /api/threads", () => {
 });
 
 describe("PATCH /api/threads — folderId", () => {
-  it("folderId を更新してフォルダに割当", async () => {
-    // フォルダ作成
+  it("updates folderId to assign to a folder", async () => {
+    // Create folder
     const [folder] = await db
       .insert(folders)
       .values({ name: "割当先フォルダ" })
       .returning();
     createdFolderIds.push(folder.id);
 
-    // スレッド作成
+    // Create thread
     const create = await POST(jsonReq("POST", {}));
     const created = (await create.json()) as { id: string };
     createdIds.push(created.id);
@@ -137,8 +137,8 @@ describe("PATCH /api/threads — folderId", () => {
     expect(updated.folderId).toBe(folder.id);
   });
 
-  it("folderId を null でクリア（フォルダから外す）", async () => {
-    // フォルダ作成 + スレッドをフォルダ付きで作成
+  it("clears folderId with null (removes from folder)", async () => {
+    // Create folder + create thread with folder
     const [folder] = await db
       .insert(folders)
       .values({ name: "クリア元フォルダ" })
@@ -150,7 +150,7 @@ describe("PATCH /api/threads — folderId", () => {
     createdIds.push(created.id);
     expect(created.folderId).toBe(folder.id);
 
-    // null でクリア
+    // Clear with null
     const res = await PATCH(
       jsonReq("PATCH", { folderId: null }, `id=${created.id}`),
     );
@@ -160,8 +160,8 @@ describe("PATCH /api/threads — folderId", () => {
   });
 });
 
-describe("GET /api/threads — folderId 含有", () => {
-  it("GET レスポンスに folderId が含まれる", async () => {
+describe("GET /api/threads — includes folderId", () => {
+  it("GET response includes folderId", async () => {
     const [folder] = await db
       .insert(folders)
       .values({ name: "GET 検証フォルダ" })

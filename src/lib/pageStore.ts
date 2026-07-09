@@ -4,17 +4,17 @@ import { eq } from "drizzle-orm";
 import { hashContent, embedText } from "@/lib/embed";
 
 /**
- * pages + page_embeddings の upsert を1関数にまとめた知識化ヘルパ。
+ * Knowledge ingestion helper that consolidates pages + page_embeddings upsert into one function.
  *
- * - urlHash で既存ページを検索
- * - contentHash が一致 → キャッシュヒット（再 embed 不要）、既存 id を返す
- * - contentHash が不一致 → pages を upsert し page_embeddings を再生成
- * - 新規 URL → pages を insert し page_embeddings を生成
+ * - Search for an existing page by urlHash
+ * - contentHash matches → cache hit (no re-embed needed), return existing id
+ * - contentHash differs → upsert pages and regenerate page_embeddings
+ * - New URL → insert into pages and generate page_embeddings
  *
- * 戻り値: page id。
+ * Returns: page id.
  *
- * /api/scrape（手動取り込み）と /api/chat（Web 検索で得たURLの自動取り込み）
- * の両方から呼ばれる共通ロジック。
+ * Common logic called from both /api/scrape (manual ingestion) and /api/chat
+ * (auto-ingestion of URLs found via web search).
  */
 export async function upsertPage(url: string, title: string, content: string): Promise<string> {
   const urlHash = hashContent(url);
@@ -22,7 +22,7 @@ export async function upsertPage(url: string, title: string, content: string): P
 
   const [existing] = await db.select().from(pages).where(eq(pages.urlHash, urlHash));
 
-  // contentHash が同じ → キャッシュヒット、再 embed 不要
+  // contentHash matches → cache hit, no re-embed needed
   if (existing && existing.contentHash === contentHash) {
     return existing.id;
   }
@@ -58,7 +58,7 @@ export async function upsertPage(url: string, title: string, content: string): P
     pageRow = { id: inserted.id };
   }
 
-  // embed + page_embeddings 保存（既存を削除してから挿入）
+  // embed + save page_embeddings (delete existing then insert)
   const vector = await embedText(content, "document");
   if (vector.length > 0) {
     await db.delete(pageEmbeddings).where(eq(pageEmbeddings.pageId, pageRow.id));

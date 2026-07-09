@@ -7,7 +7,7 @@ vi.mock("@/lib/i18n/types", async (importOriginal) => {
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { I18nProvider } from "@/components/I18nProvider";
 
-// /api/models の fetch をモック
+// Mock fetch for /api/models
 const mockModels = ["umans-glm-5.2", "gpt-4o-mini", "gpt-4o"];
 
 beforeEach(() => {
@@ -80,19 +80,19 @@ function renderSettings(overrides?: Partial<TestThread>) {
   return { onUpdate, ...render(<I18nProvider><ThreadSettings thread={thread} onUpdate={onUpdate} /></I18nProvider>) };
 }
 
-describe("ThreadSettings — 折りたたみ", () => {
-  it("閉じた状態では入力欄が見えない", () => {
+describe("ThreadSettings — collapse", () => {
+  it("input is not visible when collapsed", () => {
     renderSettings();
     expect(screen.queryByPlaceholderText("このスレッドのシステムプロンプト（任意）")).not.toBeInTheDocument();
   });
 
-  it("トグルボタンで開閉", async () => {
+  it("toggles open/closed with the toggle button", async () => {
     renderSettings();
     const btn = screen.getByRole("button", { name: "スレッド設定を開閉" });
     fireEvent.click(btn);
     expect(screen.getByPlaceholderText("このスレッドのシステムプロンプト（任意）")).toBeInTheDocument();
     fireEvent.click(btn);
-    // AnimatePresence の exit アニメーション中も DOM に残るため waitFor で待つ。
+    // AnimatePresence exit animation keeps the element in the DOM, so wait with waitFor.
     await waitFor(() => {
       expect(screen.queryByPlaceholderText("このスレッドのシステムプロンプト（任意）")).not.toBeInTheDocument();
     });
@@ -100,13 +100,13 @@ describe("ThreadSettings — 折りたたみ", () => {
 });
 
 describe("ThreadSettings — system prompt", () => {
-  it("既存の system prompt を表示", () => {
+  it("displays existing system prompt", () => {
     renderSettings({ systemPrompt: "既存プロンプト" });
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     expect(screen.getByDisplayValue("既存プロンプト")).toBeInTheDocument();
   });
 
-  it("編集して保存", async () => {
+  it("edits and saves", async () => {
     const { onUpdate } = renderSettings();
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     const ta = screen.getByPlaceholderText("このスレッドのシステムプロンプト（任意）");
@@ -117,7 +117,7 @@ describe("ThreadSettings — system prompt", () => {
     );
   });
 
-  it("空文字は null として保存", async () => {
+  it("saves empty string as null", async () => {
     const { onUpdate } = renderSettings({ systemPrompt: "既存" });
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     const ta = screen.getByPlaceholderText("このスレッドのシステムプロンプト（任意）");
@@ -129,8 +129,8 @@ describe("ThreadSettings — system prompt", () => {
   });
 });
 
-describe("ThreadSettings — モデルセレクタ", () => {
-  it("モデルリストを取得して表示", async () => {
+describe("ThreadSettings — model selector", () => {
+  it("fetches and displays the model list", async () => {
     renderSettings();
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     const select = screen.getByDisplayValue("umans-glm-5.2");
@@ -140,7 +140,7 @@ describe("ThreadSettings — モデルセレクタ", () => {
     });
   });
 
-  it("モデル変更で dirty → 保存可能", async () => {
+  it("model change makes it dirty → saveable", async () => {
     const { onUpdate } = renderSettings();
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     await waitFor(() => screen.getByRole("option", { name: "gpt-4o-mini" }));
@@ -153,7 +153,7 @@ describe("ThreadSettings — モデルセレクタ", () => {
     );
   });
 
-  it("デュアルモデル設定を保存", async () => {
+  it("saves dual model settings", async () => {
     const { onUpdate } = renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     await waitFor(() => screen.getByRole("option", { name: "gpt-4o-mini" }));
@@ -174,7 +174,7 @@ describe("ThreadSettings — モデルセレクタ", () => {
     );
   });
 
-  it("displayNames がある場合は表示名を option ラベルに使う", async () => {
+  it("uses display names for option labels when available", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((url: string) => {
@@ -203,14 +203,14 @@ describe("ThreadSettings — モデルセレクタ", () => {
   });
 });
 
-describe("ThreadSettings — 保存ボタン", () => {
-  it("変更なしなら無効", () => {
+describe("ThreadSettings — save button", () => {
+  it("is disabled when there are no changes", () => {
     renderSettings();
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
   });
 
-  it("保存成功メッセージを表示", async () => {
+  it("shows a save success message", async () => {
     const { onUpdate } = renderSettings();
         fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
     const ta = screen.getByPlaceholderText("このスレッドのシステムプロンプト（任意）");

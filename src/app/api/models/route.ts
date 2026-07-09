@@ -5,10 +5,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/models — 利用可能なモデル一覧を返す。
+ * GET /api/models — Returns the list of available models.
  *
- * - Umansモード: `/v1/models/info` 由来のモデル一覧と displayNames を返す。
- * - OAI互換モード: LLM_MODELS env（カンマ区切り）から構築。displayNames は空。
+ * - Umans mode: Returns the model list and displayNames from `/v1/models/info`.
+ * - OAI-compatible mode: Built from LLM_MODELS env (comma-separated). displayNames is empty.
  */
 export async function GET() {
   const user = await getSessionUser();

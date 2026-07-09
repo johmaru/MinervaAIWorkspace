@@ -6,6 +6,7 @@ import { users, threads, folders } from "@/db/schema";
 import { eq, isNull, count as sqlCount } from "drizzle-orm";
 import { hashPassword } from "@/lib/password";
 import { signIn, signOut } from "@/auth";
+import { isRegistrationIpAllowed } from "@/lib/ip-whitelist";
 
 type FormState = { error?: string } | undefined;
 
@@ -15,6 +16,12 @@ type FormState = { error?: string } | undefined;
  * After creation, automatically log in and redirect to /.
  */
 export async function register(state: FormState, formData: FormData): Promise<FormState> {
+  if (process.env.REGISTRATION_LOCKED === "true") {
+    return { error: "auth.registrationLocked" };
+  }
+  if (!(await isRegistrationIpAllowed())) {
+    return { error: "auth.ipNotAllowed" };
+  }
   const nickname = String(formData.get("nickname") ?? "").trim();
   const email = String(formData.get("email") ?? "").toLowerCase().trim();
   const password = String(formData.get("password") ?? "");
@@ -87,6 +94,7 @@ export async function authenticate(state: FormState, formData: FormData): Promis
  */
 export async function logout(): Promise<void> {
   await signOut();
+  await clearSessionCookies();
   redirect("/login");
 }
 

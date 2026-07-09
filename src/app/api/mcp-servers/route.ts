@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/mcp-servers — ログインユーザーの MCP サーバー一覧（更新順）。
+ * GET /api/mcp-servers — MCP servers of the logged-in user (newest first).
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -40,9 +40,9 @@ type CreateBody = {
 };
 
 /**
- * POST /api/mcp-servers — MCP サーバー登録。
- * transport="http" の場合は url が必須。
- * transport="stdio" の場合は command が必須。
+ * POST /api/mcp-servers — Register an MCP server.
+ * transport="http" requires url.
+ * transport="stdio" requires command.
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();

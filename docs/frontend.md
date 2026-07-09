@@ -102,7 +102,7 @@ All components in `src/components/` are client components (`"use client"`). Serv
 
 | Component | File | Description |
 |-----------|------|-------------|
-| `SettingsModal` | `src/components/SettingsModal.tsx` | Application settings modal (1132 lines). 5 vertical tabs with left rail navigation: 🤖 AI・モデル, 🔍 検索・ネット, 🖥️ システム, 🔗 コネクション, 🎨 パーソナライズ. Manages LLM config, embeddings (with migration confirmation), web search, Tor, database, Notion OAuth, Cloudflare Tunnel, global instructions, and personalization. |
+| `SettingsModal` | `src/components/SettingsModal.tsx` | Application settings modal. 6 vertical tabs with left rail navigation: 🤖 AI・モデル, 🔍 検索・ネット, 🖥️ システム, 🔗 コネクション, 🌐 公開・セキュリティ, 🎨 パーソナライズ. Manages LLM config, embeddings (with migration confirmation), web search, Tor, database, Notion OAuth, Cloudflare Tunnel, global instructions, and personalization. |
 | `MemoryViewerModal` | `src/components/MemoryViewerModal.tsx` | Memories table viewer/editor. List with search and filter (all/fact/working). Inline edit (PATCH), soft-delete (DELETE), add new (POST). Targets only `memories` table (not `page_embeddings`). |
 | `SkillManagerModal` | `src/components/SkillManagerModal.tsx` | Skills management UI. 3 tabs: Active Skills, Draft Candidates, Archived. CRUD for skills table + skill_candidates approval pipeline. |
 | `HelpModal` | `src/components/HelpModal.tsx` | Help modal with left nav + right content layout. Currently covers Notion connections help. |
@@ -113,9 +113,10 @@ All components in `src/components/` are client components (`"use client"`). Serv
 |-------|------|---------|---------|
 | 0 | 🤖 | `settings.tabAiModels` | LLM base URL, API key, model, models list, thinking effort. Embedding model with dimension migration. |
 | 1 | 🔍 | `settings.tabSearchNetwork` | Web search model, max results/rounds, scraper URL, SearXNG URL, Tor proxy, scrape proxy. |
-| 2 | 🖥️ | `settings.tabSystem` | Runtime environment: database URL, host OS, timezone. Tor status + connection check. Cloudflare Tunnel. |
-| 3 | 🔗 | `settings.tabConnections` | Notion OAuth connections list + authorize. |
-| 4 | 🎨 | `personalization.title` | Style presets, trait sliders (warmth, energy, structure, emoji). |
+| 2 | 🖥️ | `settings.tabSystem` | Runtime environment: database URL, host OS, timezone. Tor status + connection check. |
+| 3 | 🔗 | `settings.tabConnections` | Notion OAuth credentials + connections list + authorize. |
+| 4 | 🌐 | `settings.tabServerAccess` | Public base URL (AUTH_URL), Cloudflare Tunnel (start/stop + token), security (registration lock + allowed IPs). |
+| 5 | 🎨 | `personalization.title` | Style presets, trait sliders (warmth, energy, structure, emoji). |
 
 ### Auth & Toggles
 

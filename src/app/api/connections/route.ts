@@ -7,8 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/connections — ログインユーザーのコネクション一覧（更新順）。
- * accessToken / refreshToken は返さない（シークレット漏洩防止）。
+ * GET /api/connections — List the logged-in user's connections (by update order).
+ * Does not return accessToken / refreshToken (prevent secret leakage).
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -33,9 +33,9 @@ export async function GET() {
 type DeleteBody = { id?: string };
 
 /**
- * DELETE /api/connections — コネクション削除。
+ * DELETE /api/connections — Delete a connection.
  * body: { id: string }
- * ユーザー所有の行のみ削除（他ユーザーの行は触れない）。
+ * Only deletes rows owned by the user (cannot touch other users' rows).
  */
 export async function DELETE(req: Request) {
   const user = await getSessionUser();

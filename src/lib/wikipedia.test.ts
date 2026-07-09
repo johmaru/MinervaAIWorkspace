@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// fetch をモック: Wikipedia API への実際のネットワークアクセスなしで成功/失敗を検証
+// Mock fetch: verify success/failure without actual network access to the Wikipedia API
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
@@ -12,13 +12,13 @@ afterEach(() => {
 });
 
 describe("searchWikipedia", () => {
-  it("英語クエリ → en.wikipedia.org で opensearch → summary を取得し WikipediaResult を返す", async () => {
-    // opensearch レスポンス: [search, [titles], [descriptions], [urls]]
+  it("English query → fetches opensearch → summary from en.wikipedia.org and returns WikipediaResult", async () => {
+    // opensearch response: [search, [titles], [descriptions], [urls]]
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ["Earth", ["Earth"], ["Planet"], ["https://en.wikipedia.org/wiki/Earth"]],
     });
-    // summary レスポンス
+    // summary response
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -38,14 +38,14 @@ describe("searchWikipedia", () => {
     expect(result!.url).toBe("https://en.wikipedia.org/wiki/Earth");
     expect(result!.lang).toBe("en");
 
-    // opensearch は en.wikipedia.org に送信
+    // opensearch is sent to en.wikipedia.org
     const opensearchCall = fetchMock.mock.calls[0];
     expect(opensearchCall[0]).toContain("en.wikipedia.org");
     expect(opensearchCall[0]).toContain("action=opensearch");
     expect(opensearchCall[0]).toContain("search=Earth");
   });
 
-  it("日本語クエリ → ja.wikipedia.org にリクエストする（en ではない）", async () => {
+  it("Japanese query → sends request to ja.wikipedia.org (not en)", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ["地球", ["地球"], [], []],
@@ -66,13 +66,13 @@ describe("searchWikipedia", () => {
     expect(result!.lang).toBe("ja");
     expect(result!.title).toBe("地球");
 
-    // opensearch は ja.wikipedia.org に送信
+    // opensearch is sent to ja.wikipedia.org
     const opensearchCall = fetchMock.mock.calls[0];
     expect(opensearchCall[0]).toContain("ja.wikipedia.org");
     expect(opensearchCall[0]).not.toContain("en.wikipedia.org");
   });
 
-  it("opensearch が空配列（タイトルなし）→ null を返す", async () => {
+  it("returns null when opensearch returns empty array (no titles)", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ["nonexistentquery", [], [], []],
@@ -81,11 +81,11 @@ describe("searchWikipedia", () => {
     const result = await searchWikipedia("nonexistentquery");
 
     expect(result).toBeNull();
-    // summary endpoint は呼ばれない（1回のみ）
+    // summary endpoint is not called (only 1 call)
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("opensearch が 404 → null を返す", async () => {
+  it("returns null when opensearch returns 404", async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 });
 
     const result = await searchWikipedia("anything");
@@ -93,13 +93,13 @@ describe("searchWikipedia", () => {
     expect(result).toBeNull();
   });
 
-  it("summary が 404 → null を返す", async () => {
-    // opensearch は成功
+  it("returns null when summary returns 404", async () => {
+    // opensearch succeeds
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ["SomeTitle", ["SomeTitle"], [], []],
     });
-    // summary は 404
+    // summary returns 404
     fetchMock.mockResolvedValueOnce({ ok: false, status: 404 });
 
     const result = await searchWikipedia("SomeTitle");
@@ -107,7 +107,7 @@ describe("searchWikipedia", () => {
     expect(result).toBeNull();
   });
 
-  it("opensearch の fetch が reject した場合 → null を返す", async () => {
+  it("returns null when opensearch fetch rejects", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network error"));
 
     const result = await searchWikipedia("Earth");
@@ -115,7 +115,7 @@ describe("searchWikipedia", () => {
     expect(result).toBeNull();
   });
 
-  it("summary の fetch が reject した場合 → null を返す", async () => {
+  it("returns null when summary fetch rejects", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ["Earth", ["Earth"], [], []],
@@ -127,14 +127,14 @@ describe("searchWikipedia", () => {
     expect(result).toBeNull();
   });
 
-  it("空文字クエリ → null を返し fetch しない", async () => {
+  it("returns null and does not fetch for empty string query", async () => {
     const result = await searchWikipedia("   ");
 
     expect(result).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("content_urls が無い場合は標準 URL をフォールバック先として使う", async () => {
+  it("falls back to standard URL when content_urls is missing", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ["Earth", ["Earth"], [], []],
@@ -145,7 +145,7 @@ describe("searchWikipedia", () => {
         title: "Earth",
         description: "",
         extract: "Earth is a planet.",
-        // content_urls 無し
+        // no content_urls
       }),
     });
 

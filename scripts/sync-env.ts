@@ -1,21 +1,23 @@
 /**
  * scripts/sync-env.ts
  *
- * .env.example を走査し、.env に存在しないキーを example の値ごと末尾に追記する。
- * 既存キーの値は一切変更しない。
+ * Traverse .env.example and append any keys missing from .env (with their
+ * example values) to the end of .env. Existing keys are never modified.
  *
- * 起動前の整合性確保が目的のため、例外は catch せずそのまま throw する
- * （呼び出し元の predev / docker-entrypoint.sh でハンドリング）。
+ * Since the goal is to ensure consistency before startup, exceptions are not
+ * caught and are rethrown directly (handled by the caller in predev /
+ * docker-entrypoint.sh).
  *
- * パーサーは vitest.setup.ts:10-28 の既存最小パーサーと同アプローチ
- * （# コメントスキップ、KEY=value 抽出、"..." クオート除去）。
- * テスト用 setup は本番 import に向かないため、独立した純関数として持つ。
+ * The parser uses the same approach as the existing minimal parser in
+ * vitest.setup.ts:10-28 (skip # comments, extract KEY=value, strip "..."
+ * quotes). The test setup is not suitable for production imports, so we keep
+ * this as an independent pure function.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** .env.example から KEY -> 値文字列 の Map を抽出する。 */
+/** Extract a Map of KEY -> value string from .env.example. */
 function parseExample(raw: string): Map<string, string> {
   const out = new Map<string, string>();
   for (const line of raw.split("\n")) {
@@ -34,23 +36,24 @@ function parseExample(raw: string): Map<string, string> {
 }
 
 /**
- * .env に既にキーが存在するかを判定。
- * `^KEY=` （アクティブな定義）も `^# KEY=` （コメントアウトされた定義）も
- * 既存扱いとする。ユーザーが意図的にコメントアウトしたキーに .env.example の
- * デフォルト値が重複追記されるのを防ぐ（env_file / dotenv は最後の定義が勝つため）。
+ * .env has the key already. Both `^KEY=` (an active definition) and
+ * `^# KEY=` (a commented-out definition) count as existing. This prevents
+ * .env.example's default value from being appended again for a key the user
+ * intentionally commented out (env_file / dotenv uses the last definition,
+ * so a duplicate would win).
  */
 function hasKey(envContent: string, key: string): boolean {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`^(#\\s*)?${escaped}=`, "m").test(envContent);
 }
 
-/** sync-env の本体。戻り値は追記したキーのリスト（テスト用）。 */
+/** Body of sync-env. Returns the list of appended keys (for testing). */
 export function syncEnv(
   examplePath: string,
   envPath: string,
   now: Date = new Date(),
 ): string[] {
-  // example 無しは何もしない（エッジケース）。
+  // Do nothing if example is missing (edge case).
   if (!existsSync(examplePath)) {
     console.log("[sync-env] No .env.example found. Skipping.");
     return [];
@@ -59,10 +62,10 @@ export function syncEnv(
   const exampleRaw = readFileSync(examplePath, "utf8");
   const exampleMap = parseExample(exampleRaw);
 
-  // .env が無ければ空文字扱い。
+  // Treat as empty string if .env does not exist.
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
 
-  // 追記候補を収集。
+  // Collect append candidates.
   const additions: Array<{ key: string; value: string }> = [];
   for (const [key, value] of exampleMap) {
     if (!hasKey(envContent, key)) {
@@ -75,7 +78,7 @@ export function syncEnv(
     return [];
   }
 
-  // ヘッダコメント + キー群を末尾に追記。
+  // Append a header comment + the keys to the end.
   const header = `\n# Auto-merged from .env.example (${now.toISOString()})\n`;
   const body = additions
     .map((a) => `${a.key}=${a.value}`)
@@ -89,11 +92,12 @@ export function syncEnv(
   return keys;
 }
 
-// 直接実行された場合のみ走る。import では実行されない。
-// `process.argv[1]` とこのファイルのパスを比較して Node/Bun 両方で動作
-// （Bun 固有の `import.meta.main` は @types/node に無いため使わない）。
-// `import.meta.url` は ESM 実行時のみ定義される。CJS バンドル等で未定義の
-// 場合は安全にフォールバックし、ガードを false 扱いにする。
+// Only runs when executed directly. Does not run on import.
+// Compares `process.argv[1]` with this file's path so it works on both
+// Node and Bun (Bun-specific `import.meta.main` is absent from @types/node,
+// so we avoid it).
+// `import.meta.url` is only defined for ESM execution. If undefined (e.g. a
+// CJS bundle), fall back safely and treat the guard as false.
 const scriptUrl = import.meta.url;
 const isMain =
   typeof scriptUrl === "string" &&

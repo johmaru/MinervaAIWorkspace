@@ -7,7 +7,7 @@ vi.mock("@/lib/i18n/types", async (importOriginal) => {
 import { ChatShell } from "@/components/ChatShell";
 import { I18nProvider } from "@/components/I18nProvider";
 
-// useThreads をモック
+// Mock useThreads
 vi.mock("@/hooks/useThreads", () => ({
   useThreads: () => ({
     threads: [
@@ -23,7 +23,7 @@ vi.mock("@/hooks/useThreads", () => ({
   }),
 }));
 
-// useFolders をモック
+// Mock useFolders
 vi.mock("@/hooks/useFolders", () => ({
   useFolders: () => ({
     folders: [],
@@ -36,7 +36,7 @@ vi.mock("@/hooks/useFolders", () => ({
   }),
 }));
 
-// ChatWindow をモック（子コンポーネントの副作用を回避）
+// Mock ChatWindow (avoid side effects from child components)
 vi.mock("@/components/ChatWindow", () => ({
   ChatWindow: ({ threadId }: { threadId: string | null }) => (
     <div data-testid="chat-window" data-thread={threadId}>ChatWindow</div>
@@ -51,69 +51,69 @@ afterEach(() => {
   cleanup();
 });
 
-describe("ChatShell — モバイルサイドバー", () => {
-  it("ハンバーガーボタンが表示される", () => {
+describe("ChatShell — mobile sidebar", () => {
+  it("renders the hamburger button", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     expect(screen.getByLabelText("サイドバーを開く")).toBeInTheDocument();
   });
 
-  it("ハンバーガークリックでサイドバー表示", () => {
+  it("opens the sidebar on hamburger click", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     fireEvent.click(screen.getByLabelText("サイドバーを開く"));
-    // オーバーレイが表示される
+    // Overlay is displayed
     expect(screen.getByLabelText("スレッド一覧")).toBeVisible();
   });
 
-  it("スレッド選択でサイドバーが閉じる", () => {
+  it("closes the sidebar on thread selection", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     fireEvent.click(screen.getByLabelText("サイドバーを開く"));
-    // スレッドを選択
+    // Select a thread
     fireEvent.click(screen.getByText("テストスレッド"));
-    // サイドバーの aside が translate-x-full になる（非表示）
-    //確認: オーバーレイが消える
+    // The sidebar aside becomes translate-x-full (hidden)
+    // Confirm: overlay disappears
     expect(screen.queryByText("テストスレッド")).toBeInTheDocument();
   });
 
-  it("新規チャットボタンクリックでサイドバーが閉じる", async () => {
+  it("closes the sidebar on new chat button click", async () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     fireEvent.click(screen.getByLabelText("サイドバーを開く"));
     fireEvent.click(screen.getByText("+ 新規チャット"));
-    // create が呼ばれる
+    // create is called
     await waitFor(() => {
       expect(screen.getByTestId("chat-window")).toBeInTheDocument();
     });
   });
 
-  it("Esc キーでサイドバーを閉じる", () => {
+  it("closes the sidebar with Esc key", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     fireEvent.click(screen.getByLabelText("サイドバーを開く"));
     expect(screen.getByLabelText("スレッド一覧")).toBeVisible();
     fireEvent.keyDown(window, { key: "Escape" });
-    // サイドバーが非表示になる（transform で画面外へ）
-    // aside 要素は存在するが visible ではなくなる
+    // Sidebar becomes hidden (moved off-screen via transform)
+    // The aside element still exists but is no longer visible
     const aside = screen.getByLabelText("スレッド一覧");
     expect(aside).toBeInTheDocument();
   });
 });
 
-describe("ChatShell — アクセシビリティ", () => {
-  it("サイドバーに aria-label がある", () => {
+describe("ChatShell — accessibility", () => {
+  it("has an aria-label on the sidebar", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     expect(screen.getByLabelText("スレッド一覧")).toBeInTheDocument();
   });
 
-  it("ハンバーガーボタンに aria-label がある", () => {
+  it("has an aria-label on the hamburger button", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     expect(screen.getByLabelText("サイドバーを開く")).toBeInTheDocument();
   });
 
-  it("閉じるボタンに aria-label がある", () => {
+  it("has an aria-label on the close button", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     fireEvent.click(screen.getByLabelText("サイドバーを開く"));
     expect(screen.getByLabelText("サイドバーを閉じる")).toBeInTheDocument();
   });
 
-  it("オーバーレイに aria-hidden がある", () => {
+  it("has aria-hidden on the overlay", () => {
     render(<I18nProvider><ChatShell /></I18nProvider>);
     fireEvent.click(screen.getByLabelText("サイドバーを開く"));
     const overlay = document.querySelector('[aria-hidden="true"]');

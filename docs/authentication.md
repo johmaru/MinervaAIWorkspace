@@ -420,19 +420,25 @@ All auth env vars are defined in `.env.example`. See [Settings & Environment](./
 |----------|----------|---------|---------|
 | `AUTH_SECRET` | Yes | — | HMAC secret for signing JWTs. Generate with `bunx auth secret`. |
 | `AUTH_TRUST_HOST` | Yes | `true` | Trusts the `X-Forwarded-Host` header. Required behind reverse proxies (Docker, Cloudflare Tunnel). |
-| `AUTH_URL` | Yes | `http://localhost:3001` | Public base URL of the app. Used by Auth.js for callback URLs and by the Notion/Google OAuth redirect URIs. |
+| `AUTH_URL` | Yes | `http://localhost:3001` | Configured public base URL for Settings UI, tunnel status, and OAuth-console redirect URI matching. Auth.js no longer reads this for request-origin rewriting; redirects follow the incoming request Host header (dual local + Cloudflare access). |
 | `GOOGLE_CLIENT_ID` | No | — | Google OAuth client ID. Enables "Sign in with Google" when set together with `GOOGLE_CLIENT_SECRET`. |
 | `GOOGLE_CLIENT_SECRET` | No | — | Google OAuth client secret. |
 
 ### `AUTH_URL`
 
-`AUTH_URL` is the canonical public URL of the deployment. It is used in three places:
+`AUTH_URL` is the configured public base URL of the deployment. It serves as the canonical name for the Settings UI, tunnel status display, and OAuth-provider console redirect URI registration.
 
-1. **Auth.js callback URL** — NextAuth reads it per-request (via the internal `reqWithEnvURL` mechanism) to construct redirect URIs.
-2. **Google OAuth redirect URI** — `{AUTH_URL}/api/auth/callback/google`.
-3. **Notion OAuth redirect URI** — `{AUTH_URL}/api/connections/notion/callback` (read directly from `process.env` in the Notion routes).
+**Dual-access behavior:** Auth.js no longer reads `AUTH_URL` for request-origin rewriting. At module load, `src/lib/auth-env.ts` copies `AUTH_URL` into an internal mirror (`UMANS_CONFIGURED_AUTH_URL`) and deletes `process.env.AUTH_URL` so Auth.js's `reqWithEnvURL` is a no-op. Under `AUTH_TRUST_HOST=true`, Auth.js derives the origin from the incoming request's `X-Forwarded-Host` / `Host` + `X-Forwarded-Proto` headers. This means both `http://localhost:3001` and a public `https://...` URL work simultaneously — redirects follow the access path, not a sticky env value.
 
-When using a Cloudflare Tunnel, set `AUTH_URL` to the tunnel's public HTTPS URL. The tunnel API (`POST /api/tunnel`) updates `AUTH_URL` in both `.env` and `process.env` at runtime — no restart is needed because NextAuth reads it per-request. See [Deployment](./deployment.md) for the tunnel setup.
+The `authorized` callback in `src/auth.config.ts` uses `resolvePublicOrigin()` (from `src/lib/request-origin.ts`) to build redirect URLs from the request headers, falling back to `UMANS_CONFIGURED_AUTH_URL` only when no host header is present.
+
+OAuth redirect URIs are derived from the request origin the same way:
+1. **Google OAuth** — `{origin}/api/auth/callback/google` (origin from request headers via Auth.js).
+2. **Notion OAuth** — `{origin}/api/connections/notion/callback` (read via `resolvePublicOrigin` in the Notion routes).
+
+When using a Cloudflare Tunnel, set `AUTH_URL` to the tunnel's public HTTPS URL so the Settings UI and OAuth consoles know the public name. The tunnel API (`POST /api/tunnel`) saves `AUTH_URL` to `.env` and mirrors it to `UMANS_CONFIGURED_AUTH_URL` at runtime — no restart needed. See [Deployment](./deployment.md) for the tunnel setup.
+
+> **Dual OAuth:** if both local and public access need Connect Notion / Google, register both redirect URIs (`http://localhost:3001/...` and `https://your-tunnel.example.com/...`) in the provider console. Page routing does not depend on OAuth registration.
 
 ### `AUTH_TRUST_HOST`
 

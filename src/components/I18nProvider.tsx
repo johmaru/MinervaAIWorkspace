@@ -14,18 +14,18 @@ type I18nContextValue = {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 /**
- * クライアント側 i18n Provider。
- * localStorage にロケールを永続化し、Cookie と <html lang> を同期する。
- * next-themes と同じパターン: SSR 時は DEFAULT_LOCALE で描画し、
- * クライアント側で localStorage から復元後に再レンダリングする。
+ * Client-side i18n Provider.
+ * Persists locale to localStorage and syncs cookie and <html lang>.
+ * Same pattern as next-themes: render with DEFAULT_LOCALE during SSR,
+ * then re-render on the client after restoring from localStorage.
  */
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
 
-  // 初回マウント時に localStorage から復元。
-  // try-catch で localStorage アクセス不可（プライベートモード等）を保護。
-  // 復元時に <html lang> も更新し、SSR の lang="en" とクライアント ja の
-  // 不一致によるスクリーンリーダーの誤読を防ぐ。
+  // Restore from localStorage on first mount.
+  // try-catch guards against unavailable localStorage (e.g. private mode).
+  // Also update <html lang> on restore to prevent screen reader misreads
+  // caused by mismatch between SSR lang="en" and client ja.
   useEffect(() => {
     try {
       const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
@@ -34,17 +34,17 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         document.documentElement.lang = stored;
       }
     } catch {
-      // localStorage が利用不可（プライベートモード等）なら無視
+      // localStorage unavailable (e.g. private mode) — ignore
     }
   }, []);
 
-  // locale 変更時に localStorage + cookie + <html lang> を更新
+  // Update localStorage + cookie + <html lang> when locale changes
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
     try {
       localStorage.setItem(LOCALE_STORAGE_KEY, next);
     } catch {
-      // localStorage が利用不可なら無視
+      // localStorage unavailable — ignore
     }
     document.cookie = `${LOCALE_COOKIE_NAME}=${next}; path=/; max-age=31536000; samesite=lax`;
     document.documentElement.lang = next;

@@ -6,20 +6,20 @@ import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
-// Windows 上の AV が回復直後のバイナリ DB を短時間ロックし rmSync が
-// EPERM を投げることがある。簡易リトライで吸収する。
+// On Windows, AV may briefly lock a recovered binary DB, causing rmSync to
+// throw EPERM. A simple retry absorbs this.
 function rmSyncRetry(target: string) {
   for (let i = 0; i < 10; i++) {
     try {
       rmSync(target, { recursive: true, force: true });
       return;
     } catch {
-      // 100ms のビジーウェイトでロック解放を待つ。
+      // 100ms busy-wait for lock release.
       const until = Date.now() + 100;
       while (Date.now() < until) { /* spin */ }
     }
   }
-  // 最終試行: 例外は無視（テスト本体の検証は既に成功している前提）。
+  // Final attempt: ignore exceptions (test body verification has already succeeded).
   try { rmSync(target, { recursive: true, force: true }); } catch { /* noop */ }
 }
 
@@ -56,11 +56,11 @@ describe("openDatabase", () => {
     const dir = mkdtempSync(join(tmpdir(), "umans-db-"));
     try {
       const path = join(dir, "corrupt.db");
-      // 本物の SQLite DB を作成して行を 1 件書き込む。
+      // Create a real SQLite DB and write one row.
       const seed = new Database(path);
       seed.exec("CREATE TABLE t(v TEXT); INSERT INTO t VALUES ('hello');");
       seed.close();
-      // ヘッダー 16 バイトを破損（SQLite magic を潰す）。
+      // Corrupt the 16-byte header (destroy the SQLite magic).
       const fd = openSync(path, "r+");
       writeSync(fd, Buffer.alloc(16, 0), 0, 16, 0);
       closeSync(fd);

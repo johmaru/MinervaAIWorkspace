@@ -665,7 +665,7 @@ async function buildUrlContext({
   const blocks: string[] = [];
   for (let i = 0; i < urls.length; i++) {
     const r = settled[i];
-    if (r.status !== "fulfilled") continue;
+    if (r.status !== "fulfilled" || r.value === null) continue;
     const result = r.value;
     sources.push({
       url: result.url,
@@ -1260,13 +1260,17 @@ async function streamCompletion({
         send?.("status", { label: t(locale, "chat.statusToolScrape") });
         const tTool = Date.now();
         try {
-          const result = await scrapeUrl(parsedArgs.url);
+        const result = await scrapeUrl(parsedArgs.url);
+        if (result === null) {
+          toolContent = `Failed to scrape ${parsedArgs.url}`;
+        } else {
           sources.push({
             url: result.url,
             title: result.title,
             snippet: result.content.slice(0, 200),
           });
           toolContent = `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`;
+        }
         } catch {
           toolContent = `Failed to scrape ${parsedArgs.url}`;
         }

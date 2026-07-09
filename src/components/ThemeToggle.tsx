@@ -5,9 +5,9 @@ import { useI18n } from "@/components/I18nProvider";
 import { motion } from "motion/react";
 
 /**
- * ダークモード切替ボタン。
- * next-themes の resolvedTheme を読み、light ⇄ dark をトグル。
- * マウント前は hydration 不一致を避けるため空ボタンを描画。
+ * Dark mode toggle button.
+ * Reads next-themes' resolvedTheme and toggles light ⇄ dark.
+ * Renders an empty button before mount to avoid hydration mismatch.
  */
 export function ThemeToggle() {
   const { t } = useI18n();

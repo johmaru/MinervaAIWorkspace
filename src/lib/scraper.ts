@@ -24,7 +24,8 @@ export type ScrapeResult = {
  * Calls the microservice's /scrape endpoint.
  * Timeout is 45s: microservice-side Scrapling timeout(30s) + 3 retries (2s delay each) + margin.
  */
-export async function scrapeUrl(url: string): Promise<ScrapeResult> {
+export async function scrapeUrl(url: string): Promise<ScrapeResult | null> {
+  if (!process.env.SCRAPER_URL) return null;
   const t0 = Date.now();
   const base = process.env.SCRAPER_URL || "http://localhost:8000";
   const res = await fetch(`${base}/scrape`, {
@@ -80,6 +81,7 @@ export async function searchWeb(
   maxResults = 5,
   timeRange?: "day" | "week" | "month" | "year",
 ): Promise<WebSearchResponse> {
+  if (!process.env.SCRAPER_URL) return { query, results: [] };
   const t0 = Date.now();
   const base = process.env.SCRAPER_URL || "http://localhost:8000";
   const res = await fetch(`${base}/search`, {

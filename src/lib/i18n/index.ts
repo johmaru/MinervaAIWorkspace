@@ -5,10 +5,10 @@ import { ja, en } from "./dictionaries";
 const dictionaries = { ja, en } as const;
 
 /**
- * 翻訳文字列を取得。
- * key は "namespace.key" 形式（例: "common.save"）。
- * params は {key} プレースホルダを置換（例: {count} → 5）。
- * キー不存在時は key をそのまま返す（フォールバック）。
+ * Retrieves a translation string.
+ * key is in "namespace.key" format (e.g. "common.save").
+ * params replaces {key} placeholders (e.g. {count} → 5).
+ * If the key does not exist, returns the key as-is (fallback).
  */
 export function t(locale: Locale, key: string, params?: Record<string, string | number>): string {
   const dict = dictionaries[locale] ?? dictionaries[DEFAULT_LOCALE];
@@ -28,8 +28,8 @@ export function t(locale: Locale, key: string, params?: Record<string, string | 
 }
 
 /**
- * Route Handler で Cookie からロケールを検出する。
- * Cookie が無い or 不正値の場合は DEFAULT_LOCALE にフォールバック。
+ * Detects the locale from a cookie in a Route Handler.
+ * Falls back to DEFAULT_LOCALE if the cookie is missing or has an invalid value.
  */
 export function getRequestLocale(request: Request): Locale {
   const cookieHeader = request.headers.get("cookie") ?? "";

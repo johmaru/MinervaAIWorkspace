@@ -9,8 +9,8 @@ import { eq } from "drizzle-orm";
 import { POST as createThread } from "@/app/api/threads/route";
 import { DELETE, GET } from "@/app/api/threads/[id]/route";
 
-// /api/threads/[id] の GET/DELETE を検証。
-// Phase 2 は flat 線形会話（parent_id = NULL）。
+// Verify GET/DELETE for /api/threads/[id].
+// Phase 2 uses flat linear conversations (parent_id = NULL).
 
 const createdThreadIds: string[] = [];
 
@@ -38,9 +38,9 @@ async function createThreadWithTitle(title: string): Promise<string> {
 }
 
 describe("GET /api/threads/[id]", () => {
-  it("存在するスレッド + メッセージ一覧を返す", async () => {
+  it("returns existing thread + message list", async () => {
     const id = await createThreadWithTitle("GET テスト");
-    // メッセージを直接 DB に挿入
+    // Insert messages directly into DB
     await db.insert(messages).values([
       { threadId: id, role: "user", content: "こんにちは" },
       { threadId: id, role: "assistant", content: "どうも" },
@@ -61,7 +61,7 @@ describe("GET /api/threads/[id]", () => {
     expect(assistantMsg?.content).toBe("どうも");
   });
 
-  it("存在しない id は 404", async () => {
+  it("nonexistent id returns 404", async () => {
     const res = await GET(
       new Request("http://localhost/api/threads/00000000-0000-0000-0000-000000000000"),
       ctx("00000000-0000-0000-0000-000000000000"),
@@ -71,19 +71,19 @@ describe("GET /api/threads/[id]", () => {
 });
 
 describe("DELETE /api/threads/[id]", () => {
-  it("スレッドを削除し 204", async () => {
+  it("deletes thread and returns 204", async () => {
     const id = await createThreadWithTitle("DELETE テスト");
     const res = await DELETE(new Request(`http://localhost/api/threads/${id}`), ctx(id));
     expect(res.status).toBe(204);
-    // 削除確認
+    // Verify deletion
     const [row] = await db.select().from(threads).where(eq(threads.id, id));
     expect(row).toBeUndefined();
-    // afterAll で二重削除しないよう記録から除外
+    // Remove from tracking to avoid double deletion in afterAll
     const idx = createdThreadIds.indexOf(id);
     if (idx >= 0) createdThreadIds.splice(idx, 1);
   });
 
-  it("存在しない id は 404", async () => {
+  it("nonexistent id returns 404", async () => {
     const res = await DELETE(
       new Request("http://localhost/api/threads/00000000-0000-0000-0000-000000000000"),
       ctx("00000000-0000-0000-0000-000000000000"),
@@ -91,7 +91,7 @@ describe("DELETE /api/threads/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("cascade で messages も消える", async () => {
+  it("messages are also removed via cascade", async () => {
     const id = await createThreadWithTitle("CASCADE テスト");
     await db.insert(messages).values({ threadId: id, role: "user", content: "x" });
     const res = await DELETE(new Request(`http://localhost/api/threads/${id}`), ctx(id));

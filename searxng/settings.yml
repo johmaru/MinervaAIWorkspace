@@ -1,41 +1,41 @@
 use_default_settings:
   engines:
-    # Brave はレート制限 (suspended_time=180) で無期限停止するため除外。
-    # brave.images / brave.videos / brave.news は network: brave を参照するため
-    # 本体ごと remove すると KeyError になる。全variantをまとめて除外する。
+    # Brave is excluded because it suspends indefinitely due to rate limiting (suspended_time=180).
+    # brave.images / brave.videos / brave.news reference network: brave, so removing
+    # only the main engine causes a KeyError. Exclude all variants together.
     remove:
       - brave
       - brave.images
       - brave.videos
       - brave.news
-      # Startpage は JSONDecodeError で常に失敗するため除外。
+      # Startpage is excluded because it always fails with JSONDecodeError.
       - startpage
       - startpage news
       - startpage images
-      # aol は 404 で常に失敗するため除外。
+      # aol is excluded because it always fails with 404.
       - aol
-      # karmasearch は 403 (access denied) で常に失敗するため除外。
+      # karmasearch is excluded because it always fails with 403 (access denied).
       - karmasearch
       - karmasearch videos
-      # DuckDuckGo (旧エンジン) は CAPTCHA で常に失敗するため除外。
-      # 注意: "duckduckgo web" は別エンジンで正常動作するため下で有効化する。
+      # DuckDuckGo (legacy engine) is excluded because it always fails on CAPTCHA.
+      # Note: "duckduckgo web" is a separate engine that works fine; we enable it below.
       - duckduckgo
-      # wikidata は 403 で初期化失敗するため除外。
+      # wikidata is excluded because it fails to initialize with 403.
       - wikidata
-      # ahmia / torch は Tor onion サービス用で通常検索では不要。
+      # ahmia / torch are Tor onion services and not needed for normal search.
       - ahmia
       - torch
-      # Google は IndexError (list index out of range) で常に失敗するため除外。
-      # SearXNG の google.py が Google の HTML 構造変更に未対応。
+      # Google is excluded because it always fails with IndexError (list index out of range).
+      # SearXNG's google.py has not been updated for Google's HTML structure changes.
       - google
       - google images
       - google news
       - google videos
 
-# デフォルト無効エンジンのうち、動作確認済みのものを明示的に有効化。
-# use_default_settings は全エンジンのデフォルト状態を読み込むが、
-# mojeek / bing / duckduckgo web はデフォルト disabled=true なので
-# ここで disabled: false で上書きする。
+# Explicitly enable verified-working engines among those disabled by default.
+# use_default_settings loads the default state of all engines, but
+# mojeek / bing / duckduckgo web default to disabled=true, so we override
+# them here with disabled: false.
 engines:
   - name: mojeek
     disabled: false
@@ -53,12 +53,12 @@ server:
   bind_address: "0.0.0.0"
   port: 8080
   secret_key: "umanschat-searxng-dev-secret"
-  # リバースプロキシ無しの Docker 内部通信のため IP ヘッダーが来ない。
-  # limiter を無効化して X-Forwarded-For エラーを解消。
+  # No IP headers arrive for Docker internal traffic without a reverse proxy.
+  # Disable the limiter to eliminate X-Forwarded-For errors.
   limiter: false
 
 outgoing:
   using_tor_proxy: false
-  # エンジンタイムアウト: デフォルト 3.0s では Wikipedia 等が頻発タイムアウト。
-  # 10s に延ばしてネットワーク変動に耐える。
+  # Engine timeout: at the default 3.0s, engines like Wikipedia frequently time out.
+  # Raise to 10s to tolerate network fluctuation.
   request_timeout: 10.0

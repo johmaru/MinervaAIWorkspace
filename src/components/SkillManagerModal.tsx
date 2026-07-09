@@ -45,9 +45,9 @@ type Props = {
 const KINDS = ["workflow", "bugfix", "project_rule", "tool_usage", "coding_pattern", "debugging"] as const;
 
 /**
- * SkillManagerModal — skills テーブル + skill_candidates の管理 UI。
- * 3タブ: Active Skills / Draft Candidates / Archived
- * MemoryViewerModal と同じパターン（AnimateModal, clientFetch, useI18n）。
+ * SkillManagerModal — management UI for the skills table + skill_candidates.
+ * 3 tabs: Active Skills / Draft Candidates / Archived
+ * Same pattern as MemoryViewerModal (AnimateModal, clientFetch, useI18n).
  */
 export function SkillManagerModal({ open, onClose }: Props) {
   const { t } = useI18n();
@@ -58,7 +58,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 編集状態
+  // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editContent, setEditContent] = useState("");
@@ -67,7 +67,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
   const [editTags, setEditTags] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // 候補編集状態
+  // Candidate edit state
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
   const [candName, setCandName] = useState("");
   const [candKind, setCandKind] = useState<string>("workflow");
@@ -253,7 +253,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
   return (
     <AnimateModal open={open} onClose={onClose} panelClassName="max-w-3xl" ariaLabel={t("skills.managerTitle")}>
       <div className="flex flex-col gap-4">
-        {/* ヘッダ */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("skills.managerTitle")}</h2>
           <MotionButton
@@ -274,7 +274,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
           <div className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</div>
         )}
 
-        {/* タブ */}
+        {/* Tabs */}
         <div className="flex gap-2">
           {(["active", "drafts", "archived"] as Tab[]).map((tb) => (
             <button
@@ -299,7 +299,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
 
         {loading && <p className="text-sm text-muted-foreground">{t("skills.loading")}</p>}
 
-        {/* Active Skills タブ */}
+        {/* Active Skills tab */}
         {tab === "active" && !loading && (
           <div className="flex flex-col gap-2">
             {skills.length === 0 ? (
@@ -413,7 +413,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
           </div>
         )}
 
-        {/* Draft Candidates タブ */}
+        {/* Draft Candidates tab */}
         {tab === "drafts" && !loading && (
           <div className="flex flex-col gap-2">
             {candidates.length === 0 ? (
@@ -532,7 +532,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
           </div>
         )}
 
-        {/* Archived タブ */}
+        {/* Archived tab */}
         {tab === "archived" && !loading && (
           <div className="flex flex-col gap-2">
             {archived.length === 0 ? (

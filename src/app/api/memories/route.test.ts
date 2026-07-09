@@ -1,18 +1,18 @@
 // @vitest-environment node
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// getSessionUser をモック（認証不要な 401/400 テスト用）。
+// Mock getSessionUser (for 401/400 tests that don't require auth).
 vi.mock("@/lib/auth-guards", () => ({
   getSessionUser: vi.fn(),
 }));
 
-// embedText は POST で呼ばれるが、バリデーションエラーテストでは到達しない。
+// embedText is called in POST but not reached in validation error tests.
 vi.mock("@/lib/embed", () => ({
   embedText: vi.fn(),
   hashContent: vi.fn(),
 }));
 
-// db は使用しないが import 時の副作用を回避。
+// db is not used, but mock to avoid side effects on import.
 vi.mock("@/db", () => ({ db: {} }));
 
 import { getSessionUser } from "@/lib/auth-guards";
@@ -33,7 +33,7 @@ function jsonReq(method: string, body?: unknown): Request {
 }
 
 describe("GET /api/memories", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await GET();
     expect(res.status).toBe(401);
@@ -41,25 +41,25 @@ describe("GET /api/memories", () => {
 });
 
 describe("POST /api/memories", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await POST(jsonReq("POST", { content: "x", threadId: "t1" }));
     expect(res.status).toBe(401);
   });
 
-  it("content 必須 → 400", async () => {
+  it("content is required → 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const res = await POST(jsonReq("POST", { threadId: "t1" }));
     expect(res.status).toBe(400);
   });
 
-  it("threadId 必須 → 400", async () => {
+  it("threadId is required → 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const res = await POST(jsonReq("POST", { content: "test memory" }));
     expect(res.status).toBe(400);
   });
 
-  it("不正 JSON は 400", async () => {
+  it("invalid JSON returns 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const req = new Request("http://localhost/api/memories", {
       method: "POST",

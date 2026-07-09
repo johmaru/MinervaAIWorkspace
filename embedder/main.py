@@ -1,15 +1,15 @@
 """
-UmansChat embedder — LFM2.5-Embedding-350M 用 FastAPI サービス。
+UmansChat embedder — FastAPI service for LFM2.5-Embedding-350M.
 
-sentence-transformers 5.x の `prompt_name` API を介して
-`config_sentence_transformers.json` の prompts（`query:` / `document:`）
-を適用する。`kind` 省略時は素テキスト（Xenova 互換）。
+Applies the prompts (`query:` / `document:`) from `config_sentence_transformers.json`
+via sentence-transformers 5.x's `prompt_name` API. When `kind` is omitted, plain
+text is used (Xenova-compatible).
 
-起動:
+Startup:
   uvicorn main:app --host 0.0.0.0 --port 8001
 
-環境変数:
-  EMBEDDER_MODEL  デフォ LiquidAI/LFM2.5-Embedding-350M
+Environment variables:
+  EMBEDDER_MODEL  default LiquidAI/LFM2.5-Embedding-350M
 """
 
 from __future__ import annotations
@@ -23,21 +23,21 @@ from pydantic import BaseModel
 
 EMBEDDER_MODEL = os.environ.get("EMBEDDER_MODEL", "LiquidAI/LFM2.5-Embedding-350M")
 
-# モデルロード完了前のリクエストは 503 で返すためのフラグ。
-# lifespan でロード完了後に True になる。
+# Flag for returning 503 for requests made before the model finishes loading.
+# Set to True by lifespan once loading completes.
 _model: dict = {"ready": False, "transformer": None}
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # sentence-transformers の初回ロードはモデルダウンロードを含むため
-    # 時間がかかる（~700MB）。ロード中は /health が loading を返す。
+    # The initial load of sentence-transformers includes a model download
+    # (~700MB), so it takes time. /health returns "loading" while loading.
     from sentence_transformers import SentenceTransformer
 
     _model["transformer"] = SentenceTransformer(EMBEDDER_MODEL)
     _model["ready"] = True
     yield
-    # シャットダウン時の解放（明示的な close は不要）
+    # Release on shutdown (explicit close is not required)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -60,20 +60,20 @@ def health() -> dict:
 @app.post("/embed")
 def embed(req: EmbedRequest) -> EmbedResponse:
     if not _model["ready"] or _model["transformer"] is None:
-        # lifespan 完了前。モデルロード中。
+        # Before lifespan completes. Model is still loading.
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail={"error": "model_loading"})
 
     transformer = _model["transformer"]
-    # kind 受け取り時は prompt_name で config の prompts を適用。
-    # 省略時は素テキスト（prompt_name=None）。
+    # When kind is provided, apply the config prompts via prompt_name.
+    # When omitted, use plain text (prompt_name=None).
     encode_kwargs: dict = {}
     if req.kind is not None:
         encode_kwargs["prompt_name"] = req.kind
 
-    # normalize_embeddings=True でコサイン類似度用に正規化。
-    # sentence-transformers 側がバッチ化を処理する。
+    # normalize_embeddings=True normalizes for cosine similarity.
+    # sentence-transformers handles batching internally.
     vectors = transformer.encode(
         req.texts,
         normalize_embeddings=True,

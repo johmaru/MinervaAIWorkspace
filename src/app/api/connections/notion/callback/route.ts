@@ -2,6 +2,8 @@ import { db } from "@/db";
 import { connections } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 import { exchangeNotionCode } from "@/lib/connections/notion";
+import { resolvePublicOrigin } from "@/lib/request-origin";
+import { getConfiguredAuthUrl } from "@/lib/auth-env";
 import { logger } from "@/lib/logger";
 import { redirect } from "next/navigation";
 
@@ -14,6 +16,10 @@ export const dynamic = "force-dynamic";
  * Notion redirects with ?code=...&state=...
  * state encodes the user ID for CSRF prevention.
  * Exchanges the code for a token, saves it to the connections table, and redirects to the root.
+ *
+ * The redirect URI passed to the token exchange must match the one used in
+ * authorize — both derive the origin from the incoming request headers via
+ * resolvePublicOrigin so local and public access both work.
  */
 export async function GET(req: Request) {
   const user = await getSessionUser();
@@ -32,7 +38,8 @@ export async function GET(req: Request) {
     return new Response("Invalid OAuth state", { status: 400 });
   }
 
-  const redirectUri = `${process.env.AUTH_URL ?? "http://localhost:3001"}/api/connections/notion/callback`;
+  const origin = resolvePublicOrigin(req.headers, getConfiguredAuthUrl());
+  const redirectUri = `${origin}/api/connections/notion/callback`;
 
   try {
     const tokenResponse = await exchangeNotionCode(code, redirectUri);

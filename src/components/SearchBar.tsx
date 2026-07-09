@@ -27,10 +27,10 @@ type Props = {
 };
 
 /**
- * スレッド横断セマンティック検索バー。
- * 入力すると POST /api/search にクエリを送り、
- * 類似メッセージをスレッドタイトル + スニペット付きで表示。
- * 結果クリックで対象スレッドに遷移。
+ * Cross-thread semantic search bar.
+ * Sends a query to POST /api/search on input,
+ * displaying similar messages with thread title + snippet.
+ * Click a result to navigate to that thread.
  */
 export function SearchBar({ onSelectThread }: Props) {
   const { t } = useI18n();
@@ -45,20 +45,20 @@ export function SearchBar({ onSelectThread }: Props) {
 
   const handleSearch = useCallback((q: string) => {
     setQuery(q);
-    // 常に直前のデバウンスタイマーをクリアし、空入力時に古い検索が発火しないようにする。
+    // Always clear the previous debounce timer to prevent stale searches from firing on empty input.
     clearTimeout(debounceRef.current as ReturnType<typeof setTimeout> | undefined);
     if (!q.trim()) {
-      // 進行中のリクエストも abort して結果が残らないようにする。
+      // Abort in-flight requests too so no results remain.
       abortRef.current?.abort();
       setResults([]);
       setPageResults([]);
       setShowResults(false);
       return;
     }
-    // デバウンス: 連続入力時に直前のタイマーをキャンセル。
-    // 重い embedding+cosine 検索が各キーストロークで堆積するのを防ぐ。
+    // Debounce: cancel the previous timer on consecutive input.
+    // Prevents heavy embedding+cosine search from piling up on each keystroke.
     debounceRef.current = setTimeout(async () => {
-      // 直前のリクエストを abort し race condition で古い結果が表示されるのを防ぐ。
+      // Abort the previous request to prevent stale results from a race condition.
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -89,7 +89,7 @@ export function SearchBar({ onSelectThread }: Props) {
     }, 300);
   }, []);
 
-  // アンマウント時にタイマーと進行中のリクエストをクリーンアップ。
+  // Cleanup timer and in-flight requests on unmount.
   useEffect(() => {
     return () => {
       clearTimeout(debounceRef.current as ReturnType<typeof setTimeout> | undefined);

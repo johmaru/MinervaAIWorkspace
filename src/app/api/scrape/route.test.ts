@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 import { hashContent } from "@/lib/embed";
 import { POST } from "@/app/api/scrape/route";
 
-// scrapeUrl をモック: 実 microservice を叩かない
+// Mock scrapeUrl: don't call the real microservice
 vi.mock("@/lib/scraper", () => ({
   scrapeUrl: vi.fn(),
   normalizeUrl: (u: string) => {
@@ -28,7 +28,7 @@ vi.mock("@/lib/scraper", () => ({
 
 import { scrapeUrl } from "@/lib/scraper";
 
-// テスト用 URL（実在しないダミードメインで衝突回避）
+// Test URLs (non-existent dummy domains to avoid collisions)
 const URL_NEW = "https://scrape-test-new.example";
 const URL_CACHE = "https://scrape-test-cache.example";
 const URL_UPDATE = "https://scrape-test-update.example";
@@ -53,7 +53,7 @@ async function cleanupByHashes() {
 }
 
 beforeAll(async () => {
-  // 前回テスト中断時の残骸を除去
+  // Remove leftover data from previous interrupted test runs
   await cleanupByHashes();
 });
 
@@ -73,13 +73,13 @@ function scrapeReq(url: string): Request {
   });
 }
 
-describe("POST /api/scrape — バリデーション", () => {
-  it("空ボディは 400", async () => {
+describe("POST /api/scrape — validation", () => {
+  it("empty body returns 400", async () => {
     const res = await POST(new Request("http://localhost/api/scrape", { method: "POST" }));
     expect(res.status).toBe(400);
   });
 
-  it("不正 JSON は 400", async () => {
+  it("invalid JSON returns 400", async () => {
     const res = await POST(
       new Request("http://localhost/api/scrape", {
         method: "POST",
@@ -90,19 +90,19 @@ describe("POST /api/scrape — バリデーション", () => {
     expect(res.status).toBe(400);
   });
 
-  it("url 未指定は 400", async () => {
+  it("missing url returns 400", async () => {
     const res = await POST(scrapeReq(""));
     expect(res.status).toBe(400);
   });
 
-  it("無効 scheme は 400", async () => {
+  it("invalid scheme returns 400", async () => {
     const res = await POST(scrapeReq("ftp://example.com"));
     expect(res.status).toBe(400);
   });
 });
 
-describe("POST /api/scrape — 統合", () => {
-  it("新規URLをスクレイプして保存", async () => {
+describe("POST /api/scrape — integration", () => {
+  it("scrapes and saves a new URL", async () => {
     vi.mocked(scrapeUrl).mockResolvedValueOnce({
       url: URL_NEW,
       title: "Example Domain",
@@ -121,8 +121,8 @@ describe("POST /api/scrape — 統合", () => {
     createdPageIds.push(data.id);
   });
 
-  it("同一URL再送で cached: true", async () => {
-    // 1回目: 新規
+  it("same URL re-submitted returns cached: true", async () => {
+    // First request: new
     vi.mocked(scrapeUrl).mockResolvedValueOnce({
       url: URL_CACHE,
       title: "Cache Test",
@@ -133,7 +133,7 @@ describe("POST /api/scrape — 統合", () => {
     const data1 = await res1.json();
     createdPageIds.push(data1.id);
 
-    // 2回目: contentHash 同じ → cached
+    // Second request: same contentHash → cached
     vi.mocked(scrapeUrl).mockResolvedValueOnce({
       url: URL_CACHE,
       title: "Cache Test",
@@ -146,8 +146,8 @@ describe("POST /api/scrape — 統合", () => {
     expect(data2.id).toBe(data1.id);
   });
 
-  it("内容が変わったら再 embed", async () => {
-    // 1回目
+  it("re-embeds when content changes", async () => {
+    // First request
     vi.mocked(scrapeUrl).mockResolvedValueOnce({
       url: URL_UPDATE,
       title: "V1",
@@ -158,7 +158,7 @@ describe("POST /api/scrape — 統合", () => {
     const data1 = await res1.json();
     createdPageIds.push(data1.id);
 
-    // 2回目: content 変更
+    // Second request: content changed
     vi.mocked(scrapeUrl).mockResolvedValueOnce({
       url: URL_UPDATE,
       title: "V2",
@@ -171,7 +171,7 @@ describe("POST /api/scrape — 統合", () => {
     expect(data2.title).toBe("V2");
   });
 
-  it("スクレイプ失敗時は 502", async () => {
+  it("scrape failure returns 502", async () => {
     vi.mocked(scrapeUrl).mockRejectedValueOnce(new Error("microservice down"));
     const res = await POST(scrapeReq(URL_FAIL));
     expect(res.status).toBe(502);

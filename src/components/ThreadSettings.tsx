@@ -35,10 +35,10 @@ type Props = {
 };
 
 /**
- * スレッド設定パネル（折りたたみ式）。
- * - system prompt 編集（テキストエリア）
- * - モデルセレクタ（GET /api/models から候補取得）
- * - 保存ボタンで PATCH /api/threads?id=... を呼ぶ
+ * Thread settings panel (collapsible).
+ * - System prompt editing (textarea)
+ * - Model selector (fetches candidates from GET /api/models)
+ * - Save button calls PATCH /api/threads?id=...
  */
 export function ThreadSettings({ thread, onUpdate }: Props) {
   const { t } = useI18n();
@@ -57,7 +57,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   const [instructions, setInstructions] = useState<{ id: string; name: string }[]>([]);
   const [globalInstructionId, setGlobalInstructionId] = useState<string | null>(thread.globalInstructionId ?? null);
 
-  // モデルリスト取得
+  // Fetch model list
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -73,14 +73,14 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
           setDisplayNames(data.displayNames ?? {});
         }
       } catch {
-        // サイレント失敗: デフォルトで現在のモデルのみ
+        // Silent failure: default to only the current model
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-  // グローバルインストラクション一覧取得（名前のみ表示）
+  // Fetch global instruction list (display names only)
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -90,7 +90,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
         const data = await res.json();
         if (!cancelled && Array.isArray(data)) setInstructions(data);
       } catch {
-        // サイレント失敗
+        // Silent failure
       }
     })();
     return () => {
@@ -99,7 +99,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   }, []);
 
 
-  // スレッド切替時にローカル state を同期
+  // Sync local state on thread switch
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSystemPrompt(thread.systemPrompt ?? "");
@@ -210,7 +210,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
               onChange={(e) => {
                 const next = e.target.value === "dual" ? "dual" : "single";
                 setResponseMode(next);
-                // dual モード切替時、dualModelB が dualModelA と同じなら別モデルを自動選択。
+                // When switching to dual mode, auto-select a different model for dualModelB if it's the same as dualModelA.
                 if (next === "dual" && dualModelB === dualModelA) {
                   const alt = models.find((m) => m !== dualModelA);
                   if (alt) setDualModelB(alt);
@@ -292,7 +292,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
                   {displayNames[m] ?? m}
                 </option>
               ))}
-              {/* 現在のモデルがリストに無くても表示 */}
+              {/* Show current model even if not in the list */}
               {!models.includes(model) && (
                 <option value={model}>{displayNames[model] ?? model}</option>
               )}

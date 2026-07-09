@@ -5,16 +5,16 @@ import { eq, and, inArray } from "drizzle-orm";
 import { callNotionApi } from "./notion";
 
 /**
- * コネクション管理モジュール。
+ * Connection management module.
  *
- * - loadConnections: ユーザーのアクティブなコネクション行をロード
- * - getConnectionTools: コネクションが提供する OpenAI ツール定義を返す
- * - dispatchConnectionTool: ツール呼び出しを対応するプロバイダー API へディスパッチ
+ * - loadConnections: loads the user's active connection rows
+ * - getConnectionTools: returns OpenAI tool definitions provided by the connection
+ * - dispatchConnectionTool: dispatches tool calls to the corresponding provider API
  *
- * 新規プロバイダー追加時は:
- * 1. getConnectionTools に provider ブランチを追加
- * 2. dispatchConnectionTool に provider ブランチを追加
- * 3. ツール名プレフィックス (notion_, google_, github_) を使用して衝突を回避
+ * When adding a new provider:
+ * 1. Add a provider branch to getConnectionTools
+ * 2. Add a provider branch to dispatchConnectionTool
+ * 3. Use a tool name prefix (notion_, google_, github_) to avoid collisions
  */
 
 export type ConnectionRow = {
@@ -26,7 +26,7 @@ export type ConnectionRow = {
 };
 
 /**
- * 指定されたコネクションIDに対応するコネクション行をロードする。
+ * Loads the connection rows corresponding to the given connection IDs.
  */
 export async function loadConnections(
   userId: string,
@@ -46,8 +46,8 @@ export async function loadConnections(
 }
 
 /**
- * コネクションが提供するツール定義を OpenAI ChatCompletionTool 形式で返す。
- * プロバイダーごとに異なるツールセットを公開する。
+ * Returns the tool definitions provided by the connection in OpenAI ChatCompletionTool format.
+ * Each provider exposes a different tool set.
  */
 export function getConnectionTools(
   conn: ConnectionRow,
@@ -115,8 +115,8 @@ const NOTION_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 ];
 
 /**
- * ツール呼び出しを対応するコネクション API へディスパッチする。
- * テキストコンテンツ + リフレッシュされたトークン（あれば）を返す。
+ * Dispatches a tool call to the corresponding connection API.
+ * Returns text content + refreshed tokens (if any).
  */
 export async function dispatchConnectionTool(
   conn: ConnectionRow,
@@ -150,8 +150,8 @@ async function dispatchNotionTool(
       const id = item.id as string;
       const objectType = item.object as string;
       let title = "";
-      // ページの場合: properties.title.title[].plain_text
-      // データベースの場合: title[].plain_text
+      // For pages: properties.title.title[].plain_text
+      // For databases: title[].plain_text
       const props = item.properties as Record<string, unknown> | undefined;
       if (props?.title) {
         const titleArr = (props.title as { title?: Array<{ plain_text?: string }> }).title;

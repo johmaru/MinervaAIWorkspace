@@ -1,16 +1,16 @@
-# limiter.toml — SearXNG ボット検知設定
-# Docker 内部ネットワーク（リバースプロキシ無し）での運用向け。
-# server.limiter: false でも ProxyFix ミドルウェアは常にロードされ、
-# X-Forwarded-For / X-Real-IP ヘッダー無しでエラーログが出る。
-# trusted_proxies に Docker サブネットを含めることで内部通信を許容する。
+# limiter.toml — SearXNG bot detection settings
+# For use on the Docker internal network (without a reverse proxy).
+# Even with server.limiter: false, the ProxyFix middleware is always loaded and
+# emits error logs when X-Forwarded-For / X-Real-IP headers are absent.
+# Including the Docker subnet in trusted_proxies tolerates internal traffic.
 
 [botdetection]
-# クライアントネットワーク判定のプレフィックス長
+# Prefix length for client network determination
 ipv4_prefix = 32
 ipv6_prefix = 48
 
-# Docker 内部ネットワークからのリクエストを信頼プロキシとして扱い、
-# X-Forwarded-For / X-Real-IP ヘッダーが無くても REMOTE_ADDR を使用。
+# Treat requests from the Docker internal network as trusted proxies and use
+# REMOTE_ADDR when X-Forwarded-For / X-Real-IP headers are absent.
 trusted_proxies = [
   '127.0.0.0/8',
   '::1',

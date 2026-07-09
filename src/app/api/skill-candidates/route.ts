@@ -7,8 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/skill-candidates — ログインユーザーのスキル候補一覧。
- * ?status=draft|approved|rejected|merged でフィルタ（デフォルト: draft）。
+ * GET /api/skill-candidates — Skill candidates of the logged-in user.
+ * Filter by ?status=draft|approved|rejected|merged (default: draft).
  */
 export async function GET(req: Request) {
   const user = await getSessionUser();

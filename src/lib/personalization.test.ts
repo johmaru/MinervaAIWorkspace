@@ -6,16 +6,16 @@ import {
 } from "@/lib/personalization";
 
 describe("buildPersonalizationMessage", () => {
-  it("style が null の場合は null を返す", () => {
+  it("returns null when style is null", () => {
     expect(buildPersonalizationMessage(null, 1, 1, 1, 1)).toBeNull();
   });
 
-  it("style が無効な文字列の場合は null を返す", () => {
+  it("returns null when style is an invalid string", () => {
     expect(buildPersonalizationMessage("unknown", 1, 1, 1, 1)).toBeNull();
     expect(buildPersonalizationMessage("", 1, 1, 1, 1)).toBeNull();
   });
 
-  it("有効な style の場合は非 null 文字列を返す", () => {
+  it("returns a non-null string for valid styles", () => {
     for (const style of PERSONAL_STYLES) {
       const msg = buildPersonalizationMessage(style, 1, 1, 1, 1);
       expect(msg).not.toBeNull();
@@ -24,12 +24,12 @@ describe("buildPersonalizationMessage", () => {
     }
   });
 
-  it("スタイル説明文を含む", () => {
+  it("includes the style description", () => {
     const msg = buildPersonalizationMessage("polite", 1, 1, 1, 1);
     expect(msg).toContain("丁寧な敬語");
   });
 
-  it("4つのトレイト指示を全て含む", () => {
+  it("includes all four trait directives", () => {
     const msg = buildPersonalizationMessage("standard", 1, 1, 1, 1);
     expect(msg).toContain("温かみ");
     expect(msg).toContain("熱量");
@@ -37,33 +37,33 @@ describe("buildPersonalizationMessage", () => {
     expect(msg).toContain("絵文字");
   });
 
-  it("優先指示を含む", () => {
+  it("includes the precedence directive", () => {
     const msg = buildPersonalizationMessage("standard", 1, 1, 1, 1);
     expect(msg).toContain("優先して適用");
   });
 
-  it("スライダーレベル 0/1/2 で異なるトレイト文を生成する", () => {
+  it("generates different trait text for slider levels 0/1/2", () => {
     const level0 = buildPersonalizationMessage("standard", 0, 0, 0, 0)!;
     const level1 = buildPersonalizationMessage("standard", 1, 1, 1, 1)!;
     const level2 = buildPersonalizationMessage("standard", 2, 2, 2, 2)!;
 
-    // 温かみ
+    // Warmth
     expect(level0).toContain("事実ベースで感情を含めず");
     expect(level1).toContain("標準的な温かみ");
     expect(level2).toContain("親身で共感的な温かみ");
 
-    // 絵文字
+    // Emoji
     expect(level0).toContain("絵文字を使用しない");
     expect(level1).toContain("少量の絵文字");
     expect(level2).toContain("絵文字を積極的に");
 
-    // 3レベル全てが異なる文字列
+    // All three levels produce different strings
     expect(level0).not.toBe(level1);
     expect(level1).not.toBe(level2);
     expect(level0).not.toBe(level2);
   });
 
-  it("範囲外のスライダー値はクランプされる", () => {
+  it("clamps out-of-range slider values", () => {
     const below = buildPersonalizationMessage("standard", -5, -5, -5, -5)!;
     const at0 = buildPersonalizationMessage("standard", 0, 0, 0, 0)!;
     expect(below).toBe(at0);

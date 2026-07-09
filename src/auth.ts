@@ -9,6 +9,11 @@ import { eq, and } from "drizzle-orm";
 import { verifyPassword } from "@/lib/password";
 import { canCreateNewAccount } from "@/lib/registration-gate";
 import { logger } from "@/lib/logger";
+import { neutralizeAuthUrlForDualAccess } from "@/lib/auth-env";
+
+// Strip sticky AUTH_URL so Auth.js derives origin from request headers
+// (dual local + Cloudflare access). Must run before NextAuth().
+neutralizeAuthUrlForDualAccess();
 
 /**
  * Auth.js v5 main configuration.

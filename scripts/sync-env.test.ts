@@ -45,13 +45,13 @@ describe("sync-env", () => {
 
     expect(added).toEqual([]);
     const result = readFileSync(envPath, "utf8");
-    // 値は上書きされず元のまま
+    // Value is not overwritten; the original is kept
     expect(result).toContain("EXISTING=old");
     expect(result).not.toContain("EXISTING=new");
   });
 
   it("exits cleanly when .env.example does not exist", () => {
-    // examplePath には何も書かない（存在しない）
+    // Write nothing to examplePath (it does not exist)
     writeFileSync(envPath, "EXISTING=old\n", "utf8");
 
     const added = syncEnv(examplePath, envPath, fixedNow);
@@ -74,8 +74,8 @@ describe("sync-env", () => {
   });
 
   it("treats commented-out keys as existing and does not append them", () => {
-    // .env にコメントアウト行として存在 → ^# KEY= にマッチ → 既存扱いで追記しない
-    // （env_file / dotenv は最後の定義が勝つため、重複追記はユーザー設定を上書きする）
+    // Present in .env as a commented-out line -> matches ^# KEY= -> treated as existing, not appended
+    // (env_file / dotenv uses the last definition, so a duplicate append would override the user's setting)
     writeFileSync(examplePath, "COMMENTED=hello\n", "utf8");
     writeFileSync(envPath, "# COMMENTED=old\n", "utf8");
 
@@ -88,7 +88,7 @@ describe("sync-env", () => {
 
   it("creates .env when it does not exist", () => {
     writeFileSync(examplePath, "NEW=value\n", "utf8");
-    // envPath には何も書かない（存在しない）
+    // Write nothing to envPath (it does not exist)
 
     const added = syncEnv(examplePath, envPath, fixedNow);
 

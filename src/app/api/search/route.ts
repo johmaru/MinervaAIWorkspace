@@ -10,17 +10,17 @@ export const dynamic = "force-dynamic";
 
 type Body = {
   query: string;
-  threadId?: string; // 現在のスレッド（除外対象、省略可）
+  threadId?: string; // Current thread (excluded from results, optional)
 };
 
 /**
- * POST /api/search — セマンティック検索。
+ * POST /api/search — Semantic search.
  *
- * ユーザー入力を embedding し、アプリ側 cosine 類似度で
- * memories テーブルから関連記憶を検索（スレッド横断）。
- * 別途 page_embeddings から Web 知識ページを検索。
+ * Embeds the user input and searches the memories table for related
+ * memories using cosine similarity on the app side (cross-thread).
+ * Also searches page_embeddings for web knowledge pages.
  *
- * レスポンス: { results: [{ memoryId, threadId, threadTitle, kind, content, similarity }], pages: [...] }
+ * Response: { results: [{ memoryId, threadId, threadTitle, kind, content, similarity }], pages: [...] }
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   const queryVector = await embedText(body.query.trim(), "query");
   if (queryVector.length === 0) return Response.json({ results: [], pages: [] });
 
-  // ── 記憶検索: memories + threads JOIN ──
+  // ── Memory search: memories + threads JOIN ──
   const memoryConditions = [
     eq(threads.userId, user.id),
     isNull(memories.suppressedAt),
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
       similarity: Number(r.similarity.toFixed(3)),
     }));
 
-  // ── ページ検索: page_embeddings + pages JOIN ──
+  // ── Page search: page_embeddings + pages JOIN ──
   const pageRows = await db
     .select({
       id: pages.id,

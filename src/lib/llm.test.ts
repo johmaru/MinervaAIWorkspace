@@ -18,12 +18,12 @@ describe("llm client", () => {
     }
   });
 
-  it("createLLM は LLM_BASE_URL 必須", () => {
+  it("createLLM requires LLM_BASE_URL", () => {
     delete process.env.LLM_BASE_URL;
     expect(() => createLLM()).toThrow(/LLM_BASE_URL/);
   });
 
-  it("createLLM は baseURL / apiKey を反映する", () => {
+  it("createLLM reflects baseURL / apiKey", () => {
     process.env.LLM_BASE_URL = "https://example.test/v1";
     process.env.LLM_API_KEY = "sk-test";
     const client = createLLM();
@@ -31,20 +31,20 @@ describe("llm client", () => {
     expect(client.apiKey).toBe("sk-test");
   });
 
-  it("apiKey 未設定時は 'missing' にフォールバック", () => {
+  it("falls back to 'missing' when apiKey is unset", () => {
     process.env.LLM_BASE_URL = "https://example.test/v1";
     delete process.env.LLM_API_KEY;
     expect(createLLM().apiKey).toBe("missing");
   });
 
-    it("defaultModel は LLM_MODEL を優先、未設定なら umans-glm-5.2", () => {
+    it("defaultModel prefers LLM_MODEL, defaults to umans-glm-5.2 if unset", () => {
       process.env.LLM_MODEL = "umans-glm-5.2";
       expect(defaultModel()).toBe("umans-glm-5.2");
       delete process.env.LLM_MODEL;
       expect(defaultModel()).toBe("umans-glm-5.2");
     });
 
-  it("embedModel は EMBED_MODEL を優先、未設定なら text-embedding-3-small", () => {
+  it("embedModel prefers EMBED_MODEL, defaults to text-embedding-3-small if unset", () => {
     process.env.EMBED_MODEL = "custom-embed";
     expect(embedModel()).toBe("custom-embed");
     delete process.env.EMBED_MODEL;
@@ -52,8 +52,8 @@ describe("llm client", () => {
   });
 });
 
-describe("ChatMessage 型", () => {
-  it("role は system | user | assistant のいずれか", () => {
+describe("ChatMessage type", () => {
+  it("role is one of system | user | assistant", () => {
     const m: ChatMessage = { role: "assistant", content: "hi" };
     expect(m.role).toBe("assistant");
     expect(m.content).toBe("hi");

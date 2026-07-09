@@ -1,9 +1,9 @@
 /**
- * Wikipedia REST API で軽量参照する。
- * SearXNG/スクレイパー不要で直接 fetch。認証不要・無料。
+ * Lightweight reference via the Wikipedia REST API.
+ * Fetches directly without SearXNG/scraper. No auth required, free.
  *
- * searchLevel: "wiki" の非Toolモデルパスと、search_wikipedia ツールの両方で使用。
- * 記事が見つからない・エラー時は null を返し、呼び出し元はトレーニングデータで回答する。
+ * Used in both the searchLevel: "wiki" non-Tool model path and the search_wikipedia tool.
+ * Returns null when the article is not found or on error; the caller answers from training data.
  */
 
 export type WikipediaResult = {
@@ -18,9 +18,9 @@ const USER_AGENT = "UmansChat/1.0 (https://github.com/johmaru/UmansChat-Unoffici
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
- * クエリ内容から言語を判定。
- * ひらがな・カタカナ・漢字が含まれれば ja、それ以外は en。
- * getRequestLocale（Cookie ベース）はクエリ内容判定に使えないため新規実装。
+ * Detects the language from the query content.
+ * Returns "ja" if hiragana, katakana, or kanji are present; otherwise "en".
+ * getRequestLocale (cookie-based) cannot be used for query content detection, so this is a separate implementation.
  */
 function detectLang(query: string): "ja" | "en" {
   return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(query) ? "ja" : "en";
@@ -34,10 +34,10 @@ function timeoutFetch(url: string): Promise<Response> {
 }
 
 /**
- * Wikipedia REST API で記事を検索し、summary を取得する。
- * opensearch でタイトル解決 → summary endpoint で抽出取得の2段階。
+ * Searches for an article via the Wikipedia REST API and retrieves its summary.
+ * Two stages: title resolution via opensearch → extract retrieval via the summary endpoint.
  *
- * @returns 記事が見つかった場合は WikipediaResult、見つからない/エラー時は null
+ * @returns WikipediaResult if the article is found; null if not found or on error
  */
 export async function searchWikipedia(query: string): Promise<WikipediaResult | null> {
   const trimmed = query.trim();
@@ -45,14 +45,14 @@ export async function searchWikipedia(query: string): Promise<WikipediaResult | 
 
   const lang = detectLang(trimmed);
 
-  // (1) opensearch でタイトル解決
+  // (1) Title resolution via opensearch
   const opensearchUrl = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(trimmed)}&limit=1&namespace=0&format=json`;
   let title: string | null = null;
   try {
     const res = await timeoutFetch(opensearchUrl);
     if (!res.ok) return null;
     const data = (await res.json()) as unknown;
-    // opensearch レスポンス: [search, [titles], [descriptions], [urls]]
+    // opensearch response: [search, [titles], [descriptions], [urls]]
     if (!Array.isArray(data) || data.length < 2) return null;
     const titles = data[1];
     if (!Array.isArray(titles) || titles.length === 0) return null;
@@ -62,7 +62,7 @@ export async function searchWikipedia(query: string): Promise<WikipediaResult | 
   }
   if (!title) return null;
 
-  // (2) summary endpoint で抽出取得
+  // (2) Extract retrieval via the summary endpoint
   const summaryUrl = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
   try {
     const res = await timeoutFetch(summaryUrl);

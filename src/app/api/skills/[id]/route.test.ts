@@ -39,13 +39,13 @@ function patchReq(id: string, body: unknown): Request {
 }
 
 describe("PATCH /api/skills/[id]", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await PATCH(patchReq("s1", { name: "x" }), makeCtx("s1"));
     expect(res.status).toBe(401);
   });
 
-  it("不正 JSON は 400", async () => {
+  it("invalid JSON returns 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const res = await PATCH(
       new Request("http://localhost/api/skills/s1", {
@@ -58,7 +58,7 @@ describe("PATCH /api/skills/[id]", () => {
     expect(res.status).toBe(400);
   });
 
-  it("存在しないスキルは 404", async () => {
+  it("non-existent skill returns 404", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const { db } = await import("@/db");
     (db as { select: unknown }).select = vi.fn().mockReturnValue({
@@ -72,7 +72,7 @@ describe("PATCH /api/skills/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("trigger 変更時も re-embed される（content 変更なしでも）", async () => {
+  it("re-embeds on trigger change (even without content change)", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     mockEmbedText.mockResolvedValue([0.5, 0.5, 0.5]);
     const { db } = await import("@/db");
@@ -109,13 +109,13 @@ describe("PATCH /api/skills/[id]", () => {
     );
 
     expect(res.status).toBe(200);
-    // embedText が呼ばれた = trigger 変更で re-embed 実行
+    // embedText was called = re-embed executed due to trigger change
     expect(mockEmbedText).toHaveBeenCalledTimes(1);
     const embedArg = mockEmbedText.mock.calls[0]?.[0] as string;
     expect(embedArg).toContain("new trigger");
   });
 
-  it("status 変更のみの場合は re-embed されない", async () => {
+  it("does not re-embed when only status changes", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const { db } = await import("@/db");
     const existingSkill = {
@@ -155,7 +155,7 @@ describe("PATCH /api/skills/[id]", () => {
 });
 
 describe("DELETE /api/skills/[id]", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await DELETE(
       new Request("http://localhost", { method: "DELETE" }),

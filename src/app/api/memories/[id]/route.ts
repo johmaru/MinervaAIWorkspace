@@ -8,8 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * メモリ所有権確認: innerJoin(threads) でユーザースコープを担保。
- * memories は userId 列を持たないため、threadId → threads.userId でスコープ。
+ * Memory ownership check: innerJoin(threads) ensures user scope.
+ * memories has no userId column, so scope via threadId → threads.userId.
  */
 async function assertOwned(id: string, userId: string) {
   const [row] = await db
@@ -22,9 +22,9 @@ async function assertOwned(id: string, userId: string) {
 }
 
 /**
- * DELETE /api/memories/[id] — メモリ論理削除。
- * suppressedAt を set する（物理削除ではない）。generateMemories の replace action と同じ扱い。
- * 論理削除で過去の会話履歴との整合性を保つ。RAG 検索は suppressedAt IS NULL で既にフィルタ。
+ * DELETE /api/memories/[id] — Soft delete a memory.
+ * Sets suppressedAt (not a physical delete). Same treatment as the replace action in generateMemories.
+ * Soft delete preserves consistency with past conversation history. RAG search already filters by suppressedAt IS NULL.
  */
 export async function DELETE(
   _req: Request,
@@ -49,9 +49,9 @@ type PatchBody = {
 };
 
 /**
- * PATCH /api/memories/[id] — メモリ部分更新。
- * content 変更時は embedding + contentHash を再生成。
- * kind/importance のみの変更では再 embed しない。
+ * PATCH /api/memories/[id] — Partial memory update.
+ * Regenerates embedding + contentHash when content changes.
+ * Does not re-embed when only kind/importance changes.
  */
 export async function PATCH(
   req: Request,

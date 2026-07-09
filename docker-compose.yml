@@ -1,8 +1,8 @@
 services:
-  # リリース配布: デフォルトで GHCR の公開イメージを使用。
-  #   docker compose pull          (GHCR のリリースイメージを取得)
-  #   docker compose up -d         (取得済みイメージで起動)
-  # ローカル開発 (ソースからビルド):
+  # Release distribution: use the public GHCR image by default.
+  #   docker compose pull          (pull the release image from GHCR)
+  #   docker compose up -d         (start with the pulled image)
+  # Local development (build from source):
   #   docker compose up -d --build
   app:
     image: ${UMANSCHAT_APP_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-app:latest}
@@ -16,13 +16,13 @@ services:
         condition: service_started
       scraper:
         condition: service_started
-    # ホストの .env をマウント: GUI で設定変更した .env が
-    # 再ビルド後も保持される（イメージに焼き込まれない）
+    # Mount the host's .env: .env changes made via the GUI persist
+    # across rebuilds (not baked into the image)
     volumes:
       - ./.env:/app/.env
-      # SQLite データ永続化: data/umanschat.db をホストに保持
+      # SQLite data persistence: keep data/umanschat.db on the host
       - ./data:/app/data
-      # Tor コンテナ起動/停止用: Docker socket + compose ファイルをマウント
+      # For starting/stopping the Tor container: mount Docker socket + compose file
       - /var/run/docker.sock:/var/run/docker.sock
       - ./docker-compose.yml:/app/docker-compose.yml:ro
     env_file:
@@ -31,22 +31,22 @@ services:
       SCRAPER_URL: http://scraper:8000
       SEARXNG_URL: http://searxng:8080
       EMBEDDER_URL: http://embedder:8001
-      # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY / DATABASE_URL は
-      # .env ファイルから読み込む（GUI 書き換え対応）
+      # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY / DATABASE_URL are
+      # read from the .env file (supports GUI editing)
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     ports:
-      - "3001:3000"  # Cloudflare Tunnel 使用時も localhost:3001 で直接確認可能
+      - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
 
-  # Cloudflare Tunnel: 名前付きトンネルで app をパブリック HTTPS で公開。
-  # TUNNEL_TOKEN 未設定時は起動せず、localhost:3001 で直接アクセス可能。
-  # トンネル作成手順:
+  # Cloudflare Tunnel: expose the app over public HTTPS via a named tunnel.
+  # When TUNNEL_TOKEN is not set, this does not start; access directly via localhost:3001.
+  # Tunnel creation steps:
   #   1. https://one.dash.cloudflare.com/ → Networks → Tunnels → Create a tunnel
-  #   2. タイプ: Cloudflared → トンネル名を指定（例: umanschat）
-  #   3. Public Hostname で app サービスにルーティング: Service=http://app:3000
-  #   4. 発行されたトークンを .env の TUNNEL_TOKEN に設定
+  #   2. Type: Cloudflared → specify a tunnel name (e.g. umanschat)
+  #   3. Route to the app service via Public Hostname: Service=http://app:3000
+  #   4. Set the issued token as TUNNEL_TOKEN in .env
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: umanschat-cloudflared
@@ -56,7 +56,7 @@ services:
     command: tunnel run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
-    profiles: ["tunnel"]  # --profile tunnel で有効化。TUNNEL_TOKEN 未設定時は起動しない
+    profiles: ["tunnel"]  # Activated with --profile tunnel. Does not start when TUNNEL_TOKEN is unset
 
   scraper:
     image: ${UMANSCHAT_SCRAPER_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-scraper:latest}
@@ -85,8 +85,8 @@ services:
       - "8001:8001"
     environment:
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-LiquidAI/LFM2.5-Embedding-350M}
-    # GPU が利用可能な環境でのみ有効化（EMBEDDER_GPU_COUNT>=1 時）。
-    # 未設定時は count:0 で CPU フォールバック（Docker Compose v2.18+ で安全）。
+    # Only enabled when a GPU is available (EMBEDDER_GPU_COUNT>=1).
+    # When unset, count:0 provides CPU fallback (safe with Docker Compose v2.18+).
     deploy:
       resources:
         reservations:

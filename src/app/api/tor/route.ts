@@ -14,12 +14,12 @@ const COMPOSE_DIR = process.cwd();
 const SOCKS_PROXY = "socks5://tor:9050";
 
 /**
- * GET /api/tor — Tor プロキシの状態 + 接続確認を返す。
+ * GET /api/tor — Returns Tor proxy status + connection check.
  *
- * Tor コンテナは docker-compose up で常時起動している。
- * running は SCRAPE_PROXY が設定されているか（= Tor 経由で通信中か）で判定する。
+ * The Tor container is always running via docker-compose up.
+ * running is determined by whether SCRAPE_PROXY is set (= communicating via Tor).
  *
- * レスポンス:
+ * Response:
  *   { running: boolean, scrapeProxy: string, torProxy: string, connection: {...} }
  */
 export async function GET() {
@@ -28,11 +28,11 @@ export async function GET() {
 
   const scrapeProxy = process.env.SCRAPE_PROXY || "";
   const torProxy = process.env.TOR_PROXY || "";
-  // Tor コンテナは常時起動。running は SCRAPE_PROXY が設定されているかで判定。
+  // Tor container is always running. running is determined by whether SCRAPE_PROXY is set.
   const running = scrapeProxy === SOCKS_PROXY;
 
-  // 実際の Tor 接続確認: scraper の /tor-check を呼ぶ
-  // 直接接続IP と Tor 経由IP を比較し、実際に Tor が機能しているか検証
+  // Actual Tor connection check: calls scraper's /tor-check
+  // Compares direct IP and Tor-routed IP to verify Tor is actually working
   let connection: { directIp: string | null; torIp: string | null; connected: boolean; error: string | null } = {
     directIp: null,
     torIp: null,
@@ -49,7 +49,7 @@ export async function GET() {
         connection.error = `scraper /tor-check returned ${res.status}`;
       }
     } catch (err) {
-      connection.error = err instanceof Error ? err.message : "接続確認に失敗";
+      connection.error = err instanceof Error ? err.message : "Connection check failed";
     }
   }
 
@@ -67,13 +67,13 @@ type TorBody = {
 };
 
 /**
- * POST /api/tor — Tor プロキシの有効/無効を切り替える。
+ * POST /api/tor — Toggle Tor proxy on/off.
  *
- * Tor コンテナ自体は docker-compose up で常時起動している。
- * この API は SCRAPE_PROXY / TOR_PROXY の .env 書き換え + scraper 再起動のみ行う。
+ * The Tor container itself is always running via docker-compose up.
+ * This API only rewrites SCRAPE_PROXY / TOR_PROXY in .env and restarts the scraper.
  *
- * action=start:  SCRAPE_PROXY / TOR_PROXY を socks5://tor:9050 に設定
- * action=stop:   SCRAPE_PROXY / TOR_PROXY を空に設定
+ * action=start:  Set SCRAPE_PROXY / TOR_PROXY to socks5://tor:9050
+ * action=stop:   Set SCRAPE_PROXY / TOR_PROXY to empty
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
 
   const wantProxy = body.action === "start" ? SOCKS_PROXY : "";
 
-  // .env の SCRAPE_PROXY と TOR_PROXY を更新
+  // Update SCRAPE_PROXY and TOR_PROXY in .env
   try {
     const envPath = resolveEnvPath();
     let envContent = "";
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // scraper コンテナを再起動して SCRAPE_PROXY の変更を反映
+  // Restart the scraper container to reflect SCRAPE_PROXY changes
   try {
     await execAsync("docker compose restart scraper", {
       cwd: COMPOSE_DIR,

@@ -1,22 +1,21 @@
-# Backlog（将来実装）
+# Backlog (Future Implementation)
 
-現行の Phase 0〜8 が一通り終わったら着手する候補。PLAN.md には進行中フェーズだけを保持し、
-未確定な将来要件はここに置く。実装に着手する際は、要件を詰めてから PLAN.md のフェーズに昇格させる。
+Candidates to tackle once Phases 0–8 are broadly complete. PLAN.md holds only in-progress phases; undecided future requirements live here. When starting implementation, refine the requirements first, then promote to a phase in PLAN.md.
 
-## URL スクレイピング + IP ブロック回避 ✅ → Phase 9 へ昇格
+## URL Scraping + IP Block Avoidance ✅ → Promoted to Phase 9
 
-- **用途**: Web ページを取得してテキスト化し、RAG/検索の知識源にする（Phase 7 のベクトル基盤との相性が良い）。
-- **前提**: 単一 IP で連続スクレイピングすると封印されやすいため、回避機構が必須。
+- **Purpose**: Fetch web pages, convert them to text, and use as a knowledge source for RAG/search (pairs well with the vector infrastructure from Phase 7).
+- **Prerequisite**: Scraping from a single IP sequentially is likely to get blocked, so an avoidance mechanism is essential.
 
-### 保留中の決定事項（着手時に相談）
-- プロキシ方式の選択:
-  - 商用ローテーションプロキシ（Bright Data / ScraperAPI 等）— 安定だが課金。
-  - セルフホストプロキシプール — 無料だが運用コスト。
-  - 単純なジッタ付き遅延 + UA ローテーションのみ — 小規模ならこれで足りるか。
-- レートリミット方式: リクエスト間ジッタ、ドメイン単位の同時制限、429/403 検出時の指数バックオフ。
-- キャッシュ: 同一 URL の再取得を避ける content_hash ベースキャッシュ（Phase 7 の embeddings.content_hash と統合可能）。
-- 取得先の正規化: robots.txt 尊重、サイトマップ利用、深度制限。
+### Pending Decisions (Discuss Before Starting)
+- Proxy method selection:
+  - Commercial rotating proxies (Bright Data / ScraperAPI, etc.) — stable but paid.
+  - Self-hosted proxy pool — free but higher operational overhead.
+  - Simple jittered delays + UA rotation only — may suffice for small-scale use.
+- Rate limiting approach: jitter between requests, per-domain concurrency limits, exponential backoff on 429/403 detection.
+- Caching: content_hash-based cache to avoid re-fetching the same URL (can integrate with Phase 7's embeddings.content_hash).
+- Fetch target normalization: respect robots.txt, use sitemaps, depth limits.
 
-### メモ
-- Phase 7（Vector RAG + search）のパイプラインに乗せる形が自然。embeddings テーブルの `content_hash` をスクレイピングキャッシュのキーに再利用できる。
-- 実装時はプロキシ方式を最初に確定すること（方式によってモジュール構造が変わる）。
+### Notes
+- The natural approach is to ride on the Phase 7 (Vector RAG + search) pipeline. The `content_hash` in the embeddings table can be reused as the scraping cache key.
+- When implementing, settle on the proxy method first (the module structure changes depending on the approach).

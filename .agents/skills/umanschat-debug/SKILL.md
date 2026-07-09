@@ -1,110 +1,111 @@
 ---
 name: umanschat-debug
 description: >
-  UmansChat プロジェクト固有のデバッグ手法とトラブルシューティングガイド。
-  SSE スリーミング、Docker ビルド、transformers.js、pgvector、Next.js 16 の
-  既知の落とし穴と解決策を含む。UmansChat のコード変更・デバッグ時に参照すること。
+  Debugging techniques and troubleshooting guide specific to the UmansChat project.
+  Includes known pitfalls and solutions for SSE streaming, Docker builds,
+  transformers.js, pgvector, and Next.js 16. Refer to this when making code
+  changes or debugging UmansChat.
 origin: session-debug-log
 ---
 
 # Skill: UmansChat Debug Guide
 
-UmansChat 開発で実際に遭遇したバグとその解決手法。再発時の診断時間を短縮する。
+Bugs actually encountered during UmansChat development and their solutions. Reduces diagnosis time on recurrence.
 
-## アーキテクチャ概要
+## Architecture Overview
 
 ```
 Next.js 16 (App Router, Turbopack) + Bun
 ├── src/app/api/         # Route Handlers (SSE streaming, Node.js runtime)
 ├── src/components/      # React 19 (ChatWindow, Sidebar, Markdown, etc.)
-├── src/hooks/           # useChat, useThreads (状態管理 + SSE パース)
+├── src/hooks/           # useChat, useThreads (state management + SSE parsing)
 ├── src/lib/             # llm.ts (OpenAI SDK), embed.ts (transformers.js)
 ├── src/db/              # Drizzle ORM + better-sqlite3 (SQLite)
 └── Docker               | Bun → Next.js build → runner stage
 ```
 
-## トラブルシューティング辞典
+## Troubleshooting Dictionary
 
-### 1. Thinking がメッセージと同じ場所に表示される
+### 1. Thinking content appears in the same place as the message
 
-**症状**: LLM の思考内容が回答バブル内に混ざって表示される。
+**Symptom**: The LLM's thinking content is mixed into the answer bubble.
 
-**原因**: `MessageBubble` コンポーネントが `ThinkingBlock` をバブル内にレンダリングしている。
+**Cause**: The `MessageBubble` component renders `ThinkingBlock` inside the bubble.
 
-**修正**: `ThinkingBlock` をバブルの外（上）に独立配置。
+**Fix**: Place `ThinkingBlock` independently outside (above) the bubble.
 
 ```tsx
-// BAD: ThinkingBlock がバブル内
+// BAD: ThinkingBlock inside the bubble
 <div className="bg-muted ...">
   {thinking && <ThinkingBlock />}
   {answer}
 </div>
 
-// GOOD: ThinkingBlock がバブル外
+// GOOD: ThinkingBlock outside the bubble
 <div className="flex flex-col items-start gap-1">
   {thinking && <ThinkingBlock />}
   <div className="bg-muted ...">{answer}</div>
 </div>
 ```
 
-**ファイル**: `src/components/ChatWindow.tsx` の `MessageBubble`
+**File**: `MessageBubble` in `src/components/ChatWindow.tsx`
 
 ---
 
-### 2. Thinking イベントがブラウザに届かない（SSE 圧縮問題）
+### 2. Thinking events not reaching the browser (SSE compression issue)
 
-**症状**: `curl` では `event: thinking` が来るが、ブラウザでは来ない。
+**Symptom**: `event: thinking` arrives with `curl` but not in the browser.
 
-**診断手順**:
-1. `curl -sN -X POST localhost:3001/api/chat` で SSE を直接確認
-2. ブラウザで `fetch()` を使って SSE を直接読み取り（`tab.evaluate` 内）
-3. ブラウザと curl で差があれば、圧縮またはプロキシが原因
+**Diagnosis steps**:
+1. Check SSE directly with `curl -sN -X POST localhost:3001/api/chat`
+2. Read SSE directly in the browser using `fetch()` (inside `tab.evaluate`)
+3. If there's a difference between browser and curl, compression or proxy is the cause
 
-**原因**: Next.js 16 の `compress: true`（デフォルト）が gzip で SSE をバッファリングする。
-`thinking` イベントが圧縮レイヤーで溜め込まれ、届かない。
+**Cause**: Next.js 16's `compress: true` (default) buffers SSE with gzip.
+`thinking` events accumulate in the compression layer and never arrive.
 
-**修正**: `next.config.ts` で `compress: false`。
+**Fix**: Set `compress: false` in `next.config.ts`.
 
 ```typescript
 const nextConfig: NextConfig = {
-  compress: false, // SSE は圧縮すべきではない
+  compress: false, // SSE should not be compressed
 };
 ```
 
-**ドキュメント**: `node_modules/next/dist/docs/01-app/02-guides/streaming.md` に
-「Gzip and Brotli compression can buffer chunks internally before flushing」と明記。
+**Documentation**: `node_modules/next/dist/docs/01-app/02-guides/streaming.md`
+explicitly states "Gzip and Brotli compression can buffer chunks internally before flushing".
 
 ---
 
-### 3. Thinking が来ない（モデル不一致問題）
+### 3. Thinking not arriving (model mismatch issue)
 
-**症状**: 圧縮を無効化しても thinking が来ない。curl では来る。
+**Symptom**: Thinking doesn't arrive even after disabling compression. It does arrive with curl.
 
-**診断手順**:
-1. `docker compose logs app` でサーバーログ確認
-2. DB で `messages` テーブルの `model` カラム確認
-3. スレッド作成 API がどの model を設定しているか確認
+**Diagnosis steps**:
+1. Check server logs with `docker compose logs app`
+2. Check the `model` column in the `messages` table in the DB
+3. Check which model the thread creation API sets
 
-**原因**: スレッド作成時に `body.model` が `undefined` で、DB のデフォルト
-（`gpt-4o-mini`）が使われる。`gpt-4o-mini` は `reasoning_content` を返さない。
+**Cause**: When creating a thread, `body.model` is `undefined`, so the DB default
+(`gpt-4o-mini`) is used. `gpt-4o-mini` does not return `reasoning_content`.
 
-**修正**: `src/app/api/threads/route.ts` でデフォルトを `defaultModel()` に。
+**Fix**: Set the default to `defaultModel()` in `src/app/api/threads/route.ts`.
 
 ```typescript
 model: body.model ?? defaultModel(),
 ```
 
-**確認**: `docker compose exec db psql -U umans -d umanschat -c "SELECT model FROM threads;"`
+**Verify**: `docker compose exec db psql -U umans -d umanschat -c "SELECT model FROM threads;"`
 
 ---
 
-### 4. Docker でコード変更が反映されない
+### 4. Code changes not reflected in Docker
 
-**症状**: `docker compose up --build -d` しても古いコードのまま。
+**Symptom**: Even after `docker compose up --build -d`, old code persists.
 
-**原因**: BuildKit のレイヤーキャッシュが `COPY . .` でキャッシュヒットする。
+**Cause**: BuildKit's layer cache hits on `COPY . .`.
 
-**修正**: `--no-cache` で完全リビルド。
+**Fix**: Full rebuild with `--no-cache`.
 
 ```bash
 docker compose build --no-cache app
@@ -113,15 +114,15 @@ docker compose up -d app --force-recreate
 
 ---
 
-### 5. .dockerignore が無いと node_modules が上書きされる
+### 5. Without .dockerignore, node_modules gets overwritten
 
-**症状**: Dockerfile で `node_modules` の修正（シンボリックリンク削除等）が
-ランタイムで消える。
+**Symptom**: `node_modules` fixes in the Dockerfile (e.g., removing symlinks)
+disappear at runtime.
 
-**原因**: `.dockerignore` が無いと `COPY . .` がホストの `node_modules/` で
-Docker 内のクリーンな `node_modules/` を上書きする。
+**Cause**: Without `.dockerignore`, `COPY . .` overwrites the clean
+`node_modules/` inside Docker with the host's `node_modules/`.
 
-**修正**: `.dockerignore` を作成。
+**Fix**: Create a `.dockerignore`.
 
 ```
 node_modules
@@ -133,41 +134,41 @@ node_modules
 
 ---
 
-### 6. transformers.js が sharp ネイティブバイナリエラーで落ちる
+### 6. transformers.js crashes with sharp native binary error
 
-**症状**: `@xenova/transformers` の `pipeline()` 呼び出しで
-「Cannot find module '../build/Release/sharp-linux-x64.node'」エラー。
+**Symptom**: `pipeline()` call from `@xenova/transformers` throws
+"Cannot find module '../build/Release/sharp-linux-x64.node'" error.
 
-**原因**: `@xenova/transformers` がバンドルする `sharp` にネイティブバイナリが無い。
+**Cause**: The `sharp` bundled with `@xenova/transformers` is missing the native binary.
 
-**修正**: Dockerfile でバンドル版 sharp を削除し、トップレベルの sharp にフォールバック。
+**Fix**: Remove the bundled sharp in the Dockerfile and fall back to the top-level sharp.
 
 ```dockerfile
 RUN bun install --frozen-lockfile
 RUN rm -rf node_modules/@xenova/transformers/node_modules/sharp
 ```
 
-テキスト embedding のみに使う場合、sharp（画像処理）は不要だが、
-transformers.js は起動時に sharp をロードしようとするため削除が必要。
+When used only for text embedding, sharp (image processing) is unnecessary,
+but transformers.js attempts to load sharp at startup, so removal is required.
 
 ---
 
-### 7. SSE イベントのクライアント側デバッグ
+### 7. Client-side debugging of SSE events
 
-**手法**: ブラウザの `fetch` をモンキーパッチして SSE を傍受。
+**Method**: Monkey-patch the browser's `fetch` to intercept SSE.
 
 ```javascript
-// tab.evaluate 内で実行
+// Run inside tab.evaluate
 const origFetch = window.fetch;
 window.fetch = async function(...args) {
   const res = await origFetch.apply(this, args);
   const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
   if (url?.includes('/api/chat')) {
-    const [a, b] = res.body.tee(); // ストリームを分岐
-    // b を観察、a を useChat に返す
+    const [a, b] = res.body.tee(); // split the stream
+    // observe b, return a to useChat
     (async () => {
       const reader = b.getReader();
-      // ...イベントを収集
+      // ...collect events
     })();
     return new Response(a, { status: res.status, headers: res.headers });
   }
@@ -175,34 +176,34 @@ window.fetch = async function(...args) {
 };
 ```
 
-**注意**: `res.clone()` はストリームを壊すことがある。`tee()` を使う。
-また、モンキーパッチ自体がイベント受信に影響するため、
-最終的にはパッチなしで `waitForResponse` と `response.text()` で確認する。
+**Note**: `res.clone()` can break the stream. Use `tee()`.
+Also, the monkey-patch itself can affect event reception, so
+finally verify without the patch using `waitForResponse` and `response.text()`.
 
 ---
 
-### 8. DB の状態確認
+### 8. Checking DB state
 
 ```bash
-# メッセージと reasoning の確認
+# Check messages and reasoning
 docker compose exec -T db psql -U umans -d umanschat -c \
   "SELECT id, role, LEFT(content, 40), LEFT(reasoning, 40), length(reasoning) FROM messages ORDER BY created_at DESC LIMIT 10;"
 
-# embeddings の確認
+# Check embeddings
 docker compose exec -T db psql -U umans -d umanschat -c \
   "SELECT COUNT(*) FROM embeddings;"
 
-# スレッドのモデル確認
+# Check thread models
 docker compose exec -T db psql -U umans -d umanschat -c \
   "SELECT id, title, model, current_leaf_id FROM threads;"
 ```
 
 ---
 
-### 9. LLM API の直接テスト
+### 9. Direct LLM API testing
 
 ```bash
-# コンテナ内から LLM API を直接叩く
+# Call the LLM API directly from inside the container
 docker compose exec -T app bun -e '
 const OpenAI = (await import("openai")).default;
 const llm = new OpenAI({ baseURL: process.env.LLM_BASE_URL, apiKey: process.env.LLM_API_KEY });
@@ -222,10 +223,10 @@ for await (const chunk of completion) {
 
 ---
 
-### 10. pgvector の cosine distance クエリ
+### 10. pgvector cosine distance query
 
 ```sql
--- 類似度検索（1 - distance = similarity）
+-- Similarity search (1 - distance = similarity)
 SELECT m.content, m.role, t.title,
        1 - (e.embedding <=> '[0.1, 0.2, ...]'::vector) as similarity
 FROM embeddings e
@@ -236,33 +237,33 @@ ORDER BY e.embedding <=> '[0.1, 0.2, ...]'::vector
 LIMIT 5;
 ```
 
-**注意**: drizzle-orm は pgvector の `<=>` 演算子を直接サポートしないため、
-`sql` タグで raw SQL を書く。ベクトルは `JSON.stringify(array)` で渡し、
-`::vector` でキャストする。
+**Note**: Since drizzle-orm does not directly support pgvector's `<=>` operator,
+write raw SQL with the `sql` tag. Pass vectors as `JSON.stringify(array)` and
+cast with `::vector`.
 
 ---
 
-### 11. 記憶が保存されない（fire-and-forget 問題）
+### 11. Memories not being saved (fire-and-forget issue)
 
-**症状**: `memories` テーブルが 0 行。LLM 記憶抽出呼び出しは成功し、
-embedder も 200 OK を返すが、DB に何も保存されない。`docker compose logs app`
-にもエラーが出力されない（`.catch` が実行されない）。
+**Symptom**: The `memories` table has 0 rows. The LLM memory extraction call
+succeeds, the embedder returns 200 OK, but nothing is saved to the DB. No errors
+appear in `docker compose logs app` either (`.catch` is never executed).
 
-**原因**: `src/app/api/chat/route.ts` の `finally` ブロックで
-`generateMemories` を `void generateMemories(...).catch(...)` として
-fire-and-forget で呼び出している。`controller.close()` がストリームを終了すると、
-Next.js 本番ランタイムが未完了のバックグラウンド Promise をキャンセルする。
-`.catch` ハンドラ自体も実行されないため、エラーが完全に沈黙する。
+**Cause**: In `src/app/api/chat/route.ts`, the `finally` block calls
+`generateMemories` as `void generateMemories(...).catch(...)` in a
+fire-and-forget manner. When `controller.close()` terminates the stream,
+the Next.js production runtime cancels the incomplete background Promise.
+The `.catch` handler itself is never executed, so the error is completely silent.
 
-**修正**: `finally` ブロック内で `await generateMemories(...)` する。
-`done` SSE イベントは `try` ブロック内（`finally` の前）に送信済みのため、
-クライアント UX に影響しない。エラーは `try/catch` で握りつぶし、ログのみ出力。
+**Fix**: `await generateMemories(...)` inside the `finally` block.
+The `done` SSE event is already sent within the `try` block (before `finally`),
+so it does not affect client UX. Swallow errors with `try/catch` and log only.
 
 ```typescript
-// BAD: fire-and-forget — close() が Promise をキャンセル
+// BAD: fire-and-forget — close() cancels the Promise
 void generateMemories(...).catch((err) => console.error("[memory]", err));
 
-// GOOD: await で完了を保証（done 送信後なので UX 影響なし）
+// GOOD: await guarantees completion (no UX impact since done is already sent)
 try {
   await generateMemories(...);
 } catch (err) {
@@ -270,31 +271,32 @@ try {
 }
 ```
 
-**注意**: `controller.close()` を `await` の前に移動してはいけない。
-ストリームを先に閉じると、ランタイムが未完了 Promise を再キャンセルする。
-**ファイル**: `src/app/api/chat/route.ts` の `finally` ブロック。
+**Note**: Do not move `controller.close()` before the `await`.
+Closing the stream first causes the runtime to re-cancel the incomplete Promise.
+**File**: `finally` block in `src/app/api/chat/route.ts`.
 
-**検証**: 記憶抽出 LLM 呼び出しに時間がかかる場合（GLM で ~90秒）、
-`done` 受信後もストリームが開いたままになる。クライアントは `done` 受信で
-完了扱いするため問題ないが、サーバ側はメモリ保存完了まで待つ。
+**Verification**: When the memory extraction LLM call takes a long time (~90s with GLM),
+the stream remains open even after `done` is received. The client treats `done`
+receipt as completion, so there's no issue, but the server waits for memory
+saving to complete.
 
 ---
 
-### 12. Vitest テスト環境の DB マイグレーション競合
+### 12. Vitest test environment DB migration conflict
 
-**症状**: `bun run test` で `SqliteError: no such table: users` または `table 'accounts' already exists` が発生。
+**Symptom**: `bun run test` throws `SqliteError: no such table: users` or `table 'accounts' already exists`.
 
-**原因**:
-- `vitest.setup.ts` が DB マイグレーションを実行しない（`predev` の `drizzle-kit migrate` のみ）。
-- `:memory:` DB は `openDatabase` の `fileMustExist` プローブで throw → corruption 警告。
-- `process.pid` ベースの DB ファイルは複数 worker で共有され、migrate が再実行されて "table already exists" になる。
+**Cause**:
+- `vitest.setup.ts` does not run DB migrations (only `drizzle-kit migrate` in `predev`).
+- `:memory:` DB throws on `openDatabase`'s `fileMustExist` probe → corruption warning.
+- `process.pid`-based DB files are shared across multiple workers, causing migrations to re-run and "table already exists" errors.
 
-**修正** (`vitest.setup.ts`):
-1. `DATABASE_URL` に `VITEST_WORKER_ID` を含めて worker ごとに固有の DB ファイルを作成。
-2. ファイル先頭で `DATABASE_URL` を設定（静的 import の hoist より前）。
-3. `@/db` と `migrate` は動的 `await import()` で読み込む（hoist 回避）。
-4. `globalThis.__umanschatTestDbReady` ガードで同一 worker 内の再マイグレーションを防止。
-5. 共有テストユーザー（`test-user-id`）をマイグレーション後に作成（FK 制約対応）。
+**Fix** (`vitest.setup.ts`):
+1. Include `VITEST_WORKER_ID` in `DATABASE_URL` to create a unique DB file per worker.
+2. Set `DATABASE_URL` at the top of the file (before static import hoisting).
+3. Load `@/db` and `migrate` via dynamic `await import()` (to avoid hoisting).
+4. Use a `globalThis.__umanschatTestDbReady` guard to prevent re-migration within the same worker.
+5. Create the shared test user (`test-user-id`) after migration (for FK constraints).
 
 ```ts
 import { tmpdir } from "node:os";
@@ -304,9 +306,9 @@ import { join, resolve } from "node:path";
 if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("/app/data/")) {
   const workerId = process.env.VITEST_WORKER_ID ?? "0";
   process.env.DATABASE_URL = join(tmpdir(), `umanschat-test-${process.pid}-${workerId}.db`);
-  try { unlinkSync(process.env.DATABASE_URL); } catch { /* 初回 */ }
+  try { unlinkSync(process.env.DATABASE_URL); } catch { /* first run */ }
 }
-// ... .env 読み込み ...
+// ... load .env ...
 const globalForTestSetup = globalThis as unknown as { __umanschatTestDbReady?: boolean };
 if (!globalForTestSetup.__umanschatTestDbReady) {
   const { db } = await import("@/db");
@@ -320,13 +322,13 @@ if (!globalForTestSetup.__umanschatTestDbReady) {
 
 ---
 
-### 13. next-auth headers() がテストで throw する
+### 13. next-auth headers() throws in tests
 
-**症状**: `Error: headers was called outside a request scope`
+**Symptom**: `Error: headers was called outside a request scope`
 
-**原因**: `getSessionUser()` が `auth()` → `headers()` を呼ぶ。テスト環境では Next.js request store がない。
+**Cause**: `getSessionUser()` calls `auth()` → `headers()`. In the test environment, there is no Next.js request store.
 
-**修正**: テストファイルに `vi.mock("@/lib/auth-guards")` を追加。
+**Fix**: Add `vi.mock("@/lib/auth-guards")` to the test file.
 
 ```ts
 vi.mock("@/lib/auth-guards", () => ({
@@ -334,15 +336,15 @@ vi.mock("@/lib/auth-guards", () => ({
 }));
 ```
 
-**注意**: `chat/route` を import するテスト（`instruction.test.ts` 等）は `next/server` の `after()` も mock が必要。
+**Note**: Tests that import `chat/route` (e.g., `instruction.test.ts`) also need to mock `after()` from `next/server`.
 
 ---
 
-### 14. jsdom が HTMLElement.scrollTo を実装していない
+### 14. jsdom does not implement HTMLElement.scrollTo
 
-**症状**: `TypeError: el.scrollTo is not a function` （ChatWindow の自動スクロール）
+**Symptom**: `TypeError: el.scrollTo is not a function` (ChatWindow auto-scroll)
 
-**修正** (`vitest.setup.ts`):
+**Fix** (`vitest.setup.ts`):
 ```ts
 if (typeof HTMLElement !== "undefined" && !HTMLElement.prototype.scrollTo) {
   HTMLElement.prototype.scrollTo = function () {};
@@ -351,11 +353,11 @@ if (typeof HTMLElement !== "undefined" && !HTMLElement.prototype.scrollTo) {
 
 ---
 
-### 15. I18nProvider 初回レンダーが en で日本語アサーションが失敗する
+### 15. I18nProvider initial render is en, causing Japanese assertions to fail
 
-**症状**: `getByText("日本語ラベル")` が失敗。`I18nProvider` の `useState(DEFAULT_LOCALE)` が `en` で初期化されるため。
+**Symptom**: `getByText("Japanese label")` fails. `I18nProvider`'s `useState(DEFAULT_LOCALE)` initializes with `en`.
 
-**修正**: テストファイルに `vi.mock("@/lib/i18n/types")` を追加して `DEFAULT_LOCALE` を `ja` に上書き。
+**Fix**: Add `vi.mock("@/lib/i18n/types")` to the test file to override `DEFAULT_LOCALE` to `ja`.
 
 ```ts
 vi.mock("@/lib/i18n/types", async (importOriginal) => {
@@ -364,15 +366,15 @@ vi.mock("@/lib/i18n/types", async (importOriginal) => {
 });
 ```
 
-**注意**:
-- `vi.mock` は hoist されるため、component import より前に評価される。
-- `beforeEach` に `localStorage.setItem("umanschat-locale", "ja")` も追加（useEffect 復元整合性）。
-- Hook テスト（`.ts` ファイル）は `I18nProvider` wrapper が必要。JSX が使えないため `createElement` を使用:
+**Note**:
+- `vi.mock` is hoisted, so it is evaluated before component imports.
+- Also add `localStorage.setItem("umanschat-locale", "ja")` in `beforeEach` (for useEffect restore consistency).
+- Hook tests (`.ts` files) need an `I18nProvider` wrapper. Since JSX is unavailable, use `createElement`:
 ```ts
 import { createElement, type ReactNode } from "react";
 import { I18nProvider } from "@/components/I18nProvider";
 const wrapper = ({ children }: { children: ReactNode }) => createElement(I18nProvider, null, children);
-// renderHook を alias して wrapper を自動適用
+// alias renderHook to auto-apply the wrapper
 import { renderHook as rtlRenderHook } from "@testing-library/react";
 function renderHook<T>(callback: () => T) {
   return rtlRenderHook(callback, { wrapper });
@@ -381,11 +383,11 @@ function renderHook<T>(callback: () => T) {
 
 ---
 
-### 16. Accordion コンポーネントのテスト（AnimatePresence exit animation）
+### 16. Accordion component testing (AnimatePresence exit animation)
 
-**症状**: トグルクリック後に `queryByPlaceholderText(...).not.toBeInTheDocument()` が失敗。`AnimatePresence` の exit animation 中も DOM に残るため。
+**Symptom**: `queryByPlaceholderText(...).not.toBeInTheDocument()` fails after toggle click. The element remains in the DOM during `AnimatePresence` exit animation.
 
-**修正**: `await waitFor()` で exit 完了を待つ。
+**Fix**: Use `await waitFor()` to wait for exit completion.
 ```ts
 fireEvent.click(btn); // close
 await waitFor(() => {
@@ -393,73 +395,73 @@ await waitFor(() => {
 });
 ```
 
-**注意**: `Accordion` は `defaultOpen=false` でマウントされる。内容を確認するにはクリックで開く必要がある。`closest("details")` は使えない（`Accordion` は `<details>` ではなく `<button>` + `AnimatePresence`）。
+**Note**: `Accordion` mounts with `defaultOpen=false`. To inspect its contents, you must click to open it. `closest("details")` cannot be used (`Accordion` uses `<button>` + `AnimatePresence`, not `<details>`).
 
 ---
 
-### 17. Route Handler テストで日本語ステータスメッセージが期待と不一致
+### 17. Route Handler test with Japanese status message mismatch
 
-**症状**: `expect(lastStatus.data.label).toContain("Web検索で結果が見つかりませんでした")` が失敗。実際は英語。
+**Symptom**: `expect(lastStatus.data.label).toContain("No results found in web search")` fails. The actual value is in English.
 
-**原因**: `getRequestLocale(req)` が Cookie なしで `DEFAULT_LOCALE = "en"` にフォールバック。
+**Cause**: `getRequestLocale(req)` falls back to `DEFAULT_LOCALE = "en"` without a cookie.
 
-**修正**: テストの Request helper に locale cookie を追加:
+**Fix**: Add a locale cookie to the test's Request helper:
 ```ts
 headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 ```
 
 ---
 
-### 18. useFolders の error が成功後にクリアされない
+### 18. useFolders error not cleared after success
 
-**症状**: create/update/remove 失敗後に成功すると、`error` が `null` にならない。
+**Symptom**: After a create/update/remove failure followed by success, `error` does not become `null`.
 
-**原因**: `useFolders` の `create`/`update`/`remove` が成功時に `setError(null)` を呼んでいない（`useThreads.move` は呼んでいる）。
+**Cause**: `useFolders`'s `create`/`update`/`remove` do not call `setError(null)` on success (`useThreads.move` does).
 
-**修正**: 成功パスに `setError(null)` を追加。
-
----
-
-### 19. folder.instruction が chat route に結合されない
-
-**症状**: `instruction.test.ts` が 404 または systemContent に folder instruction が含まれない。
-
-**原因**: `chat/route.ts` が `folders` テーブルの `instruction` カラムを読んでいなかった。
-
-**修正**: `chat/route.ts` で `thread.folderId` 経由で `folders.instruction` を lookup（`folders.userId === user.id` で所有権チェック）。空白のみは trim で除外。`systemContent` の先頭に結合。
+**Fix**: Add `setError(null)` to the success path.
 
 ---
-## デバッグの基本手順
 
-1. **症状を再現** — ブラウザまたは curl で確実に再現
-2. **サーバログ確認** — `docker compose logs app --tail=30`
-3. **DB 状態確認** — psql でデータの有無・整合性をチェック
-4. **API 直接テスト** — curl またはコンテナ内 bun -e で API を直接叩く
-5. **ブラウザ DOM 確認** — `tab.evaluate` で DOM 構造とスタイルを検査
-6. **差分比較** — curl vs ブラウザ、動く環境 vs 動かない環境で差を特定
-7. **最小再現** — 問題を再現する最小条件を見つける
+### 19. folder.instruction not merged into chat route
 
-## 頻出ファイル
+**Symptom**: `instruction.test.ts` returns 404 or the systemContent does not include the folder instruction.
 
-| ファイル | 役割 |
+**Cause**: `chat/route.ts` was not reading the `instruction` column from the `folders` table.
+
+**Fix**: In `chat/route.ts`, look up `folders.instruction` via `thread.folderId` (ownership check via `folders.userId === user.id`). Trim-only whitespace is excluded. Prepend to `systemContent`.
+
+---
+## Basic Debugging Steps
+
+1. **Reproduce the symptom** — reliably reproduce via browser or curl
+2. **Check server logs** — `docker compose logs app --tail=30`
+3. **Check DB state** — use psql to verify data presence and integrity
+4. **Direct API test** — call the API directly via curl or `bun -e` inside the container
+5. **Check browser DOM** — inspect DOM structure and styles via `tab.evaluate`
+6. **Compare differences** — identify differences between curl vs browser, working env vs broken env
+7. **Minimal reproduction** — find the minimal conditions to reproduce the issue
+
+## Frequently Used Files
+
+| File | Role |
 |---|---|
-| `src/app/api/chat/route.ts` | SSE スリーミング、LLM 呼び出し、RAG、embedding |
-| `src/hooks/useChat.ts` | クライアント側 SSE パース、状態管理、枝分かれ |
-| `src/components/ChatWindow.tsx` | メッセージ表示、入力、再生成・編集 |
-| `src/lib/llm.ts` | LLM クライアント、モデル設定 |
+| `src/app/api/chat/route.ts` | SSE streaming, LLM calls, RAG, embedding |
+| `src/hooks/useChat.ts` | Client-side SSE parsing, state management, branching |
+| `src/components/ChatWindow.tsx` | Message display, input, regenerate/edit |
+| `src/lib/llm.ts` | LLM client, model settings |
 | `src/lib/embed.ts` | transformers.js embedding |
-| `next.config.ts` | compress 設定、Next.js 設定 |
-| `Dockerfile` | ビルドステージ、sharp 削除 |
-| `.dockerignore` | node_modules 上書き防止 |
-| `docker-compose.yml` | env 変数、ポートマッピング |
+| `next.config.ts` | compress setting, Next.js config |
+| `Dockerfile` | Build stages, sharp removal |
+| `.dockerignore` | Prevents node_modules overwrite |
+| `docker-compose.yml` | Env vars, port mapping |
 | `src/lib/i18n/types.ts` | DEFAULT_LOCALE, LOCALE_STORAGE_KEY |
 | `src/lib/auth-guards.ts` | getSessionUser (next-auth headers) |
-| `src/hooks/useFolders.ts` | フォルダ CRUD、error クリア |
+| `src/hooks/useFolders.ts` | Folder CRUD, error clearing |
 | `src/components/ui/motion.tsx` | Accordion, AnimatePresence |
 | `vitest.setup.ts` | DB migration, test user, scrollTo polyfill |
 | `vitest.config.mts` | threads pool, next/server alias |
 
-## 環境変数
+## Environment Variables
 
 ```
 DATABASE_URL=umanschat.db

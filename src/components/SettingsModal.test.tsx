@@ -154,8 +154,8 @@ describe("SettingsModal — immediate partial persistence", () => {
     const { calls } = mockFetch();
     renderModal();
     await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
-    // Security checkbox is on the Connections tab (🔗 コネクション, index 3)
-    fireEvent.click(screen.getByRole("button", { name: /コネクション/ }));
+    // Security checkbox is on Access & Security (🌐 公開・セキュリティ)
+    fireEvent.click(screen.getByRole("button", { name: /公開・セキュリティ/ }));
     const checkbox = await screen.findByRole("checkbox");
     fireEvent.click(checkbox);
     await waitFor(() => {
@@ -166,6 +166,29 @@ describe("SettingsModal — immediate partial persistence", () => {
       // Partial update only — must not send the entire form
       expect(body.embedModel).toBeUndefined();
     });
+  });
+
+  it("Connections tab shows Notion fields and not AUTH_URL/Tunnel/Security", async () => {
+    mockFetch();
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /コネクション/ }));
+    expect(screen.getByText("NOTION_CLIENT_ID")).toBeInTheDocument();
+    expect(screen.getByText("NOTION_CLIENT_SECRET")).toBeInTheDocument();
+    expect(screen.queryByText("AUTH_URL")).toBeNull();
+    expect(screen.queryByText("Tunnel Token")).toBeNull();
+    expect(screen.queryByText(t => t.startsWith("Cloudflare Tunnel"))).toBeNull();
+  });
+
+  it("Server Access tab shows AUTH_URL, Tunnel, and Security", async () => {
+    mockFetch();
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: /公開・セキュリティ/ }));
+    expect(await screen.findByText("AUTH_URL")).toBeInTheDocument();
+    expect(screen.getByText("Tunnel Token")).toBeInTheDocument();
+    expect(screen.getByText(t => typeof t === "string" && t.startsWith("Cloudflare Tunnel"))).toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).toBeInTheDocument();
   });
 
   it("selecting a GSI radio sends immediate POST { activeInstructionId }", async () => {

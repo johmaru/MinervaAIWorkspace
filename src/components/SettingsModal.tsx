@@ -557,6 +557,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     { icon: "🔍", label: t("settings.tabSearchNetwork") },
     { icon: "🖥️", label: t("settings.tabSystem") },
     { icon: "🔗", label: t("settings.tabConnections") },
+    { icon: "🌐", label: t("settings.tabServerAccess") },
     { icon: "🎨", label: t("personalization.title") },
   ];
 
@@ -574,15 +575,15 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         </MotionButton>
       </div>
 
-      <div className="flex gap-4" style={{ minHeight: "400px" }}>
+      <div className="flex flex-col gap-4 sm:flex-row" style={{ minHeight: "400px" }}>
         {/* Vertical tab rail */}
-        <div className="flex w-40 shrink-0 flex-col gap-1">
+        <div className="flex shrink-0 gap-1 overflow-x-auto sm:w-40 sm:flex-col sm:overflow-visible">
           {tabs.map((tab, i) => (
             <button
               key={i}
               type="button"
               onClick={() => setActiveTab(i)}
-              className={`flex items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200 ${
+              className={`shrink-0 whitespace-nowrap flex items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200 ${
                 activeTab === i
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -1130,6 +1131,37 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
+            {/* "Connect to Notion" button becomes available after saving */}
+            {connections.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
+            ) : (
+              connections.map((conn) => (
+                <div key={conn.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-3">
+                  {conn.workspaceIcon && <img src={conn.workspaceIcon} alt="" className="h-5 w-5 rounded" />}
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{conn.workspaceName ?? "Notion"}</p>
+                    <p className="text-xs text-muted-foreground">{conn.ownerEmail ?? conn.ownerName}</p>
+                  </div>
+                  <button type="button" onClick={() => void handleDisconnect(conn.id)} className="text-xs text-muted-foreground hover:text-foreground">
+                    {t("settings.disconnect")}
+                  </button>
+                </div>
+              ))
+            )}
+            {form.notionClientId ? (
+              <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                {t("settings.connectNotion")}
+              </a>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+            )}
+          </div>
+          </div>
+          )}
+          {activeTab === 4 && (
+          <div className="space-y-6">
+        {/* Server Access — AUTH_URL + Tunnel + Security */}
+          <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">AUTH_URL</span>
@@ -1231,34 +1263,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 />
               </div>
             </div>
-            {/* "Connect to Notion" button becomes available after saving */}
-            {connections.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
-            ) : (
-              connections.map((conn) => (
-                <div key={conn.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-3">
-                  {conn.workspaceIcon && <img src={conn.workspaceIcon} alt="" className="h-5 w-5 rounded" />}
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{conn.workspaceName ?? "Notion"}</p>
-                    <p className="text-xs text-muted-foreground">{conn.ownerEmail ?? conn.ownerName}</p>
-                  </div>
-                  <button type="button" onClick={() => void handleDisconnect(conn.id)} className="text-xs text-muted-foreground hover:text-foreground">
-                    {t("settings.disconnect")}
-                  </button>
-                </div>
-              ))
-            )}
-            {form.notionClientId ? (
-              <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
-                {t("settings.connectNotion")}
-              </a>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
-            )}
           </div>
           </div>
           )}
-          {activeTab === 4 && (
+          {activeTab === 5 && (
           <div className="space-y-6">
             <div className="mt-3 space-y-4">
               {/* Style/tone presets */}

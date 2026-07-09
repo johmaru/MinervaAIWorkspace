@@ -135,7 +135,7 @@ export async function buildSkillContext({
   }
 
   // Skill usage log + lastUsedAt update (fire-and-forget)
-  if (threadId) {
+  if (threadId && merged.length > 0) {
     const usageEntries = merged.map((s) => ({
       skillId: s.id,
       userId,

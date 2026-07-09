@@ -14,7 +14,7 @@ function renderHook<T>(callback: () => T) {
   return rtlRenderHook(callback, { wrapper });
 }
 
-// useFolders は /api/folders の CRUD を叩く。fetch をモックして決定的な応答を返す。
+// useFolders calls CRUD on /api/folders. Mock fetch to return deterministic responses.
 
 const originalFetch = globalThis.fetch;
 
@@ -51,8 +51,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("useFolders — 初回ロード", () => {
-  it("マウントで GET /api/folders を呼ぶ", async () => {
+describe("useFolders — initial load", () => {
+  it("calls GET /api/folders on mount", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -61,7 +61,7 @@ describe("useFolders — 初回ロード", () => {
     expect(result.current.folders[0].name).toBe("仕事");
   });
 
-  it("ロード失敗は error に設定", async () => {
+  it("sets error on load failure", async () => {
     fetchMock().mockResolvedValue(jsonResponse({ error: "x" }, 500));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -70,7 +70,7 @@ describe("useFolders — 初回ロード", () => {
 });
 
 describe("useFolders — create", () => {
-  it("POST で新規フォルダを作り一覧に先頭挿入", async () => {
+  it("creates a new folder via POST and inserts it at the top", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
@@ -85,14 +85,14 @@ describe("useFolders — create", () => {
     expect(created).toEqual(newFolder);
     expect(result.current.folders[0].id).toBe("new-id");
 
-    // POST の body に name が含まれる
+    // POST body includes name
     const call = fetchMock().mock.calls[1];
     expect(call[0]).toBe("/api/folders");
     expect(call[1].method).toBe("POST");
     expect(JSON.parse(call[1].body)).toEqual({ name: "新規" });
   });
 
-  it("create 引数なしは空 body で POST", async () => {
+  it("create with no arguments sends empty body via POST", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
@@ -109,7 +109,7 @@ describe("useFolders — create", () => {
     expect(JSON.parse(call[1].body)).toEqual({});
   });
 
-  it("create 失敗は null を返し error に設定", async () => {
+  it("create failure returns null and sets error", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
@@ -122,7 +122,7 @@ describe("useFolders — create", () => {
     expect(created).toBeNull();
     expect(result.current.error).toMatch(/HTTP 500/);
 
-    // 次に成功すると error がクリアされる
+    // Subsequent success clears error
     const newFolder = { ...sampleFolder, id: "recovered", name: "復帰" };
     fetchMock().mockResolvedValue(jsonResponse(newFolder, 201));
     await act(async () => {
@@ -133,7 +133,7 @@ describe("useFolders — create", () => {
 });
 
 describe("useFolders — update", () => {
-  it("PATCH で name を更新し一覧に反映", async () => {
+  it("updates name via PATCH and reflects in the list", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
@@ -148,14 +148,14 @@ describe("useFolders — update", () => {
     expect(ok!).toBe(true);
     expect(result.current.folders[0].name).toBe("改名後");
 
-    // PATCH の URL と body
+    // PATCH URL and body
     const call = fetchMock().mock.calls[1];
     expect(call[0]).toBe("/api/folders?id=folder-1");
     expect(call[1].method).toBe("PATCH");
     expect(JSON.parse(call[1].body)).toEqual({ name: "改名後" });
   });
 
-  it("memoryScope を更新", async () => {
+  it("updates memoryScope", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
@@ -169,12 +169,12 @@ describe("useFolders — update", () => {
     expect(result.current.folders[0].memoryScope).toBe("folder");
   });
 
-  it("update 失敗後の成功で error がクリアされる", async () => {
+  it("clears error on success after update failure", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
 
-    // まず失敗させて error を設定
+    // First fail to set error
     fetchMock().mockResolvedValue(jsonResponse({ error: "x" }, 500));
     let ok: boolean;
     await act(async () => {
@@ -183,7 +183,7 @@ describe("useFolders — update", () => {
     expect(ok!).toBe(false);
     expect(result.current.error).toMatch(/HTTP 500/);
 
-    // 次に成功すると error がクリアされる
+    // Subsequent success clears error
     const renamed = { ...sampleFolder, name: "復帰" };
     fetchMock().mockResolvedValue(jsonResponse(renamed));
     await act(async () => {
@@ -195,7 +195,7 @@ describe("useFolders — update", () => {
 });
 
 describe("useFolders — remove", () => {
-  it("DELETE で一覧から除外", async () => {
+  it("removes from the list via DELETE", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
@@ -213,12 +213,12 @@ describe("useFolders — remove", () => {
     expect(call[1].method).toBe("DELETE");
   });
 
-  it("remove 失敗後の成功で error がクリアされる", async () => {
+  it("clears error on success after remove failure", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));
 
-    // まず失敗させて error を設定
+    // First fail to set error
     fetchMock().mockResolvedValue(jsonResponse({ error: "x" }, 500));
     let ok: boolean;
     await act(async () => {
@@ -227,7 +227,7 @@ describe("useFolders — remove", () => {
     expect(ok!).toBe(false);
     expect(result.current.error).toMatch(/HTTP 500/);
 
-    // 次に成功すると error がクリアされる
+    // Subsequent success clears error
     fetchMock().mockResolvedValue(emptyResponse(204));
     await act(async () => {
       ok = await result.current.remove("folder-1");
@@ -238,7 +238,7 @@ describe("useFolders — remove", () => {
 });
 
 describe("useFolders — refresh", () => {
-  it("refresh で一覧を再取得", async () => {
+  it("re-fetches the list on refresh", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleFolder]));
     const { result } = renderHook(() => useFolders());
     await waitFor(() => expect(result.current.folders).toHaveLength(1));

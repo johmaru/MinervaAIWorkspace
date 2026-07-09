@@ -8,8 +8,8 @@ import type { ChatMessage } from "@/hooks/useChat";
 import { ChatWindow } from "@/components/ChatWindow";
 import { I18nProvider } from "@/components/I18nProvider";
 
-// ChatWindow は useChat(threadId) に直接依存しているため、モックで決定的な状態を注入する。
-// 実 API / SSE / DB の挙動は route.test.ts / useChat.test.ts で担保済み。
+// ChatWindow depends directly on useChat(threadId), so we inject deterministic state via mock.
+// Real API / SSE / DB behavior is covered by route.test.ts / useChat.test.ts.
 
 type UseChatReturn = {
   messages: ChatMessage[];
@@ -118,8 +118,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("ChatWindow — threadId がない状態", () => {
-  it("NoThreadState を表示", () => {
+describe("ChatWindow — no threadId state", () => {
+  it("renders NoThreadState", () => {
     render(<I18nProvider><ChatWindow threadId={null} /></I18nProvider>);
     expect(
       screen.getByText("メッセージを送って、新しいスレッドを始めてください。"),
@@ -127,14 +127,14 @@ describe("ChatWindow — threadId がない状態", () => {
     expect(screen.getByPlaceholderText(/Enter で送信/)).toBeInTheDocument();
   });
 
-  it("入力すると送信ボタンが有効化", () => {
+  it("enables the send button on input", () => {
     render(<I18nProvider><ChatWindow threadId={null} /></I18nProvider>);
     const ta = screen.getByPlaceholderText(/Enter で送信/) as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: "hello" } });
     expect(screen.getByRole("button", { name: "メッセージを送信" })).not.toBeDisabled();
   });
 
-  it("送信すると onCreateThread が呼ばれ、threadId 切替後に send する", async () => {
+  it("calls onCreateThread on send, then sends after threadId switches", async () => {
     const onCreateThread = vi.fn().mockResolvedValue("t-new");
     const send = vi.fn().mockResolvedValue(undefined);
     mockState.send = send;
@@ -148,7 +148,7 @@ describe("ChatWindow — threadId がない状態", () => {
     await waitFor(() => expect(send).toHaveBeenCalledWith("hello", {}));
   });
 
-  it("onCreateThread が失敗すると send は呼ばれない", async () => {
+  it("does not call send when onCreateThread fails", async () => {
     const onCreateThread = vi.fn().mockResolvedValue(null);
     const send = vi.fn().mockResolvedValue(undefined);
     mockState.send = send;
@@ -162,8 +162,8 @@ describe("ChatWindow — threadId がない状態", () => {
   });
 });
 
-describe("ChatWindow — 空状態（threadId あり）", () => {
-  it("メッセージ0件のとき EmptyState を表示", () => {
+describe("ChatWindow — empty state (with threadId)", () => {
+  it("renders EmptyState when there are no messages", () => {
     mockState.thread = mockThread();
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(
@@ -171,33 +171,33 @@ describe("ChatWindow — 空状態（threadId あり）", () => {
     ).toBeInTheDocument();
   });
 
-  it("プレースホルダと送信ボタンを表示", () => {
+  it("renders placeholder and send button", () => {
     mockState.thread = mockThread();
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByPlaceholderText(/Enter で送信/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "メッセージを送信" })).toBeDisabled();
   });
 
-  it("isLoading 中は読み込み中表示", () => {
+  it("shows loading indicator while isLoading", () => {
     mockState.isLoading = true;
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText("読み込み中…")).toBeInTheDocument();
   });
 });
 
-describe("ChatWindow — 送信操作", () => {
+describe("ChatWindow — send operations", () => {
   beforeEach(() => {
     mockState.thread = mockThread();
   });
 
-  it("入力すると送信ボタンが有効化", () => {
+  it("enables the send button on input", () => {
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     const ta = screen.getByPlaceholderText(/Enter で送信/) as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: "hello" } });
     expect(screen.getByRole("button", { name: "メッセージを送信" })).not.toBeDisabled();
   });
 
-  it("送信ボタン押下で send を呼び入力をクリア", () => {
+  it("calls send on button click and clears input", () => {
     const send = vi.fn().mockResolvedValue(undefined);
     mockState.send = send;
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
@@ -208,7 +208,7 @@ describe("ChatWindow — 送信操作", () => {
     expect(ta.value).toBe("");
   });
 
-  it("Enter で送信、Shift+Enter は改行", () => {
+  it("sends on Enter, inserts newline on Shift+Enter", () => {
     const send = vi.fn().mockResolvedValue(undefined);
     mockState.send = send;
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
@@ -222,7 +222,7 @@ describe("ChatWindow — 送信操作", () => {
     expect(send).toHaveBeenCalledWith("hello", { attachmentIds: [] });
   });
 
-  it("onConversationEnded は送信完了後に呼ばれる", async () => {
+  it("calls onConversationEnded after send completes", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
     mockState.send = send;
     const onEnded = vi.fn();
@@ -230,19 +230,19 @@ describe("ChatWindow — 送信操作", () => {
     const ta = screen.getByPlaceholderText(/Enter で送信/) as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "メッセージを送信" }));
-    // send の .then で呼ばれるので microtask 待ち
+    // Called in send's .then, so wait a microtask
     await Promise.resolve();
     await Promise.resolve();
     expect(onEnded).toHaveBeenCalled();
   });
 });
 
-describe("ChatWindow — ストリーミング状態", () => {
+describe("ChatWindow — streaming state", () => {
   beforeEach(() => {
     mockState.thread = mockThread();
   });
 
-  it("isStreaming 時は停止ボタンに切替", () => {
+  it("switches to stop button when isStreaming", () => {
     const stop = vi.fn();
     mockState.isStreaming = true;
     mockState.stop = stop;
@@ -253,7 +253,7 @@ describe("ChatWindow — ストリーミング状態", () => {
     expect(stop).toHaveBeenCalled();
   });
 
-  it("assistant の空バブルはスピナーと待機ラベルを表示", () => {
+  it("shows spinner and waiting label for empty assistant bubble", () => {
     mockState.isStreaming = true;
     mockState.messages = [
       { id: "u1", role: "user", content: "hi", parentId: null },
@@ -261,11 +261,11 @@ describe("ChatWindow — ストリーミング状態", () => {
     ];
     const { container } = render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText(/応答を待っています/)).toBeInTheDocument();
-    // reduce 環境でも回転を維持するための復元クラスが付与されていること
+    // A restore class is applied to maintain rotation even in reduced-motion environments
     expect(container.querySelector(".loading-spinner")).toBeInTheDocument();
   });
 
-  it("thinking 受信中も statusLabel があれば進捗ラベルとスピナーを表示", () => {
+  it("shows progress label and spinner while thinking is received if statusLabel exists", () => {
     mockState.isStreaming = true;
     mockState.messages = [
       { id: "u1", role: "user", content: "hi", parentId: null },
@@ -273,17 +273,17 @@ describe("ChatWindow — ストリーミング状態", () => {
     ];
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText("考え中…")).toBeInTheDocument();
-    // スピナー（aria-label="応答を待っています"）は thinking ありでは出ない
+    // Spinner (aria-label="waiting for response") is not shown when thinking exists
     expect(screen.queryByLabelText("応答を待っています")).not.toBeInTheDocument();
   });
 });
 
-describe("ChatWindow — メッセージ描画", () => {
+describe("ChatWindow — message rendering", () => {
   beforeEach(() => {
     mockState.thread = mockThread();
   });
 
-  it("user / assistant の内容を描画", () => {
+  it("renders user / assistant content", () => {
     mockState.messages = [
       { id: "u1", role: "user", content: "こんにちは", parentId: null },
       { id: "a1", role: "assistant", content: "どうも", parentId: null },
@@ -293,13 +293,13 @@ describe("ChatWindow — メッセージ描画", () => {
     expect(screen.getByText("どうも")).toBeInTheDocument();
   });
 
-  it("assistant の thinking 部分は折りたためる思考ブロック内に表示", async () => {
+  it("renders assistant thinking inside a collapsible thinking block", async () => {
     mockState.messages = [
       { id: "a1", role: "assistant", content: "<thinking>We need answer greeting in Japanese.</thinking>\nこんにちは！お元気ですか？", parentId: null },
     ];
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText("こんにちは！お元気ですか？")).toBeInTheDocument();
-    // Accordion は閉じた状態でマウントされるため、クリックして開く。
+    // Accordion mounts in closed state, so click to open.
     const thinkingBtn = screen.getByRole("button", { name: "思考" });
     fireEvent.click(thinkingBtn);
     await waitFor(() => {
@@ -309,7 +309,7 @@ describe("ChatWindow — メッセージ描画", () => {
     expect(region).toBeInTheDocument();
   });
 
-  it("thinking フィールドがあるとき折りたたみ思考ブロックとして表示", async () => {
+  it("renders thinking field as a collapsible thinking block", async () => {
     mockState.messages = [
       {
         id: "a2",
@@ -321,7 +321,7 @@ describe("ChatWindow — メッセージ描画", () => {
     ];
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText("こんにちは！お元気ですか？")).toBeInTheDocument();
-    // Accordion は閉じた状態でマウントされるため、クリックして開く。
+    // Accordion mounts in closed state, so click to open.
     const thinkingBtn = screen.getByRole("button", { name: "思考" });
     fireEvent.click(thinkingBtn);
     await waitFor(() => {
@@ -331,7 +331,7 @@ describe("ChatWindow — メッセージ描画", () => {
     expect(region).toBeInTheDocument();
   });
 
-  it("デュアルモデル詳細を折りたたみで表示", async () => {
+  it("renders dual model details in a collapsible block", async () => {
     mockState.messages = [
       {
         id: "a-dual",
@@ -355,7 +355,7 @@ describe("ChatWindow — メッセージ描画", () => {
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText("統合結論です。")).toBeInTheDocument();
     expect(screen.getByText("デュアルモデル詳細")).toBeInTheDocument();
-    // Accordion は閉じた状態でマウントされるため、クリックして開く。
+    // Accordion mounts in closed state, so click to open.
     const dualBtn = screen.getByRole("button", { name: "デュアルモデル詳細" });
     fireEvent.click(dualBtn);
     await waitFor(() => {
@@ -364,7 +364,7 @@ describe("ChatWindow — メッセージ描画", () => {
     });
   });
 
-  it("error があるときエラー文を表示", () => {
+  it("displays error text when error is present", () => {
     mockState.error = "boom";
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText(/boom/)).toBeInTheDocument();

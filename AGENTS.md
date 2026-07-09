@@ -275,7 +275,7 @@ Token changes and AUTH_URL switching take effect immediately without restarting 
 
 - **API**: `/api/tunnel` (GET: status, POST: start, DELETE: stop)
   - Token is never returned in plaintext in GET responses (only `hasToken`)
-  - AUTH_URL updates `process.env` dynamically → NextAuth reads it via `reqWithEnvURL` on each request, so no restart needed
+  - AUTH_URL is saved to .env dynamically and mirrored to UMANS_CONFIGURED_AUTH_URL; redirects follow the request Host header (dual local + Cloudflare access, no localhost trap, no restart needed)
   - On token change, `startTunnel(token, { force: true })` stops and restarts (avoids using stale tokens)
 - **Process management**: `src/lib/tunnel.ts`
   - Docker environment: `docker compose --profile tunnel up -d --force-recreate cloudflared`

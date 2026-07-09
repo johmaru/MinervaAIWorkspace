@@ -1,15 +1,15 @@
 /**
- * アプリ側ベクトル検索ヘルパ — pgvector の代わりに JS でコサイン類似度を計算。
+ * Client-side vector search helper — computes cosine similarity in JS instead of using pgvector.
  *
- * SQLite では embedding は JSON 配列（text 列, mode: json）として保存され、
- * Drizzle が number[] に自動パースする。そのため parse 処理は不要。
- * このモジュールはコサイン類似度計算のみを提供する。
+ * In SQLite, embeddings are stored as JSON arrays (text column, mode: json),
+ * and Drizzle auto-parses them into number[]. No parse handling is needed.
+ * This module only provides cosine similarity computation.
  */
 
 /**
- * コサイン類似度: a·b / (|a||b|)。
- * ゼロベクトルの場合は 0 を返す（除算回避）。
- * 次元が一致しない場合は 0 を返す。
+ * Cosine similarity: a·b / (|a||b|).
+ * Returns 0 for zero vectors (avoids division by zero).
+ * Returns 0 if dimensions do not match.
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;

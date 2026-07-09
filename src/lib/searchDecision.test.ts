@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// createLLM をモック: 実 API を叩かずに decideSearch のロジックを検証
+// Mock createLLM: verify decideSearch logic without calling the real API
 const mockCreate = vi.fn();
 vi.mock("@/lib/llm", () => ({
   createLLM: () => mockCreate(),
@@ -11,8 +11,8 @@ vi.mock("@/lib/llm", () => ({
 import { decideSearch } from "@/lib/searchDecision";
 
 /**
- * OpenAI クライアントのモックを構築。
- * create が返す content を指定。
+ * Builds a mock OpenAI client.
+ * Specifies the content returned by create.
  */
 function mockClient(content: string | null) {
   return {
@@ -31,7 +31,7 @@ beforeEach(() => {
 });
 
 describe("decideSearch", () => {
-  it("searchLevel:web + queries をパースする", async () => {
+  it("parses searchLevel:web + queries", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -54,7 +54,7 @@ describe("decideSearch", () => {
     ]);
   });
 
-  it("searchLevel:none の場合は空 queries を返す", async () => {
+  it("returns empty queries when searchLevel is none", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -73,7 +73,7 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBeNull();
   });
 
-  it("LLM が検索不要と判定しても最新レビュー要求は検索へ倒す", async () => {
+  it("routes to search even when LLM judges no search needed, if latest review is requested", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -96,7 +96,7 @@ describe("decideSearch", () => {
     expect(decision.queries[0]).toContain("Steam");
   });
 
-  it("LLM が不自然な userNotice を返しても丁寧な固定文に整形する", async () => {
+  it("normalizes unnatural userNotice from LLM into a polite fixed sentence", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -114,7 +114,7 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBe("最新の評価やレビューをWebで確認します。");
   });
 
-  it("Steam 系の検索判定成功時は Steam 用の固定文に整形する", async () => {
+  it("normalizes to Steam-specific fixed sentence on Steam-related search decision success", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -132,7 +132,7 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBe("Steamの最新情報をWebで確認します。");
   });
 
-  it("markdown コードフェンス付き JSON をパースする", async () => {
+  it("parses JSON wrapped in markdown code fences", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         '```json\n{"searchLevel": "web", "reason": "need search", "userNotice": "確認するね", "queries": ["latest news"]}\n```',
@@ -146,7 +146,7 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBe("最新の情報をWebで確認します。");
   });
 
-  it("フェンス無しのプレーン JSON もパースする", async () => {
+  it("also parses plain JSON without fences", async () => {
     mockCreate.mockReturnValue(
       mockClient('{"searchLevel": "none", "reason": "ok", "userNotice": null, "queries": []}'),
     );
@@ -157,7 +157,7 @@ describe("decideSearch", () => {
     expect(decision.reason).toBe("ok");
   });
 
-  it("LLM が不正 JSON を返した場合は searchLevel:none でフォールバック", async () => {
+  it("falls back to searchLevel:none when LLM returns invalid JSON", async () => {
     mockCreate.mockReturnValue(mockClient("this is not json"));
 
     const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
@@ -167,7 +167,7 @@ describe("decideSearch", () => {
     expect(decision.queries).toEqual([]);
   });
 
-  it("LLM が不正 JSON を返しても明示的な検索要求なら検索へ倒す", async () => {
+  it("routes to search on explicit search request even when LLM returns invalid JSON", async () => {
     mockCreate.mockReturnValue(mockClient("this is not json"));
 
     const decision = await decideSearch("Project Motor Racing 2.0 Steam 最新レビューを調べて", "umans-glm-5.2", "ja", []);
@@ -179,7 +179,7 @@ describe("decideSearch", () => {
     expect(decision.queries[0]).toContain("Project Motor Racing 2.0");
   });
 
-  it("LLM 呼び出しが reject した場合は searchLevel:none でフォールバック", async () => {
+  it("falls back to searchLevel:none when LLM call rejects", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -195,7 +195,7 @@ describe("decideSearch", () => {
     expect(decision.queries).toEqual([]);
   });
 
-  it("LLM 呼び出しが reject しても明示的な検索要求なら検索へ倒す", async () => {
+  it("routes to search on explicit search request even when LLM call rejects", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -213,7 +213,7 @@ describe("decideSearch", () => {
     expect(decision.queries[0]).toContain("現在の価格");
   });
 
-  it("queries に空文字や非文字が混ざっても除外される", async () => {
+  it("filters out empty strings and non-strings from queries", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -231,7 +231,7 @@ describe("decideSearch", () => {
     expect(decision.queries).toEqual(["valid query", "another valid"]);
   });
 
-  it("userNotice が空文字や whitespace-only の場合は null になる", async () => {
+  it("sets userNotice to null when empty or whitespace-only", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -249,7 +249,7 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBe("最新の情報をWebで確認します。");
   });
 
-  it("content が null の場合はフォールバック", async () => {
+  it("falls back when content is null", async () => {
     mockCreate.mockReturnValue(mockClient(null));
 
     const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
@@ -258,7 +258,7 @@ describe("decideSearch", () => {
     expect(decision.queries).toEqual([]);
   });
 
-  it("content が空文字の場合はフォールバック", async () => {
+  it("falls back when content is empty string", async () => {
     mockCreate.mockReturnValue(mockClient(""));
 
     const decision = await decideSearch("hi", "umans-glm-5.2", "ja", []);
@@ -267,7 +267,7 @@ describe("decideSearch", () => {
     expect(decision.reason).toBe("router failed");
   });
 
-  it("history を system prompt 以外の messages として渡す", async () => {
+  it("passes history as messages other than the system prompt", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
         {
@@ -291,7 +291,7 @@ describe("decideSearch", () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     const params = create.mock.calls[0][0] as { messages: { role: string; content: string }[] };
-    // system, user, assistant, user の順
+    // system, user, assistant, user order
     expect(params.messages).toHaveLength(4);
     expect(params.messages[0].role).toBe("system");
     expect(params.messages[1]).toEqual({ role: "user", content: "前の質問" });
@@ -299,7 +299,7 @@ describe("decideSearch", () => {
     expect(params.messages[3]).toEqual({ role: "user", content: "follow up" });
   });
 
-  it("response_format を使わず通常 completion で呼ぶ", async () => {
+  it("calls with regular completion without response_format", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [{ message: { content: JSON.stringify({ searchLevel: "none", reason: "ok", userNotice: null, queries: [] }) } }],
     });
@@ -311,7 +311,7 @@ describe("decideSearch", () => {
     expect(params.response_format).toBeUndefined();
   });
 
-  it("記憶呼び出し質問は heuristic が検索を強制しない（LLM が不要と判定すれば検索しない）", async () => {
+  it("heuristic does not force search for memory recall questions (does not search if LLM judges unnecessary)", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -329,7 +329,7 @@ describe("decideSearch", () => {
     expect(decision.queries).toEqual([]);
   });
 
-  it("記憶呼び出し質問は LLM 失敗時も検索しない", async () => {
+  it("does not search on memory recall questions even when LLM fails", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -345,7 +345,7 @@ describe("decideSearch", () => {
     expect(decision.queries).toEqual([]);
   });
 
-  it("記憶呼び出し質問の英語パターンも検索を抑制する", async () => {
+  it("English memory recall patterns also suppress search", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -362,7 +362,7 @@ describe("decideSearch", () => {
     expect(decision.searchLevel).toBe("none");
   });
 
-  it("記憶呼び出し質問の英語バリエーションを網羅的に検索抑制する", async () => {
+  it("exhaustively suppresses search for English memory recall variations", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -403,8 +403,8 @@ describe("decideSearch", () => {
     }
   });
 
-  it("コード質問はヒューリスティックで検索不要となり LLM を呼ばない", async () => {
-    // LLM が呼ばれたら即座に失敗するよう reject を設定
+  it("code questions are heuristically determined as no-search and do not call LLM", async () => {
+    // Set reject so LLM call immediately fails if invoked
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -421,7 +421,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("翻訳依頼はヒューリスティックで検索不要となり LLM を呼ばない", async () => {
+  it("translation requests are heuristically determined as no-search and do not call LLM", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -437,7 +437,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("意見・アドバイス要求はヒューリスティックで検索不要となり LLM を呼ばない", async () => {
+  it("opinion/advice requests are heuristically determined as no-search and do not call LLM", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -453,7 +453,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("英語のコード質問もヒューリスティックで検索不要となる", async () => {
+  it("English code questions are also heuristically determined as no-search", async () => {
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -468,7 +468,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("検索不要パターンでも明示的に「検索して」とあれば LLM 判定へ進む", async () => {
+  it("proceeds to LLM judgment even for no-search patterns when 'search' is explicitly requested", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -486,8 +486,8 @@ describe("decideSearch", () => {
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("UNKNOWN_TERM ヒューリスティック（Xって何）は searchLevel:wiki となる", async () => {
-    // LLM が呼ばれたら即座に失敗するよう reject を設定
+  it("UNKNOWN_TERM heuristic (unknown-term pattern) results in searchLevel:wiki", async () => {
+    // Set reject so LLM call immediately fails if invoked
     mockCreate.mockReturnValue({
       chat: {
         completions: {
@@ -504,9 +504,9 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  // --- Step 7: 拡張 UNKNOWN_TERM_PATTERN のテスト ---
-  // 全てヒューリスティックで捕捉され LLM が呼ばれないことを検証する。
-  it("Xって性格悪かったの？ は wiki となる（って性格 マッチ）", async () => {
+  // --- Step 7: Extended UNKNOWN_TERM_PATTERN tests ---
+  // Verify that all are caught heuristically and LLM is not called.
+  it("personality question pattern results in wiki (personality match)", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -517,7 +517,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("Xってどんな人だった？ は wiki となる（ってどんな マッチ）", async () => {
+  it("what-kind-of-person pattern results in wiki (what-kind match)", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -527,7 +527,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("Xって本当にいたの？ は wiki となる（って本当 マッチ）", async () => {
+  it("did-they-really-exist pattern results in wiki (really match)", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -537,7 +537,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("Xって実在する？ は wiki となる（って実在 マッチ）", async () => {
+  it("does-it-exist pattern results in wiki (exist match)", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -547,7 +547,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("Xって誰？ は wiki となる（って誰 マッチ）", async () => {
+  it("who-is pattern results in wiki (who match)", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -557,7 +557,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("LLM が searchLevel:wiki を返した場合パースする", async () => {
+  it("parses when LLM returns searchLevel:wiki", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -573,13 +573,13 @@ describe("decideSearch", () => {
 
     expect(decision.searchLevel).toBe("wiki");
     expect(decision.queries).toEqual(["マグナ・カルタ"]);
-    // ヒューリスティックが null（パターン非マッチ）の場合 LLM が wiki を返す。
-    // normalizeDecisionNotice は buildUserNotice で再計算するが、UNKNOWN_TERM_PATTERN
-    // 非マッチのため DEFAULT_USER_NOTICE になる（プラン想定: wiki 専用分岐なし）。
+    // When heuristic is null (pattern does not match), LLM returns wiki.
+    // normalizeDecisionNotice recomputes via buildUserNotice, but since
+    // UNKNOWN_TERM_PATTERN does not match, it becomes DEFAULT_USER_NOTICE (plan assumption: no wiki-specific branch).
   });
 
-  // --- English locale: ヒューリスティックパターン拡張の検証 ---
-  it("en: \"who was Socrates\" は wiki 判定となり LLM を呼ばない", async () => {
+  // --- English locale: heuristic pattern extension verification ---
+  it("en: \"who was Socrates\" results in wiki judgment and does not call LLM", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -590,7 +590,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("en: \"was King John really a bad person\" は wiki 判定となり LLM を呼ばない", async () => {
+  it("en: \"was King John really a bad person\" results in wiki judgment and does not call LLM", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -600,11 +600,11 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
   // --- Search query diversification: multi-query generation ---
-  it("web ヒューリスティックは direct + keyword の 2 クエリを生成する", async () => {
-    // LLM が呼ばれたら即座に失敗するよう reject を設定
-    // （ヒューリスティック web は短絡せず LLM ルーターへ進むが、canned "none"
-    //  により heuristicDecision がフォールバック返却される。ここでは LLM を
-    //  呼ばないよう reject にし、heuristicDecision のクエリ配列を検証する。）
+  it("web heuristic generates direct + keyword queries (2 queries)", async () => {
+    // Set reject so LLM call immediately fails if invoked.
+    // (Heuristic web does not short-circuit; it proceeds to the LLM router, but canned "none"
+    //  causes heuristicDecision to be returned as fallback. Here we set reject to avoid
+    //  calling the LLM and verify the query array from heuristicDecision.)
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({ searchLevel: "none", reason: "defer", userNotice: null, queries: [] }),
@@ -616,11 +616,11 @@ describe("decideSearch", () => {
     expect(decision.searchLevel).toBe("web");
     expect(decision.queries.length).toBeGreaterThanOrEqual(2);
     expect(decision.queries[0]).toContain("PMR2.0");
-    // keyword variant は元の助詞(の/は/が)を含まない
+    // keyword variant does not contain original particles (の/は/が)
     expect(decision.queries[1]).not.toMatch(/[のはが]/);
   });
 
-  it("wiki ヒューリスティック: 純CJKエンティティは英語バリアントを生成しない", async () => {
+  it("wiki heuristic: pure CJK entities do not generate an English variant", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -632,7 +632,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("wiki ヒューリスティック: ASCIIエンティティは英語バリアントを追加する", async () => {
+  it("wiki heuristic: ASCII entities append an English variant", async () => {
     mockCreate.mockReturnValue({
       chat: { completions: { create: vi.fn().mockRejectedValue(new Error("LLM should not be called")) } },
     });
@@ -645,7 +645,7 @@ describe("decideSearch", () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("LLM web canned: 4 クエリ(3言語 + 1英語)をパースする", async () => {
+  it("LLM web canned: parses 4 queries (3 in language + 1 in English)", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({
@@ -669,7 +669,7 @@ describe("decideSearch", () => {
     expect(decision.queries.some((q) => /^[A-Za-z0-9 .]+$/.test(q))).toBe(true);
   });
 
-  it("LLM wiki canned: エンティティ + 英語の 2 クエリをパースする", async () => {
+  it("LLM wiki canned: parses entity + English queries (2 queries)", async () => {
     mockCreate.mockReturnValue(
       mockClient(
         JSON.stringify({

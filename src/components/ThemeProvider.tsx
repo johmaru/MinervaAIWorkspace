@@ -4,9 +4,9 @@ import { ThemeProvider as NextThemesProvider } from "next-themes";
 import type { ComponentProps } from "react";
 
 /**
- * next-themes ラッパー。
- * ダークモード切替を SSR 安全に提供する。
- * attribute="class" → <html class="dark"> を付与し Tailwind v4 の .dark と連動。
+ * next-themes wrapper.
+ * Provides SSR-safe dark mode toggling.
+ * attribute="class" → adds <html class="dark"> to work with Tailwind v4's .dark.
  */
 export function ThemeProvider({
   children,

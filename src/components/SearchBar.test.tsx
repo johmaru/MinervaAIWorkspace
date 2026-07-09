@@ -53,20 +53,20 @@ function renderSearchBar(onSelectThread: (id: string) => void) {
   return render(<I18nProvider><SearchBar onSelectThread={onSelectThread} /></I18nProvider>);
 }
 
-describe("SearchBar — 表示", () => {
-  it("検索入力欄を表示", () => {
+describe("SearchBar — display", () => {
+  it("renders the search input", () => {
     renderSearchBar(vi.fn());
     expect(screen.getByPlaceholderText("🔍 検索…")).toBeInTheDocument();
   });
 
-  it("空入力時は結果を表示しない", () => {
+  it("does not show results on empty input", () => {
     renderSearchBar(vi.fn());
     expect(screen.queryByText("結果なし")).not.toBeInTheDocument();
   });
 });
 
-describe("SearchBar — 検索", () => {
-  it("入力すると検索結果を表示", async () => {
+describe("SearchBar — search", () => {
+  it("displays search results on input", async () => {
     renderSearchBar(vi.fn());
     const input = screen.getByPlaceholderText("🔍 検索…");
     fireEvent.change(input, { target: { value: "こんにちは" } });
@@ -77,7 +77,7 @@ describe("SearchBar — 検索", () => {
     });
   });
 
-  it("類似度パーセントを表示", async () => {
+  it("displays similarity percentage", async () => {
     renderSearchBar(vi.fn());
     fireEvent.change(screen.getByPlaceholderText("🔍 検索…"), {
       target: { value: "テスト" },
@@ -88,7 +88,7 @@ describe("SearchBar — 検索", () => {
     });
   });
 
-  it("結果クリックで onSelectThread を呼ぶ", async () => {
+  it("calls onSelectThread on result click", async () => {
     const onSelect = vi.fn();
     renderSearchBar(onSelect);
     fireEvent.change(screen.getByPlaceholderText("🔍 検索…"), {
@@ -99,7 +99,7 @@ describe("SearchBar — 検索", () => {
     expect(onSelect).toHaveBeenCalledWith("t1");
   });
 
-  it("空入力に戻すと結果をクリア", async () => {
+  it("clears results when input becomes empty", async () => {
     renderSearchBar(vi.fn());
     const input = screen.getByPlaceholderText("🔍 検索…");
     fireEvent.change(input, { target: { value: "テスト" } });
@@ -111,8 +111,8 @@ describe("SearchBar — 検索", () => {
   });
 });
 
-describe("SearchBar — Web知識結果", () => {
-  it("ページ結果を 🌐 セクションに表示", async () => {
+describe("SearchBar — web knowledge results", () => {
+  it("displays page results in the 🌐 section", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -144,7 +144,7 @@ describe("SearchBar — Web知識結果", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
-  it("ページ結果とメッセージ結果が両方表示される", async () => {
+  it("displays both page results and message results", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: () =>

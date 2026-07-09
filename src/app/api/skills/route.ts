@@ -8,8 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/skills — ログインユーザーのスキル一覧（更新順）。
- * embedding は含まず、メタのみ返す。
+ * GET /api/skills — Skills of the logged-in user (newest first).
+ * Excludes embedding; returns metadata only.
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -46,10 +46,10 @@ type CreateBody = {
 };
 
 /**
- * POST /api/skills — スキル手動作成。
- * name + content を受け取り、kind/trigger/tags と共に保存。
- * embedding は name + trigger + tags + content の結合テキストから生成。
- * contentHash が既存と一致する場合は 409 Conflict。
+ * POST /api/skills — Manual skill creation.
+ * Accepts name + content, saves with kind/trigger/tags.
+ * Embedding is generated from the combined text of name + trigger + tags + content.
+ * Returns 409 Conflict if contentHash matches an existing skill.
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     ? body.tags.filter((t): t is string => typeof t === "string")
     : [];
 
-  // embedding 生成: name + trigger + tags + content の結合テキストから
+  // Generate embedding: from combined text of name + trigger + tags + content
   const embedSource = [name, trigger, tags.join(", "), content].filter(Boolean).join("\n");
   const vector = await embedText(embedSource, "document");
   if (vector.length === 0) {

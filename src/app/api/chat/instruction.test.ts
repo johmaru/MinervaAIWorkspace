@@ -10,7 +10,7 @@ import { db } from "@/db";
 import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// searchWeb / upsertPage をモック
+// Mock searchWeb / upsertPage
 vi.mock("@/lib/scraper", () => ({
   searchWeb: vi.fn().mockResolvedValue({ query: "", results: [] }),
   scrapeUrl: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("@/lib/pageStore", () => ({
   upsertPage: vi.fn().mockResolvedValue("mock-page-id"),
 }));
 
-// LLM をモック: messages を捕捉し、最小ストリームを返す
+// Mock LLM: capture messages, return minimal stream
 let capturedMessages: Array<{ role: string; content: unknown }> = [];
 vi.mock("@/lib/llm", async () => {
   const actual = await vi.importActual<typeof import("@/lib/llm")>("@/lib/llm");
@@ -66,9 +66,9 @@ function chatReq(threadId: string, content: string): Request {
   });
 }
 
-describe("POST /api/chat — フォルダ Instruction 結合", () => {
-  it("folder.instruction が system message 先頭に結合される", async () => {
-    // フォルダ作成 + Instruction 付き
+describe("POST /api/chat — folder instruction integration", () => {
+  it("folder.instruction is prepended to the system message", async () => {
+    // Create folder + with instruction
     const [folder] = await db
       .insert(folders)
       .values({
@@ -79,7 +79,7 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
       .returning();
     createdFolderIds.push(folder.id);
 
-    // スレッド作成 + フォルダ割当 + スレッド個別 systemPrompt
+    // Create thread + assign folder + thread-specific systemPrompt
     const [thread] = await db
       .insert(threads)
       .values({
@@ -93,11 +93,11 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
 
     const res = await POST(chatReq(thread.id, "こんにちは"));
     expect(res.status).toBe(200);
-    await res.text(); // ストリーム消費
+    await res.text(); // consume stream
 
-    // system message に instruction と systemPrompt 両方が含まれる
-    // getEnvContext() の "Current date:" メッセージが先頭に来るため、
-    // プロンプト系 system message を特定する。
+    // Both instruction and systemPrompt are included in the system message.
+    // Since getEnvContext()'s "Current date:" message comes first,
+    // we identify the prompt-related system message specifically.
     const systemMessages = capturedMessages.filter((m) => m.role === "system");
     expect(systemMessages.length).toBeGreaterThan(0);
     const promptSystem = String(
@@ -105,13 +105,13 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
     );
     expect(promptSystem).toContain("丁寧な敬語で回答してください");
     expect(promptSystem).toContain("簡潔に答えて");
-    // instruction が先頭に来る
+    // instruction comes first
     expect(promptSystem.indexOf("丁寧な敬語")).toBeLessThan(
       promptSystem.indexOf("簡潔に答えて"),
     );
   }, 30_000);
 
-  it("folder.instruction が null の場合は thread.systemPrompt のみ", async () => {
+  it("when folder.instruction is null, only thread.systemPrompt is used", async () => {
     const [folder] = await db
       .insert(folders)
       .values({ name: "空フォルダ", userId: "test-user-id", instruction: null })
@@ -140,7 +140,7 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
     expect(promptSystem).toBe("短く答えて");
   }, 30_000);
 
-  it("フォルダ未所属スレッドは thread.systemPrompt のみ", async () => {
+  it("threads without a folder use only thread.systemPrompt", async () => {
     const [thread] = await db
       .insert(threads)
       .values({ title: "no folder", userId: "test-user-id", systemPrompt: "通常プロンプト" })
@@ -159,8 +159,8 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
     expect(promptSystem).toBe("通常プロンプト");
   }, 30_000);
 
-  it("whitespace-only instruction は systemContent に含まれない", async () => {
-    // DB に直接 whitespace-only instruction を仕込む（API 経由だと trim されてしまうため）
+  it("whitespace-only instruction is excluded from systemContent", async () => {
+    // Set up whitespace-only instruction directly in DB (API would trim it)
     const [folder] = await db
       .insert(folders)
       .values({ name: "空白フォルダ", userId: "test-user-id", instruction: "   " })
@@ -187,7 +187,7 @@ describe("POST /api/chat — フォルダ Instruction 結合", () => {
     const promptSystem = String(
       systemMessages.find((m) => !String(m.content).startsWith("Current date:"))?.content ?? "",
     );
-    // whitespace-only instruction は除外され、systemPrompt のみになる
+    // whitespace-only instruction is excluded, only systemPrompt remains
     expect(promptSystem).toBe("有効プロンプト");
   }, 30_000);
 });

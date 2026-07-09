@@ -35,7 +35,7 @@ function jsonReq(method: string, body?: unknown): Request {
 }
 
 describe("GET /api/skills", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await GET();
     expect(res.status).toBe(401);
@@ -43,25 +43,25 @@ describe("GET /api/skills", () => {
 });
 
 describe("POST /api/skills", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await POST(jsonReq("POST", { name: "x", content: "y" }));
     expect(res.status).toBe(401);
   });
 
-  it("name 必須 → 400", async () => {
+  it("name is required → 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const res = await POST(jsonReq("POST", { content: "y" }));
     expect(res.status).toBe(400);
   });
 
-  it("content 必須 → 400", async () => {
+  it("content is required → 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const res = await POST(jsonReq("POST", { name: "x" }));
     expect(res.status).toBe(400);
   });
 
-  it("不正 JSON は 400", async () => {
+  it("invalid JSON returns 400", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const res = await POST(
       new Request("http://localhost/api/skills", {
@@ -73,7 +73,7 @@ describe("POST /api/skills", () => {
     expect(res.status).toBe(400);
   });
 
-  it("embedding source に name + trigger + tags + content を含む", async () => {
+  it("embedding source includes name + trigger + tags + content", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     mockEmbedText.mockResolvedValue([0.1, 0.2, 0.3]);
     mockHashContent.mockReturnValue("hash123");

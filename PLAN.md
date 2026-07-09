@@ -1,211 +1,211 @@
-# UmansChat — 設計 & 実装計画
+# UmansChat — Design & Implementation Plan
 
-ChatGPT ライクなチャットウィンドウ。UmansAI / OpenAI 互換 LLM と会話。
-PostgreSQL + pgvector で RDB とベクトルを1DB ハイブリッド運用。
-メッセージ編集は ChatGPT 式の枝分かれ。UI はミニマル自作。
+A ChatGPT-like chat window. Converse with UmansAI / OpenAI-compatible LLMs.
+Uses PostgreSQL + pgvector for hybrid RDB + vector operations in a single database.
+Message editing follows the ChatGPT-style branching model. UI is minimal and hand-built.
 
-## 確定事項
+## Confirmed Decisions
 
-| 項目 | 決定 |
+| Item | Decision |
 |---|---|
-| フロント | Next.js 15 (App Router) + React 19 + TypeScript + Tailwind |
-| バックエンド | Route Handlers / OpenAI 互換 SDK（baseURL 切替） |
-| ストレージ | PostgreSQL + `pgvector`（1DB ハイブリッド） |
+| Frontend | Next.js 15 (App Router) + React 19 + TypeScript + Tailwind |
+| Backend | Route Handlers / OpenAI-compatible SDK (switchable baseURL) |
+| Storage | PostgreSQL + `pgvector` (single-DB hybrid) |
 | ORM | Drizzle ORM |
-| ベクトル用途 | C：セマンティック検索 + 長期記憶 RAG |
-| メッセージ編集 | 枝分かれ（親ポインタツリー、`threads.current_leaf_id`） |
-| デザイン | ミニマル自作（モノクロ + 1アクセント、罫線仕切り、細サイドバー） |
-| 実行 | Docker Compose（Next + Postgres） |
+| Vector use | Semantic search + long-term memory RAG |
+| Message editing | Branching (parent-pointer tree, `threads.current_leaf_id`) |
+| Design | Minimal, hand-built (monochrome + 1 accent, divider lines, narrow sidebar) |
+| Runtime | Docker Compose (Next + Postgres) |
 
-## アーキテクチャ
+## Architecture
 
 ```
-Browser ──> Next.js Route Handlers ──> OpenAI 互換 LLM (env: LLM_BASE_URL)
+Browser ──> Next.js Route Handlers ──> OpenAI-compatible LLM (env: LLM_BASE_URL)
    │             │
    │             v
    │      PostgreSQL + pgvector
    │       - threads (RDB)
-   │       - messages (RDB, parent_id 自己参照でツリー)
-   │       - embeddings (vector(1536))  -- RAG/検索用
+   │       - messages (RDB, parent_id self-reference for tree)
+   │       - embeddings (vector(1536))  -- for RAG/search
    │
-   └─ localStorage: オフラインキャッシュ（任意）
+   └─ localStorage: offline cache (optional)
 ```
 
-### データモデル概要
+### Data Model Overview
 
 ```
 threads
   id, title, system_prompt, model, current_leaf_id, created_at, updated_at
 
 messages
-  id, thread_id, parent_id (自己参照, NULL=root), role, content,
+  id, thread_id, parent_id (self-reference, NULL=root), role, content,
   created_at
-  -- 枝分かれ: 編集/再生成は新しいレコードを作り parent_id で繋ぐ
+  -- Branching: edit/regenerate creates a new record and links via parent_id
 
 embeddings
   id, message_id, content_hash, embedding vector(1536), model, created_at
 ```
 
-### 枝分かれの挙動
+### Branching Behavior
 
-- ユーザー発言を編集 → 元メッセージは残し、新しい message (parent_id=同じ親) を作成。
-- `threads.current_leaf_id` を新しい方に更新。サイドバーで枝を選択可能。
-- 再生成も同じ仕組み：assistant メッセージを新規作成、parent_id はユーザー発言。
+- Edit a user message → the original message is kept; a new message (parent_id=same parent) is created.
+- `threads.current_leaf_id` is updated to the new message. Branches can be selected in the sidebar.
+- Regeneration uses the same mechanism: a new assistant message is created, with parent_id pointing to the user message.
 
-## フェーズ
+## Phases
 
 ### Phase 0: Scaffold
-- Next.js + TS + Tailwind 初期化
-- Docker Compose（Next + Postgres with pgvector）
-- Drizzle スキーマ + 初回マイグレーション
-- スケルトンレイアウト（サイドバー + メイン）
+- Initialize Next.js + TS + Tailwind
+- Docker Compose (Next + Postgres with pgvector)
+- Drizzle schema + initial migration
+- Skeleton layout (sidebar + main)
 
 ### Phase 1: Streaming chat ✅
-- 単一スレッドのチャット UI（メッセージリスト + 入力欄）
-- `/api/chat` Route Handler、SSE でストリーミング
-- OpenAI 互換クライアント（`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` env）
-- 自動テスト: Vitest + React Testing Library（実 API で SSE 疎通検証含む、30 tests green）
+- Single-thread chat UI (message list + input field)
+- `/api/chat` Route Handler, streaming via SSE
+- OpenAI-compatible client (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` env)
+- Automated tests: Vitest + React Testing Library (includes SSE verification with real API, 30 tests green)
 
 ### Phase 2: Threads + persistence ✅
-- サイドバー：スレッド CRUD（作成/選択/リネーム/削除）
-- メッセージ Postgres 永続化（/api/chat が user/assistant を DB に保存）
-- 楽観更新（state + fetch、SWR/React Query は最適化フェーズで検討）
-- title 自動生成（初回 user 発言から先頭40字）
-- 自動テスト: 55 tests green（実 API SSE + DB 永続化含む）
+- Sidebar: thread CRUD (create/select/rename/delete)
+- Message Postgres persistence (/api/chat saves user/assistant to DB)
+- Optimistic updates (state + fetch; SWR/React Query considered for optimization phase)
+- Auto-generate title (first 40 chars of initial user message)
+- Automated tests: 55 tests green (includes real API SSE + DB persistence)
 
 ### Phase 3: Markdown + theme ✅
 - `react-markdown` + `remark-gfm` + `rehype-highlight` + `rehype-katex` (KaTeX)
-- `next-themes` でダークモード（system / light / dark 切替）
-- シンタックスハイライト (highlight.js github-dark)、数式 ($...$ / $$...$$)
-- 自動テスト: 75 tests green（Markdown 10 tests + ThemeToggle 4 tests 追加）
+- Dark mode via `next-themes` (system / light / dark toggle)
+- Syntax highlighting (highlight.js github-dark), math ($...$ / $$...$$)
+- Automated tests: 75 tests green (Markdown 10 tests + ThemeToggle 4 tests added)
 ### Phase 4: System prompt + model ✅
-- スレッド単位 system prompt 編集（折りたたみ欄）
-- モデルセレクタ（LLM_MODELS env で候補リスト、GET /api/models）
-- useChat に updateThread 追加（PATCH /api/threads?id=...）
-- 自動テスト: 88 tests green（ThreadSettings 9 tests + models API 4 tests 追加）
+- Per-thread system prompt editing (collapsible field)
+- Model selector (candidate list via LLM_MODELS env, GET /api/models)
+- Added updateThread to useChat (PATCH /api/threads?id=...)
+- Automated tests: 88 tests green (ThreadSettings 9 tests + models API 4 tests added)
 
 ### Phase 5: Stop / regenerate / edit ✅
-- `AbortController` で生成停止（停止ボタン）
-- 再生成ボタン → parentMessageId から新しい assistant 枝を生成
-- メッセージ編集 → 新しい user 兄弟枝 + assistant 応答
-- 枝ナビ `‹ 1/2 ›` セレクタ（siblingGroups で same parentId をグループ化）
-- チャット API 3 モード対応: send / regenerate / edit
-- `buildContextChain()` で parent chain を遡り LLM context 構築
-- `threads.currentLeafId` で表示中の枝を追跡
-- 自動テスト: 92 tests green（枝分かれ 4 tests 追加: siblings, switchBranch, regenerate, editMessage）
+- Stop generation via `AbortController` (stop button)
+- Regenerate button → generates a new assistant branch from parentMessageId
+- Message editing → creates a new user sibling branch + assistant response
+- Branch navigation `‹ 1/2 ›` selector (group by same parentId in siblingGroups)
+- Chat API supports 3 modes: send / regenerate / edit
+- `buildContextChain()` traces the parent chain to build LLM context
+- `threads.currentLeafId` tracks the currently displayed branch
+- Automated tests: 92 tests green (branching 4 tests added: siblings, switchBranch, regenerate, editMessage)
 
 ### Phase 6: File attachments ✅
-- 画像：base64 dataURL として DB 保存、vision モデルへ inline 渡し
-- PDF：`pdf-parse` でテキスト抽出、LLM context にテキストパートとして挿入
-- テキスト/JSON/コード：UTF-8 で読み込み、LLM context に挿入
-- `attachments` テーブル（threadId + nullable messageId）
-- `POST /api/upload`（multipart/form-data）+ chat API で `attachmentIds` リンク
-- `AttachmentBar` コンポーネント（サムネイル + 削除ボタン）
-- 📎 ファイル添付ボタン（複数選択可、10MB 制限）
-- 自動テスト: 100 tests green（AttachmentBar 8 tests 追加）
+- Images: stored as base64 dataURL in DB, passed inline to vision models
+- PDF: text extraction via `pdf-parse`, inserted as text part into LLM context
+- Text/JSON/code: read as UTF-8, inserted into LLM context
+- `attachments` table (threadId + nullable messageId)
+- `POST /api/upload` (multipart/form-data) + link via `attachmentIds` in chat API
+- `AttachmentBar` component (thumbnail + delete button)
+- 📎 File attachment button (multiple selection, 10MB limit)
+- Automated tests: 100 tests green (AttachmentBar 8 tests added)
 
 ### Phase 7: Vector RAG + search ✅
-- `@xenova/transformers` (all-MiniLM-L6-v2, 384次元) でローカル embedding
-- 応答完了後に user + assistant メッセージを非同期 embed（contentHash で重複回避）
-- `POST /api/search`: pgvector cosine distance でスレッド横断セマンティック検索
-- RAG: 送信時に他スレッドから top-5 類似発言を検索し system context に注入（類似度 > 0.5）
-- `SearchBar` コンポーネント（サイドバー、ドロップダウン結果、類似度%表示）
-- Dockerfile: `.dockerignore` 追加、バンドル sharp 削除で transformers.js 動作
-- 自動テスト: 110 tests green（embed 4 tests + SearchBar 6 tests 追加）
+- Local embedding via `@xenova/transformers` (all-MiniLM-L6-v2, 384 dimensions)
+- Asynchronously embed user + assistant messages after response completion (dedup via contentHash)
+- `POST /api/search`: cross-thread semantic search via pgvector cosine distance
+- RAG: on send, search top-5 similar messages from other threads and inject into system context (similarity > 0.5)
+- `SearchBar` component (sidebar, dropdown results, similarity % display)
+- Dockerfile: added `.dockerignore`, removed bundled sharp for transformers.js to work
+- Automated tests: 110 tests green (embed 4 tests + SearchBar 6 tests added)
 
 ### Phase 8: UI polish ✅
-- モバイルサイドバー（ハンバーガーボタン + オーバーレイ + Esc 閉じる）
-- レスポンシブ: `sm:` / `md:` ブレイクポイントで padding, gap, max-width 調整
+- Mobile sidebar (hamburger button + overlay + Esc to close)
+- Responsive: adjust padding, gap, max-width at `sm:` / `md:` breakpoints
 - a11y: ARIA labels, roles, aria-live, aria-expanded, aria-controls, aria-hidden
-- focus-visible アウトライン（WCAG AA準拠）, コントラスト改善
-- 自動テスト: 119 tests green（ChatShell 9 tests 追加）
+- focus-visible outline (WCAG AA compliant), contrast improvements
+- Automated tests: 119 tests green (ChatShell 9 tests added)
 
-### Phase 9: URL スクレイピング + IP ブロック回避 ✅
-- Scrapling（Python）FastAPI microservice（`scraper/`）で Web ページ取得
-  - `AsyncFetcher.get()` が TLS fingerprint impersonation（`impersonate='chrome'`）+ `stealthy_headers=True` + `retries=3` を組み込み
-  - robots.txt 尊重（`User-agent: *` ブロックの Disallow、fail-open）
-  - docker-compose に `scraper` サービス追加（port 8000）
-- `pages` + `page_embeddings` テーブル追加（pgvector 384次元、HNSW インデックス）
-- `POST /api/scrape`: URL 取り込み → スクレイプ → embed → 恒久ナレッジ化（contentHash でキャッシュ）
-- `POST /api/search` に `pages` フィールド追加（スレッド横断ページ検索）
-- `findRelevantMessages()` にページ RAG 注入（類似度 > 0.3、メッセージは > 0.5）
-- `UrlInput` コンポーネント（サイドバー、Enter で取り込み）
-- `SearchBar` に 🌐 Web知識 セクション追加（ページ結果を外部リンク表示）
-- vitest pool を threads に変更（sharp native module が forks pool でクラッシュするため）
-- 自動テスト: 152 tests green（scraper 9 + scrape route 8 + search route 3 + UrlInput 6 + SearchBar 2 追加、Python 15+1skip）
+### Phase 9: URL scraping + IP block avoidance ✅
+- Scrapling (Python) FastAPI microservice (`scraper/`) for web page fetching
+  - `AsyncFetcher.get()` combines TLS fingerprint impersonation (`impersonate='chrome'`) + `stealthy_headers=True` + `retries=3`
+  - Respects robots.txt (disallow for `User-agent: *` blocks, fail-open)
+  - Added `scraper` service to docker-compose (port 8000)
+- Added `pages` + `page_embeddings` tables (pgvector 384-dim, HNSW index)
+- `POST /api/scrape`: URL ingestion → scrape → embed → persist as knowledge (cached via contentHash)
+- Added `pages` field to `POST /api/search` (cross-thread page search)
+- Page RAG injection in `findRelevantMessages()` (similarity > 0.3, messages > 0.5)
+- `UrlInput` component (sidebar, Enter to ingest)
+- Added 🌐 Web Knowledge section to `SearchBar` (page results shown as external links)
+- Changed vitest pool to threads (sharp native module crashes with forks pool)
+- Automated tests: 152 tests green (scraper 9 + scrape route 8 + search route 3 + UrlInput 6 + SearchBar 2 added, Python 15+1skip)
 
-### Phase 10: Web 検索 + 自動知識化 ✅
-- SearXNG（セルフホスト metasearch）+ Tor プロキシを docker-compose に追加
-  - `searxng` サービス: JSON API 有効化（`settings.yml` で `formats: [html, json]`）
-  - `tor` サービス: SOCKS5 プロキシ（`dperson/torproxy`、`SCRAPE_PROXY` env で動的切り替え）
-  - `app` / `scraper` に `SEARXNG_URL` / `TOR_PROXY` / `SCRAPE_PROXY` env 追加
-- `scraper/main.py` に `POST /search` エンドポイント追加
-  - SearXNG に検索依頼（httpx で JSON API）→ 上位 URL を `asyncio.gather` で並列スクレイピング
-  - `scrape_url_safe()` で既存の `is_safe_host` / `extract_title` / `extract_text` を再利用（SSRF 保護継承）
-  - `SCRAPE_PROXY` で Tor 経由スクレイピングを切り替え可能
-- `src/lib/scraper.ts` に `searchWeb()` + `SourceInfo` / `WebSearchResult` 型追加
-- `src/lib/pageStore.ts` 新規: `upsertPage()` で pages + page_embeddings の upsert + embed を共通化
-  - `/api/scrape` route を `upsertPage` 呼び出しにリファクタ（重複排除）
-- `/api/chat` route: 送信時に Web 検索 → 上位3件をスクレイピング → pages テーブルに知識化 → RAG 注入
-  - SSE `sources` イベント追加（`send("sources", { sources })` を `start` の直後に送信）
-- `useChat` hook: `sources` state + SSE `sources` イベント処理（送信/切替時にクリア）
-- `ChatWindow`: 最新 assistant メッセージ下に「📚 参照元: N件」表示（外部リンク `target="_blank"`）
-- Tor 切り替え: `SCRAPE_PROXY` env で scraper 側は動的、SearXNG 側は `settings.yml` の `outgoing.using_tor_proxy` 編集で切り替え
-- 自動テスト: 161 vitest green（searchWeb 4 + pageStore 3 + useChat sources 1 + chat route sources 1 + ChatWindow 修正、Python 34+2skip: search endpoint 3 + scrape_url_safe 3 追加）
-- GUI 設定モーダル: サイドバーの⚙️ボタンから全 `.env` 設定を GUI で編集可能
-  - `GET/POST /api/settings`: 全設定取得 + `.env` へ保存 + 次元変更時の vector 列マイグレーション
-  - `SettingsModal` コンポーネント: 5セクション（LLM / 埋め込み / Web検索 / Tor / DB）12項目
-  - LLM 設定: BASE_URL, API_KEY, MODEL, MODELS, **Thinking Effort**（low/medium/high）
-  - 埋め込みモデル: 4候補から選択、次元変更時はマイグレーション確認
-  - Web 検索: 参照元件数, SCRAPER_URL, SEARXNG_URL
-  - Tor プロキシ: TOR_PROXY, SCRAPE_PROXY（空 = Tor なし、socks5://tor:9050 = Tor あり）
+### Phase 10: Web search + auto-knowledge ✅
+- Added SearXNG (self-hosted metasearch) + Tor proxy to docker-compose
+  - `searxng` service: JSON API enabled (`formats: [html, json]` in `settings.yml`)
+  - `tor` service: SOCKS5 proxy (`dperson/torproxy`, dynamic switching via `SCRAPE_PROXY` env)
+  - Added `SEARXNG_URL` / `TOR_PROXY` / `SCRAPE_PROXY` env to `app` / `scraper`
+- Added `POST /search` endpoint to `scraper/main.py`
+  - Sends search request to SearXNG (JSON API via httpx) → parallel scraping of top URLs via `asyncio.gather`
+  - `scrape_url_safe()` reuses existing `is_safe_host` / `extract_title` / `extract_text` (SSRF protection inherited)
+  - `SCRAPE_PROXY` toggles Tor-based scraping
+- Added `searchWeb()` + `SourceInfo` / `WebSearchResult` types to `src/lib/scraper.ts`
+- New `src/lib/pageStore.ts`: `upsertPage()` consolidates upsert + embed for pages + page_embeddings
+  - Refactored `/api/scrape` route to call `upsertPage` (deduplication)
+- `/api/chat` route: on send, performs web search → scrapes top 3 results → stores as knowledge in pages table → RAG injection
+  - Added SSE `sources` event (`send("sources", { sources })` sent right after `start`)
+- `useChat` hook: `sources` state + SSE `sources` event handling (cleared on send/switch)
+- `ChatWindow`: displays "📚 Sources: N" below the latest assistant message (external links with `target="_blank"`)
+- Tor toggle: `SCRAPE_PROXY` env handles the scraper side dynamically; SearXNG side toggled by editing `outgoing.using_tor_proxy` in `settings.yml`
+- Automated tests: 161 vitest green (searchWeb 4 + pageStore 3 + useChat sources 1 + chat route sources 1 + ChatWindow fix, Python 34+2skip: search endpoint 3 + scrape_url_safe 3 added)
+- GUI settings modal: all `.env` settings editable via GUI from the ⚙️ button in the sidebar
+  - `GET/POST /api/settings`: fetch all settings + save to `.env` + vector column migration on dimension change
+  - `SettingsModal` component: 5 sections (LLM / Embedding / Web Search / Tor / DB) with 12 items
+  - LLM settings: BASE_URL, API_KEY, MODEL, MODELS, **Thinking Effort** (low/medium/high)
+  - Embedding model: select from 4 candidates, migration confirmation on dimension change
+  - Web search: max results count, SCRAPER_URL, SEARXNG_URL
+  - Tor proxy: TOR_PROXY, SCRAPE_PROXY (empty = no Tor, socks5://tor:9050 = Tor enabled)
   - Database: DATABASE_URL
-  - 次元変更時は警告表示 → チェックボックスで確認 → vector 列再作成（HNSW インデックス含む）
-- Thinking Effort: `THINKING_EFFORT` env で LLM の推論強度を制御（chat route で `reasoning_effort` パラメータとして送信）
-- `.env` マウント: ホストの `.env` をコンテナにマウント（`volumes: ./.env:/app/.env`）+ `env_file` で読み込み
-  - GUI で変更した `.env` が再ビルド後も保持される（イメージに焼き込まれない）
-- 埋め込みモデル環境変数化: `EMBED_MODEL` / `EMBED_DIM` / `WEB_SEARCH_MAX_RESULTS` で動的切替
-  - `embed.ts` / `schema.ts` / `pageStore.ts` / chat route が env を参照
-  - 候補: all-MiniLM-L6-v2 (384), paraphrase-multilingual-MiniLM-L12-v2 (384, 推奨), multilingual-e5-small (384), multilingual-e5-base (768)
-- 検索精度改善: 日本語の長い質問文をそのまま SearXNG に投げると精度が落ちる問題を解決
-  - `extractSearchQuery()`: LLM で質問から検索クエリをキーワード化（「Project Motor Racingの2.0でて評価良いらしいんだけど本当？」→ "Project Motor Racing 2.0 評価" 等）。失敗時は元の質問にフォールバック
-  - スクレイプ本文の注入を 2000→4000 文字に拡張し、「2.0」等の重要情報が欠落しないよう救済
-  - スクレイプ失敗ページは SearXNG の snippet をフォールバックとして注入（情報ゼロを回避）
-  - `findRelevantMessages()` の `page_embeddings` 検索を廃止: Web 検索で直接注入したページと重複・ノイズが増えるため。過去発言検索のみに専念
-- E2E 検証済み: SearXNG 検索 → 並列スクレイピング → `sources` SSE → フロントで参照元3件表示
-- GUI 検証済み: 設定モーダルで全設定編集 → Thinking Effort を high に変更 → 保存 → 再ビルド後も設定保持確認
+  - On dimension change: warning shown → checkbox confirmation → recreate vector column (including HNSW index)
+- Thinking Effort: controls LLM reasoning intensity via `THINKING_EFFORT` env (sent as `reasoning_effort` parameter in chat route)
+- `.env` mount: mounts host `.env` into container (`volumes: ./.env:/app/.env`) + loaded via `env_file`
+  - GUI-modified `.env` persists across rebuilds (not baked into the image)
+- Embedding model environment variable support: dynamic switching via `EMBED_MODEL` / `EMBED_DIM` / `WEB_SEARCH_MAX_RESULTS`
+  - `embed.ts` / `schema.ts` / `pageStore.ts` / chat route reference env
+  - Candidates: all-MiniLM-L6-v2 (384), paraphrase-multilingual-MiniLM-L12-v2 (384, recommended), multilingual-e5-small (384), multilingual-e5-base (768)
+- Search accuracy improvement: solved the issue where sending long Japanese questions directly to SearXNG degrades accuracy
+  - `extractSearchQuery()`: uses LLM to extract keywords from the question (e.g., "Is Project Motor Racing 2.0 getting good reviews?" → "Project Motor Racing 2.0 review"). Falls back to the original question on failure
+  - Expanded scraped body text injection from 2000→4000 chars to prevent loss of key info like "2.0"
+  - Failed scrape pages fall back to SearXNG snippets (avoids zero-information results)
+  - Removed `page_embeddings` search from `findRelevantMessages()`: duplicates and noise increase when combined with pages directly injected by web search. Now focuses solely on past message search
+- E2E verified: SearXNG search → parallel scraping → `sources` SSE → 3 sources displayed in frontend
+- GUI verified: edited all settings in settings modal → changed Thinking Effort to high → saved → confirmed settings persist after rebuild
 
-### Phase 11: UI リフレッシュ — 深淵グラデ + glass-card ✅
-- 前回フェーズ（Slate Lavender + glassmorphism）の「のっぺり」を解消
-  - `--background` を `#0d1117` → `#0a0e17`（一段暗く）、`--muted` を `#161a26` → `#1c2235`（コントラスト比 1.09→1.5 で浮き立たせ）
-  - 新変数 `--glow`（accent 発光用、ダーク `rgba(129,140,248,0.15)` / ライト `rgba(99,102,241,0.12)`）を `@theme inline` に `--color-glow` として登録
-- body 背景: alpha 倍増の radial-gradient 2層（`background-attachment: fixed, fixed` でスクロール固定）
-  - `.dark body` は `background-image` のみ上書きし、`background-attachment` と `background-size` は継承
-  - **ノイズ SVG は撤去**: 当初 `feTurbulence` ノイズを追加したが、`<rect width="100%">` が不透明ノイズを全面描画して「砂嵐」状態になった（プランの「薄く乗る」前提が技術的に誤り）。グラデ＋glass-card で深みは十分なので削除
-- `.glass-card` ユーティリティ: `inset 0 1px 0 0` の inner highlight + 低外影で「厚み」を演出（ライト=白ハイライト、ダーク=ラベンダーハイライト）
-- 適用箇所: Sidebar aside / ThreadRow 選択行 / ChatWindow assistant バブル・入力欄上向き影・送信ボタン `--glow` 発光・user バブル `--glow` 外影・参照元・ThinkingBlock / 3モーダル本文・SearchBar ドロップダウン・ContextMenu ポータル
-  - `shadow-*` と `glass-card` の box-shadow 衝突を回避: `glass-card` 適用要素からは `shadow-*` を削除
-- 安全リスト維持: テキスト・aria・role・`text-red-500`・`.h-px.bg-border` は一切変更せず、className/CSS のみ
-- 検証: typecheck green / build green / Docker 再ビルド + 本番 CSS チャンクで feTurbulence=0（砂嵐解消）、glass-card・radial-gradient・0a0e17・1c2235・background-attachment:fixed,fixed 確認済み
+### Phase 11: UI refresh — abyssal gradient + glass-card ✅
+- Resolved the "flat" look from the previous phase (Slate Lavender + glassmorphism)
+  - `--background` from `#0d1117` → `#0a0e17` (one step darker), `--muted` from `#161a26` → `#1c2235` (contrast ratio 1.09→1.5, making elements stand out)
+  - New variable `--glow` (for accent glow, dark `rgba(129,140,248,0.15)` / light `rgba(99,102,241,0.12)`) registered as `--color-glow` in `@theme inline`
+- Body background: two-layer radial-gradient with doubled alpha (`background-attachment: fixed, fixed` for scroll-lock)
+  - `.dark body` overrides only `background-image`; inherits `background-attachment` and `background-size`
+  - **Noise SVG removed**: initially added `feTurbulence` noise, but `<rect width="100%">` rendered opaque noise across the entire surface, creating a "sandstorm" effect (the plan's "subtle overlay" assumption was technically incorrect). The gradient + glass-card provide sufficient depth, so it was removed
+- `.glass-card` utility: `inset 0 1px 0 0` inner highlight + subtle outer shadow for "depth" (light = white highlight, dark = lavender highlight)
+- Applied to: Sidebar aside / ThreadRow selected row / ChatWindow assistant bubble · input field upward shadow · send button `--glow` glow · user bubble `--glow` outer shadow · sources · ThinkingBlock / 3 modal bodies · SearchBar dropdown · ContextMenu portal
+  - Avoided `shadow-*` and `glass-card` box-shadow conflicts: removed `shadow-*` from elements with `glass-card`
+- Safe list maintained: text · aria · role · `text-red-500` · `.h-px.bg-border` all unchanged — only className/CSS
+- Verification: typecheck green / build green / Docker rebuild + production CSS chunk confirmed feTurbulence=0 (sandstorm resolved), glass-card · radial-gradient · 0a0e17 · 1c2235 · background-attachment:fixed,fixed confirmed
 
-### Phase 12: 会話記憶システム — fact/working 記憶の抽出・検索・注入 ✅
-- `embeddings` テーブル（死んだテーブル: 書き込み・読み込みなし）を削除し、新規 `memories` テーブルを追加
-  - `kind` (fact/working), `content`, `embedding`, `importance`, `suppressedAt` (論理削除), `folderId` (スコープ判定)
-  - HNSW インデックスで cosine 類似検索
-- 記憶生成 (`src/lib/memory.ts`): アシスタント応答完了後に LLM で会話を要約・分類
-  - fact (不変情報) / working (一時文脈) で分類
-  - new / replace (suppressedAt で論理削除) / merge (LLM で content 統合) の action 判定
-  - fire-and-forget で非同期実行（ストリーム完了を待たせない）
-- 記憶検索 (`src/lib/memoryStore.ts`): 次回送信時に pgvector 検索 → LLM rerank → recency スコアで top-5
-  - `folders.memoryScope` が "folder" の場合は同フォルダのみ検索、"global" は全スレッド横断
-  - recency: `importance * 0.6 + exp(-age_days / 14) * 0.4`（2週間で半減）
-- chat route 統合: `buildFinalMessages` に memory system message を注入（systemPrompt 直後、history 前）
-- search route 切り替え: `embeddings` → `memories` テーブル、レスポンス型 `messageId`→`memoryId`/`role`→`kind`
-- settings route 切り替え: `embeddings` → `memories` の vector 列次元管理
-- マイグレーション `0005_memories.sql`: CREATE memories + DROP embeddings CASCADE + HNSW index
-- テスト: 31 tests green（memory.test.ts 6 + memoryStore.test.ts 4 + search 4 + settings 4 + chat 11 + SearchBar 2）
+### Phase 12: Conversation memory system — fact/working memory extraction, retrieval, injection ✅
+- Removed the `embeddings` table (dead table: no reads or writes) and added a new `memories` table
+  - `kind` (fact/working), `content`, `embedding`, `importance`, `suppressedAt` (soft delete), `folderId` (scope determination)
+  - HNSW index for cosine similarity search
+- Memory generation (`src/lib/memory.ts`): summarizes and classifies conversations via LLM after assistant response completes
+  - Classifies as fact (immutable info) / working (temporary context)
+  - Action determination: new / replace (soft delete via suppressedAt) / merge (integrate content via LLM)
+  - Runs asynchronously as fire-and-forget (does not block stream completion)
+- Memory retrieval (`src/lib/memoryStore.ts`): on next send, performs pgvector search → LLM rerank → top-5 by recency score
+  - If `folders.memoryScope` is "folder", searches only within the same folder; "global" searches across all threads
+  - recency: `importance * 0.6 + exp(-age_days / 14) * 0.4` (halves every 2 weeks)
+- chat route integration: injects memory system message into `buildFinalMessages` (right after systemPrompt, before history)
+- search route switch: `embeddings` → `memories` table, response type `messageId`→`memoryId`/`role`→`kind`
+- settings route switch: `embeddings` → `memories` for vector column dimension management
+- Migration `0005_memories.sql`: CREATE memories + DROP embeddings CASCADE + HNSW index
+- Tests: 31 tests green (memory.test.ts 6 + memoryStore.test.ts 4 + search 4 + settings 4 + chat 11 + SearchBar 2)
 
-## 環境変数（想定）
+## Environment Variables (Expected)
 
 ```
 DATABASE_URL=postgres://...
@@ -218,17 +218,18 @@ SCRAPER_URL=http://localhost:8000       # or http://scraper:8000 in Docker
 SEARXNG_URL=http://localhost:8080       # or http://searxng:8080 in Docker
 TOR_PROXY=                               # empty = no Tor, socks5://tor:9050 = Tor
 SCRAPE_PROXY=                            # empty = no Tor, socks5://tor:9050 = Tor
-# 埋め込みモデル（transformers.js）:
-#   Xenova/all-MiniLM-L6-v2               (384次元, 英語中心, デフォルト)
-#   Xenova/paraphrase-multilingual-MiniLM-L12-v2 (384次元, 多言語・日本語対応, 推奨)
-#   Xenova/multilingual-e5-base            (768次元, 多言語, 高精度)
-# モデル切替時は EMBED_DIM を合わせて変更 + DB マイグレーションが必要
+# Embedding models (transformers.js):
+#   Xenova/all-MiniLM-L6-v2               (384-dim, English-focused, default)
+#   Xenova/paraphrase-multilingual-MiniLM-L12-v2 (384-dim, multilingual incl. Japanese, recommended)
+#   Xenova/multilingual-e5-base            (768-dim, multilingual, high accuracy)
+# When switching models, update EMBED_DIM accordingly + DB migration required
 EMBED_MODEL=Xenova/all-MiniLM-L6-v2
 EMBED_DIM=384
-# Web 検索の参照元数（チャット送信時に取得・スクレイピングする件数）
+# Number of web search sources to fetch and scrape on chat send
 WEB_SEARCH_MAX_RESULTS=3
+```
 
-## 実行
+## Running
 
 ```
 docker compose up -d

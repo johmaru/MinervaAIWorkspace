@@ -17,9 +17,9 @@ function renderHook<T>(callback: () => T) {
   return rtlRenderHook(callback, { wrapper });
 }
 
-// useThreads は /api/threads の CRUD を叩く。
-// fetch をモックして決定的な応答を返す。
-// DB との統合は route.test.ts で担保済み。
+// useThreads calls CRUD on /api/threads.
+// Mock fetch to return deterministic responses.
+// DB integration is covered by route.test.ts.
 
 const createdThreadIds: string[] = [];
 
@@ -63,8 +63,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("useThreads — 初回ロード", () => {
-  it("マウントで GET /api/threads を呼ぶ", async () => {
+describe("useThreads — initial load", () => {
+  it("calls GET /api/threads on mount", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -73,7 +73,7 @@ describe("useThreads — 初回ロード", () => {
     expect(result.current.threads[0].title).toBe("Sample");
   });
 
-  it("ロード失敗は error に設定", async () => {
+  it("sets error on load failure", async () => {
     fetchMock().mockResolvedValue(jsonResponse({ error: "x" }, 500));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -82,7 +82,7 @@ describe("useThreads — 初回ロード", () => {
 });
 
 describe("useThreads — create", () => {
-  it("POST で新規スレッドを作り一覧に先頭挿入", async () => {
+  it("creates a new thread via POST and inserts it at the top", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -98,7 +98,7 @@ describe("useThreads — create", () => {
     expect(result.current.threads[0].id).toBe("new-id");
   });
 
-  it("create 失敗は null を返し error に設定", async () => {
+  it("create failure returns null and sets error", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -114,7 +114,7 @@ describe("useThreads — create", () => {
 });
 
 describe("useThreads — rename", () => {
-  it("PATCH で title を更新し一覧に反映", async () => {
+  it("updates title via PATCH and reflects in the list", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -130,7 +130,7 @@ describe("useThreads — rename", () => {
     expect(result.current.threads[0].title).toBe("Renamed");
   });
 
-  it("rename 失敗は false を返し error に設定", async () => {
+  it("rename failure returns false and sets error", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -146,7 +146,7 @@ describe("useThreads — rename", () => {
 });
 
 describe("useThreads — move", () => {
-  it("PATCH で folderId を更新し一覧に反映", async () => {
+  it("updates folderId via PATCH and reflects in the list", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -161,14 +161,14 @@ describe("useThreads — move", () => {
     expect(ok!).toBe(true);
     expect(result.current.threads[0].folderId).toBe("folder-9");
 
-    // PATCH の URL と body
+    // PATCH URL and body
     const call = fetchMock().mock.calls[1];
     expect(call[0]).toBe("/api/threads?id=sample-id");
     expect(call[1].method).toBe("PATCH");
     expect(JSON.parse(call[1].body)).toEqual({ folderId: "folder-9" });
   });
 
-  it("move で folderId に null を設定（フォルダから外す）", async () => {
+  it("move sets folderId to null (removes from folder)", async () => {
     const inFolder = { ...sampleThread, folderId: "folder-1" };
     fetchMock().mockResolvedValue(jsonResponse([inFolder]));
     const { result } = renderHook(() => useThreads());
@@ -185,7 +185,7 @@ describe("useThreads — move", () => {
     expect(result.current.threads[0].folderId).toBeNull();
   });
 
-  it("move 失敗は false を返し error に設定", async () => {
+  it("move failure returns false and sets error", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -199,19 +199,19 @@ describe("useThreads — move", () => {
     expect(result.current.error).toMatch(/HTTP 500/);
   });
 
-  it("成功後は前の error がクリアされる", async () => {
+  it("clears previous error on success", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
 
-    // まず失敗させて error を設定
+    // First fail to set error
     fetchMock().mockResolvedValue(jsonResponse({ error: "x" }, 500));
     await act(async () => {
       await result.current.move("sample-id", "bad");
     });
     expect(result.current.error).toMatch(/HTTP 500/);
 
-    // 次に成功させると error がクリアされる
+    // Subsequent success clears error
     const moved = { ...sampleThread, folderId: "folder-9" };
     fetchMock().mockResolvedValue(jsonResponse(moved));
     await act(async () => {
@@ -222,7 +222,7 @@ describe("useThreads — move", () => {
 });
 
 describe("useThreads — remove", () => {
-  it("DELETE で一覧から除外", async () => {
+  it("removes from the list via DELETE", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
@@ -238,7 +238,7 @@ describe("useThreads — remove", () => {
 });
 
 describe("useThreads — refresh", () => {
-  it("refresh で一覧を再取得", async () => {
+  it("re-fetches the list on refresh", async () => {
     fetchMock().mockResolvedValue(jsonResponse([sampleThread]));
     const { result } = renderHook(() => useThreads());
     await waitFor(() => expect(result.current.threads).toHaveLength(1));
