@@ -25,10 +25,12 @@ import {
   createReadStream,
 } from "node:fs";
 import { join, dirname } from "node:path";
+import { getDataDir } from "@/lib/user-data";
 import { createHash } from "node:crypto";
 import { request } from "node:https";
 import { platform } from "node:os";
 import { logger } from "@/lib/logger";
+import { getConfiguredAuthUrl } from "@/lib/auth-env";
 
 const execAsync = promisify(exec);
 
@@ -58,13 +60,7 @@ function getBinaryName(): string {
 
 /** Download directory for the cloudflared binary */
 function getCloudflaredDir(): string {
-  // In the exe environment, based on the directory of process.execPath
-  // When running directly with node/bun, based on process.cwd()
-  const isCompiled =
-    process.execPath.endsWith("umanschat.exe") ||
-    process.execPath.endsWith("umanschat");
-  const appRoot = isCompiled ? dirname(process.execPath) : process.cwd();
-  return join(appRoot, "data", "cloudflared");
+  return join(getDataDir(), "cloudflared");
 }
 
 /** Determines whether running in a Docker environment */
@@ -272,7 +268,7 @@ export async function getTunnelStatus(): Promise<TunnelStatus> {
   return {
     running: await isTunnelRunning(),
     hasToken: !!process.env.TUNNEL_TOKEN,
-    authUrl: process.env.AUTH_URL || "http://localhost:3001",
+    authUrl: getConfiguredAuthUrl(),
   };
 }
 

@@ -18,6 +18,7 @@ import {
 } from "@/lib/updater";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { getDataDir } from "@/lib/user-data";
 
 describe("updater", () => {
   beforeEach(() => {
@@ -124,6 +125,18 @@ describe("updater", () => {
       await expect(
         downloadUpdate("https://example.com/zip", "1.0.0"),
       ).rejects.toThrow("Auto-update is not available in this environment");
+    });
+
+    it("uses UMANS_USER_ROOT/data for update paths when set", () => {
+      vi.stubEnv("UMANS_USER_ROOT", "/custom/user/root");
+      const dataDir = getDataDir();
+      expect(dataDir).toBe(join("/custom/user/root", "data"));
+      expect(join(dataDir, "updates")).toBe(
+        join("/custom/user/root", "data", "updates"),
+      );
+      expect(join(dataDir, ".update-pending")).toBe(
+        join("/custom/user/root", "data", ".update-pending"),
+      );
     });
   });
 });

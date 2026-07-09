@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { httpsDownload, isDockerEnv } from "@/lib/tunnel";
+import { getDataDir } from "@/lib/user-data";
 
 const GITHUB_REPO = "johmaru/UmansChat-Unofficial";
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
@@ -115,7 +116,8 @@ export async function downloadUpdate(
     throw new Error("Auto-update is not available in this environment");
   }
 
-  const updatesDir = join(process.cwd(), "data", "updates");
+  const dataDir = getDataDir();
+  const updatesDir = join(dataDir, "updates");
   const zipPath = join(updatesDir, `UmansChat-${version}-windows-x64.zip`);
   const stagingDir = join(updatesDir, "staging");
 
@@ -138,7 +140,7 @@ export async function downloadUpdate(
   );
 
   // Write marker file for the launcher to pick up
-  const markerPath = join(process.cwd(), "data", ".update-pending");
+  const markerPath = join(dataDir, ".update-pending");
   writeFileSync(markerPath, JSON.stringify({ stagingDir, version, zipPath }));
 
   return { stagingDir, version };

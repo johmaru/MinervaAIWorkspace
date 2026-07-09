@@ -1,30 +1,33 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { getUserDataRoot } from "./user-data";
 
 /**
- * cwd から親方向へ遡って既存の .env を探す。
- * Next.js standalone サーバーは process.chdir で /app/.next/standalone に
- * 移動するため、cwd 直下だとイメージレイヤ内の一時ファイルに書き込んでしまう。
- * 見つからなければ cwd 直下を返す（ローカル dev や新規作成時のフォールバック）。
+ * Searches upward from cwd for an existing .env file.
+ * Next.js standalone server uses process.chdir to move to /app/.next/standalone,
+ * so writing directly under cwd would target a temporary file in the image layer.
+ * If not found, returns cwd/.env (fallback for local dev or new file creation).
  */
 export function resolveEnvPath(): string {
+  const userRoot = getUserDataRoot();
+  if (userRoot) return join(userRoot, ".env");
   let dir = process.cwd();
   for (let i = 0; i < 10; i++) {
     const candidate = resolve(dir, ".env");
     if (existsSync(candidate)) return candidate;
     const parent = resolve(dir, "..");
-    if (parent === dir) break; // ルート到達
+    if (parent === dir) break; // Reached filesystem root
     dir = parent;
   }
   return resolve(process.cwd(), ".env");
 }
 
 /**
- * .env 値のエスケープ。
- * 全ての値をダブルクォートで囲み、内部の " / \ / 改行をバックスラッシュエスケープする。
- * 改行は \n にエスケープしてインジェクションを防止。
- * # / = / スペース等も dotenv に誤解釈されないようクォート内に入る。
- * dotenv パーサは "..." 内の \n を改行として解釈するため安全。
+ * Escapes a .env value.
+ * Wraps all values in double quotes, backslash-escaping internal " / \ / newlines.
+ * Newlines are escaped to \n to prevent injection.
+ * # / = / spaces are kept inside quotes so dotenv does not misinterpret them.
+ * The dotenv parser interprets \n inside "..." as a newline, so this is safe.
  */
 export function escapeEnvValue(value: string): string {
   if (value === "") return '""';
@@ -37,9 +40,9 @@ export function escapeEnvValue(value: string): string {
 }
 
 /**
- * .env ファイルを読み込み、指定キーの値を更新する。
- * 値は escapeEnvValue でエスケープされる。
- * 戻り値: 更新後の .env 文字列。
+ * Reads the .env file and updates the specified key values.
+ * Values are escaped via escapeEnvValue.
+ * Returns: the updated .env content string.
  */
 export function updateEnvContent(
   envContent: string,
@@ -59,8 +62,8 @@ export function updateEnvContent(
 }
 
 /**
- * .env を読み込み、指定キーを更新して書き込む。
- * resolveEnvPath で .env のパスを解決する。
+ * Reads .env, updates the specified keys, and writes back.
+ * Resolves the .env path via resolveEnvPath.
  */
 export function writeEnvUpdates(updates: Record<string, string>): string {
   const envPath = resolveEnvPath();
