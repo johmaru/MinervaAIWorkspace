@@ -77,6 +77,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_PREFIX }}-app:latest
             ${{ env.IMAGE_PREFIX }}-app:${{ needs.prepare.outputs.version }}
+          build-args: |
+            APP_VERSION=${{ needs.prepare.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -123,6 +125,7 @@ jobs:
         run: bun run pack:exe
         env:
           DATABASE_URL: ":memory:"
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
 
       - name: Zip distribution
         shell: pwsh

@@ -8,9 +8,9 @@ import { db } from "@/db";
 import { pages, pageEmbeddings, memories, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// embedText をモック: 実 embedder に依存せず、bag-of-characters で
-// 類似内容に類似ベクトルを割り当てる。検索クエリとコンテンツが
-// 文字を共有すればコサイン類似度が高くなる。
+// Mock embedText: instead of relying on the real embedder, use bag-of-characters
+// to assign similar vectors to similar content. If the search query and content
+// share characters, cosine similarity will be high.
 vi.mock("@/lib/embed", () => ({
   embedText: vi.fn().mockImplementation(async (text: string) => {
     const vec = new Array(1024).fill(0);
@@ -27,8 +27,8 @@ vi.mock("@/lib/embed", () => ({
 import { embedText, hashContent } from "@/lib/embed";
 import { POST } from "@/app/api/search/route";
 
-// ページ検索の統合テスト。事前に pages + page_embeddings を挿入し、
-// /api/search が pages フィールドを返すことを検証。
+// Integration test for page search. Inserts pages + page_embeddings beforehand,
+// then verifies that /api/search returns the pages field.
 
 const createdPageIds: string[] = [];
 
@@ -68,14 +68,14 @@ async function searchReq(query: string): Promise<Response> {
 }
 
 describe("POST /api/search", () => {
-  it("空クエリは空 results を返す", async () => {
+  it("empty query returns empty results", async () => {
     const res = await searchReq("");
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.results).toEqual([]);
   });
 
-  it("pages フィールドが含まれる", async () => {
+  it("includes pages field in response", async () => {
     const res = await searchReq("anything");
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -83,7 +83,7 @@ describe("POST /api/search", () => {
   });
 });
 
-describe("POST /api/search — ページ検索", () => {
+describe("POST /api/search — page search", () => {
   beforeAll(async () => {
     await insertPage(
       "https://search-test.example.com",
@@ -99,7 +99,7 @@ describe("POST /api/search — ページ検索", () => {
     }
   });
 
-  it("関連クエリでページがヒットする", async () => {
+  it("related query hits a page", async () => {
     const res = await searchReq("python programming");
     const data = await res.json();
     expect(data.pages.length).toBeGreaterThan(0);
@@ -113,7 +113,7 @@ describe("POST /api/search — ページ検索", () => {
   }, 60_000);
 });
 
-describe("POST /api/search — 記憶検索", () => {
+describe("POST /api/search — memory search", () => {
   const createdThreadIds: string[] = [];
   const createdMemoryIds: string[] = [];
 
@@ -148,7 +148,7 @@ describe("POST /api/search — 記憶検索", () => {
     }
   });
 
-  it("関連クエリで記憶がヒットする", async () => {
+  it("related query hits a memory", async () => {
     const res = await searchReq("FPGA 低レイヤー");
     const data = await res.json();
     expect(data.results.length).toBeGreaterThan(0);

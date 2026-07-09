@@ -33,20 +33,20 @@ function renderUrlInput(onScraped?: (title: string) => void) {
   return render(<I18nProvider><UrlInput onScraped={onScraped} /></I18nProvider>);
 }
 
-describe("UrlInput — 表示", () => {
-  it("URL 入力欄を表示", () => {
+describe("UrlInput — display", () => {
+  it("renders the URL input", () => {
     renderUrlInput();
     expect(screen.getByPlaceholderText("URL を知識化…")).toBeInTheDocument();
   });
 
-  it("🌐 アイコンとラベルがある", () => {
+  it("has a 🌐 icon and label", () => {
     renderUrlInput();
     expect(screen.getByLabelText("URL を取り込んで知識化")).toBeInTheDocument();
   });
 });
 
-describe("UrlInput — 送信", () => {
-  it("Enter で POST /api/scrape を呼ぶ", async () => {
+describe("UrlInput — submit", () => {
+  it("calls POST /api/scrape on Enter", async () => {
     const onScraped = vi.fn();
     renderUrlInput(onScraped);
     const input = screen.getByLabelText("URL を取り込んで知識化") as HTMLInputElement;
@@ -61,14 +61,14 @@ describe("UrlInput — 送信", () => {
     expect(input.value).toBe("");
   });
 
-  it("空入力は送信しない", async () => {
+  it("does not submit on empty input", async () => {
     renderUrlInput();
     const input = screen.getByLabelText("URL を取り込んで知識化") as HTMLInputElement;
     fireEvent.submit(input.form!);
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("キャッシュヒット時はメッセージが変わる", async () => {
+  it("shows a different message on cache hit", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ title: "Cached", url: "https://example.com", cached: true }),
@@ -82,7 +82,7 @@ describe("UrlInput — 送信", () => {
     });
   });
 
-  it("エラー時はエラーメッセージを表示", async () => {
+  it("displays error message on error", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: false,
       status: 500,
@@ -97,7 +97,7 @@ describe("UrlInput — 送信", () => {
     });
   });
 
-  it("通信エラー時は通信エラーメッセージ", async () => {
+  it("shows communication error message on network error", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error("network"));
     renderUrlInput();
     const input = screen.getByLabelText("URL を取り込んで知識化") as HTMLInputElement;

@@ -2,15 +2,17 @@ import type OpenAI from "openai";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { messages, skillCandidates, threads } from "@/db/schema";
+import { logger } from "@/lib/logger";
 
 /**
- * スキル候補抽出 — 会話から再利用可能なスキル候補を自動抽出。
+ * Skill candidate extraction — automatically extracts reusable skill candidates from conversations.
  *
- * ユーザーが「スキルで保存」と明示した場合は generateSkillFromConversation
- * が直接スキルを作成するが、本モジュールは全会話後に自動で候補を抽出し、
- * ユーザーが承認してからスキル化する（approval-based learning loop）。
+ * When the user explicitly says "save as skill", generateSkillFromConversation
+ * creates the skill directly, but this module automatically extracts candidates
+ * after every conversation and saves them as skills only after user approval
+ * (approval-based learning loop).
  *
- * LLM が concrete な reusable skill を認識しなかった場合は候補を作成しない。
+ * If the LLM does not recognize a concrete reusable skill, no candidate is created.
  * Max 3 candidates per conversation.
  */
 
@@ -48,9 +50,9 @@ type ExtractedCandidate = {
 };
 
 /**
- * LLM の生レスポンスから ExtractedCandidate 配列をパース。
- * markdown コードフェンスを除去し JSON をパース。
- * 不正な場合は null を返し、呼び出し元でスキップ。
+ * Parses ExtractedCandidate array from the LLM's raw response.
+ * Removes markdown code fences and parses JSON.
+ * Returns null on invalid input; the caller skips it.
  */
 export function parseCandidates(raw: string | null | undefined): ExtractedCandidate[] | null {
   if (!raw || !raw.trim()) return null;
@@ -96,14 +98,14 @@ export function parseCandidates(raw: string | null | undefined): ExtractedCandid
 }
 
 /**
- * スレッドの会話からスキル候補を抽出し draft として保存。
+ * Extracts skill candidates from a thread's conversation and saves them as drafts.
  *
- * 1. threads から userId を検証
- * 2. messages を時系列で取得
- * 3. LLM で候補抽出（[] の場合は何もしない）
- * 4. 各候補を skill_candidates テーブルに draft として挿入
+ * 1. Verify userId from threads
+ * 2. Get messages in chronological order
+ * 3. Extract candidates via LLM (do nothing if [])
+ * 4. Insert each candidate into the skill_candidates table as a draft
  *
- * LLM 失敗・空配列・パース失敗時はスキップ（エラーを投げない）。
+ * Skips on LLM failure, empty array, or parse failure (does not throw).
  */
 export async function extractSkillCandidates(
   threadId: string,
@@ -111,14 +113,14 @@ export async function extractSkillCandidates(
   llm: OpenAI,
   model: string,
 ): Promise<void> {
-  // スレッド所有者を検証
+  // Verify thread owner
   const [thread] = await db
     .select({ userId: threads.userId })
     .from(threads)
     .where(eq(threads.id, threadId));
   if (!thread || thread.userId !== userId) return;
 
-  // 会話の全メッセージを時系列で取得
+  // Get all messages in chronological order
   const allMessages = await db
     .select({ role: messages.role, content: messages.content })
     .from(messages)
@@ -129,7 +131,7 @@ export async function extractSkillCandidates(
   const hasAssistant = allMessages.some((m) => m.role === "assistant");
   if (!hasUser || !hasAssistant || allMessages.length === 0) return;
 
-  // LLM で候補抽出
+  // Extract candidates via LLM
   let candidates: ExtractedCandidate[] | null;
   try {
     const completion = await llm.chat.completions.create({
@@ -146,13 +148,13 @@ export async function extractSkillCandidates(
     });
     candidates = parseCandidates(completion.choices[0]?.message?.content);
   } catch (err) {
-    console.error("[skill-candidate] LLM extraction failed:", err);
+    logger.error("skill-candidate", "LLM extraction failed", { error: err instanceof Error ? err.message : String(err) });
     return;
   }
 
   if (!candidates || candidates.length === 0) return;
 
-  // 各候補を draft として挿入
+  // Insert each candidate as a draft
   for (const c of candidates) {
     try {
       await db.insert(skillCandidates).values({
@@ -168,9 +170,9 @@ export async function extractSkillCandidates(
         status: "draft",
       });
     } catch (err) {
-      console.error("[skill-candidate] failed to insert candidate:", c.name, err);
+      logger.error("skill-candidate", "failed to insert candidate", { name: c.name, error: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  console.log(`[skill-candidate] extracted ${candidates.length} candidates from thread ${threadId}`);
+  logger.info("skill-candidate", "extracted candidates", { count: candidates.length, threadId });
 }

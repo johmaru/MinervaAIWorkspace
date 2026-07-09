@@ -6,8 +6,8 @@ import { db } from "@/db";
 import { memories, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// embedText / hashContent をモック: 実 embedder サービスに依存せず、
-// 決定論的ベクトルを返す（memories テーブルは vector(1024)）。
+// Mock embedText / hashContent: return deterministic vectors without depending on
+// the real embedder service (memories table is vector(1024)).
 vi.mock("@/lib/embed", () => ({
   embedText: vi.fn().mockImplementation(async (text: string) => {
     const hash = createHash("sha256").update(text).digest();
@@ -20,9 +20,9 @@ vi.mock("@/lib/embed", () => ({
 
 import { generateMemories } from "@/lib/memory";
 
-// generateMemories の単体テスト。LLM をモックし、DB に記憶が正しく保存・
-// 更新・論理削除されることを検証する。embedText は実物（HTTP embedder または
-// transformers.js）を使用する。
+// Unit tests for generateMemories. Mocks the LLM and verifies that memories are
+// correctly stored, updated, and soft-deleted in the DB. embedText uses the real
+// implementation (HTTP embedder or transformers.js).
 
 function mockLLM(responseContent: string): OpenAI {
   return {
@@ -40,7 +40,7 @@ const createdThreadIds: string[] = [];
 const createdMemoryIds: string[] = [];
 
 beforeAll(async () => {
-  // テスト用スレッドを作成
+  // Create a test thread
   const [thread] = await db.insert(threads).values({ title: "memory test" }).returning();
   createdThreadIds.push(thread.id);
 });
@@ -56,7 +56,7 @@ afterAll(async () => {
 });
 
 describe("generateMemories", () => {
-  it("new action で memories テーブルに INSERT する", async () => {
+  it("new action INSERTs into the memories table", async () => {
     const threadId = createdThreadIds[0];
     const llm = mockLLM(
       JSON.stringify([
@@ -86,9 +86,9 @@ describe("generateMemories", () => {
     createdMemoryIds.push(row!.id);
   }, 60_000);
 
-  it("replace action で対象記憶に suppressedAt が設定される", async () => {
+  it("replace action sets suppressedAt on the target memory", async () => {
     const threadId = createdThreadIds[0];
-    // 対象となる既存記憶の content は "User uses RTX 5070 Ti"
+    // The target existing memory's content is "User uses RTX 5070 Ti"
     const llm = mockLLM(
       JSON.stringify([
         {
@@ -111,7 +111,7 @@ describe("generateMemories", () => {
       "test-model",
     );
 
-    // 古い記憶が suppressed されている
+    // Old memory is suppressed
     const [old] = await db
       .select()
       .from(memories)
@@ -119,7 +119,7 @@ describe("generateMemories", () => {
     expect(old).toBeDefined();
     expect(old!.suppressedAt).not.toBeNull();
 
-    // 新しい記憶が挿入されている
+    // New memory is inserted
     const [newRow] = await db
       .select()
       .from(memories)
@@ -129,9 +129,9 @@ describe("generateMemories", () => {
     createdMemoryIds.push(newRow!.id);
   }, 60_000);
 
-  it("merge action で対象記憶の content が更新される", async () => {
+  it("merge action updates the target memory's content", async () => {
     const threadId = createdThreadIds[0];
-    // 既存記憶 "User upgraded to RTX 5080" に対して merge
+    // Merge against existing memory "User upgraded to RTX 5080"
     const llm = mockLLM(
       JSON.stringify([
         {
@@ -143,7 +143,7 @@ describe("generateMemories", () => {
         },
       ]),
     );
-    // mergeContents の LLM レスポンスも同じ mock から返る（2回目の create 呼び出し）
+    // The mergeContents LLM response also comes from the same mock (2nd create call)
     llm.chat.completions.create = vi.fn()
       .mockResolvedValueOnce({
         choices: [{ message: { content: JSON.stringify([
@@ -170,7 +170,7 @@ describe("generateMemories", () => {
       "test-model",
     );
 
-    // 対象記憶の content が統合されている
+    // Target memory's content is merged
     const [merged] = await db
       .select()
       .from(memories)
@@ -179,7 +179,7 @@ describe("generateMemories", () => {
     expect(merged!.suppressedAt).toBeNull();
   }, 60_000);
 
-  it("LLM が不正 JSON を返した場合、スキップしてエラーを投げない", async () => {
+  it("when LLM returns invalid JSON, skips without throwing", async () => {
     const threadId = createdThreadIds[0];
     const llm = mockLLM("this is not json at all");
 
@@ -196,18 +196,18 @@ describe("generateMemories", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("recentTurns が空の場合、早期リターン", async () => {
+  it("early return when recentTurns is empty", async () => {
     const threadId = createdThreadIds[0];
     const llm = mockLLM("[]");
 
     await expect(
       generateMemories(threadId, [], llm, "test-model"),
     ).resolves.toBeUndefined();
-    // LLM は呼ばれない
+    // LLM is not called
     expect(llm.chat.completions.create).not.toHaveBeenCalled();
   });
 
-  it("user/assistant ペアが無い場合は早期リターン", async () => {
+  it("early return when no user/assistant pair", async () => {
     const threadId = createdThreadIds[0];
     const llm = mockLLM("[]");
 

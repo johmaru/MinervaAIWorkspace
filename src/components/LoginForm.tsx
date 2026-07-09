@@ -22,12 +22,25 @@ export function LoginForm({
   const [mode, setMode] = useState<Mode>(initialMode);
   const [state, action, pending] = useActionState(authenticate, undefined);
   const [mismatch, setMismatch] = useState(false);
+  const [rememberEmail, setRememberEmail] = useState(false);
+  const [savedEmail, setSavedEmail] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (sessionInvalid) {
       clearSessionCookies();
     }
   }, [sessionInvalid]);
+
+  // Pre-fill email from localStorage on mount (login mode only)
+  useEffect(() => {
+    if (mode === "login") {
+      const stored = localStorage.getItem("umanschat:rememberEmail");
+      if (stored) {
+        setSavedEmail(stored);
+        setRememberEmail(true);
+      }
+    }
+  }, [mode]);
 
   const toggleMode = () => { setMismatch(false); setMode((m) => (m === "login" ? "register" : "login")); };
   return (
@@ -51,7 +64,13 @@ export function LoginForm({
           action={action}
           className="space-y-3"
           onSubmit={(e) => {
-            if (mode === "register") {
+            if (mode === "login") {
+              if (rememberEmail) {
+                localStorage.setItem("umanschat:rememberEmail", savedEmail);
+              } else {
+                localStorage.removeItem("umanschat:rememberEmail");
+              }
+            } else {
               const form = e.currentTarget;
               const pw = (form.elements.namedItem("password") as HTMLInputElement)?.value;
               const pw2 = (form.elements.namedItem("passwordConfirm") as HTMLInputElement)?.value;
@@ -87,6 +106,8 @@ export function LoginForm({
               id="email"
               name="email"
               type="email"
+              value={savedEmail}
+              onChange={(e) => setSavedEmail(e.target.value)}
               autoComplete="email"
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus:ring-2 focus:ring-ring"
               required
@@ -106,6 +127,18 @@ export function LoginForm({
               required
             />
           </div>
+          {mode === "login" && (
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                name="rememberEmail"
+                checked={rememberEmail}
+                onChange={(e) => setRememberEmail(e.target.checked)}
+                className="h-4 w-4 rounded border-border accent-primary"
+              />
+              {t("auth.rememberEmail")}
+            </label>
+          )}
 
           {mode === "register" && (
             <div className="space-y-1">

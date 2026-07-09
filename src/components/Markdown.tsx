@@ -9,20 +9,20 @@ import rehypeKatex from "rehype-katex";
 import { sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 
 /**
- * LLM 応答の Markdown レンダリング。
+ * Markdown rendering for LLM responses.
  *
- * - remark-gfm: テーブル・打消し線・タスクリスト等の GFM 拡張
- * - rehype-highlight: コードブロックのシンタックスハイライト (highlight.js)
- * - rehype-katex: $...$ / $$...$$ の数式レンダリング (KaTeX)
+ * - remark-gfm: GFM extensions (tables, strikethrough, task lists, etc.)
+ * - rehype-highlight: syntax highlighting for code blocks (highlight.js)
+ * - rehype-katex: math rendering for $...$ / $$...$$ (KaTeX)
  *
- * ユーザー入欄はプレーンテキストのままでよい（Markdown パース不要）。
- * ストリーミング中の不完全な Markdown は react-markdown が寛容に扱う。
- * ツール呼び出しマークアップのサニタイズは sanitizeToolCallMarkup に委譲。
+ * User input can remain plain text (no Markdown parsing needed).
+ * Incomplete Markdown during streaming is handled tolerantly by react-markdown.
+ * Sanitization of tool-call markup is delegated to sanitizeToolCallMarkup.
  */
 function PreBlock({ children }: { children?: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    // children からテキストを抽出
+    // Extract text from children
     const extractText = (node: React.ReactNode): string => {
       if (typeof node === "string") return node;
       if (typeof node === "number") return String(node);
@@ -54,8 +54,8 @@ function PreBlock({ children }: { children?: React.ReactNode }) {
 }
 
 function CodeBlock({ className, children, ...props }: ComponentPropsWithoutRef<"code">) {
-  // ブロックコード判定: language-* クラスの有無に加え、
-  // rehype-highlight が言語未検出時に付与する hljs クラスでも判定する。
+  // Block code detection: in addition to the language-* class,
+  // also detect via the hljs class that rehype-highlight adds when no language is found.
   const isBlock = className?.includes("language-") || className?.includes("hljs");
   if (!isBlock) {
     return (
@@ -79,10 +79,10 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, [rehypeKatex, { throwOnError: false }]]}
         components={{
-          // コードブロック: highlight.js が <pre><code class="language-xxx"> を生成
+          // Code blocks: highlight.js generates <pre><code class="language-xxx">
           pre: PreBlock,
           code: CodeBlock,
-          // テーブル
+          // Tables
           table: ({ children }) => (
             <table className="my-2 w-full border-collapse text-xs">
               {children}
@@ -96,7 +96,7 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
           td: ({ children }) => (
             <td className="border border-border px-2 py-1">{children}</td>
           ),
-          // リンクは新タブで開く
+          // Links open in a new tab
           a: ({ href, children }) => (
             <a
               href={href}
@@ -107,7 +107,7 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
               {children}
             </a>
           ),
-          // リスト
+          // Lists
           ul: ({ children }) => (
             <ul className="my-1 list-disc pl-5">{children}</ul>
           ),
@@ -115,9 +115,9 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
             <ol className="my-1 list-decimal pl-5">{children}</ol>
           ),
           li: ({ children }) => <li className="my-0.5">{children}</li>,
-          // 段落
+          // Paragraphs
           p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
-          // 引用
+          // Blockquotes
           blockquote: ({ children }) => (
             <blockquote className="my-2 border-l-2 border-accent/40 pl-3 text-muted-foreground">
               {children}

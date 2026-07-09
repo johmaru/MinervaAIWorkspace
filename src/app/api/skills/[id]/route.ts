@@ -17,9 +17,9 @@ type PatchBody = {
 };
 
 /**
- * PATCH /api/skills/[id] — スキル編集。
- * name/content/kind/trigger/tags/status を部分更新。
- * content 変更時は re-embed + contentHash 更新 + version インクリメント。
+ * PATCH /api/skills/[id] — Edit a skill.
+ * Partially updates name/content/kind/trigger/tags/status.
+ * Re-embeds + updates contentHash + increments version when content changes.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -32,7 +32,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  // 既存スキル取得（user scope）
+  // Fetch existing skill (user scope)
   const [existing] = await db
     .select()
     .from(skills)
@@ -52,8 +52,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
   if (body.status !== undefined) updates.status = body.status;
 
-  // embedding ソース（name + trigger + tags + content）のいずれかが変わったら re-embed。
-  // contentHash + version は content 変更時のみ bump。
+  // Re-embed if any embedding source (name + trigger + tags + content) changed.
+  // Bump contentHash + version only when content changes.
   const newContent = body.content?.trim();
   const newName = (updates.name as string | undefined) ?? existing.name;
   const newTrigger = (updates.trigger as string | undefined) ?? existing.trigger ?? "";
@@ -100,8 +100,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 }
 
 /**
- * DELETE /api/skills/[id] — スキル削除。
- * user_id でスコープし、他ユーザーのスキルは削除できない。
+ * DELETE /api/skills/[id] — Delete a skill.
+ * Scoped by user_id; cannot delete another user's skill.
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

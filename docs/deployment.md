@@ -100,7 +100,7 @@ The standalone distribution is a single double-clickable `umanschat.exe` plus it
 
 1. **Build** — `bun run build` with `DATABASE_URL=":memory:"` (build-time only; the real DB is created at runtime). Produces `.next/standalone/` via Next.js output-file tracing.
 
-2. **Clean** — removes any prior `dist/UmansChat/` directory.
+2. **Clean** — removes any prior `dist/UmansChat/` directory. Before wiping, pack stashes the existing `dist/UmansChat/.env` and `data/` (if present) to a temp dir, then restores them after assemble and re-applies exe-only service defaults so Docker hostnames do not stick. Security keys (`REGISTRATION_LOCKED`, `ALLOWED_REGISTRATION_IPS`), secrets, and other user `.env` values survive an in-place rebuild. The in-app updater already preserved `.env`/`data/` when copying staging → appRoot; pack now matches that for the dist folder. This only applies to in-place `dist/UmansChat` rebuilds — a fresh extract into a new empty folder correctly starts unlocked for first admin creation.
 
 3. **Copy standalone output** — copies `.next/standalone/*` → `dist/UmansChat/`. On Windows, Next.js's output-file-tracing creates junctions (for `@xenova/transformers-<hash>` and `better-sqlite3-<hash>`). `cpSync` fails on junctions with `EPERM`, so the script detects junctions, skips them during the copy, and then copies their targets as real directories. Junctions point to absolute paths that would break at the distribution destination, so this step is essential.
 
@@ -118,8 +118,7 @@ The standalone distribution is a single double-clickable `umanschat.exe` plus it
 
 1. **Resolve `appRoot`** — when compiled, uses `dirname(process.execPath)` (the exe's directory); when run under node/bun directly, uses `__dirname`. This matters because `bun build --compile` can make `__dirname` point to a temp extraction directory.
 
-2. **Create `data/`** — ensures `<appRoot>/data/` exists for the SQLite database.
-
+2. **Resolve user data root + migrate** — resolves `%USERPROFILE%\.umans_chat_unofficial\` as the user data root (`launcher/user-data.cjs`). If a legacy `appRoot/.env` and `appRoot/data` exist (from a prior version), copies them to the user data root. The legacy files are left in `appRoot` as a backup. Sets `UMANS_USER_ROOT` env var so the server's `getDataDir()` and `resolveEnvPath()` locate `.env`, `data/`, cloudflared, and update staging in the user folder. The exe folder becomes purely application binaries — safe to delete, rebuild, or replace without data loss.
 3. **Sync `.env`** — appends any new keys from `.env.example` into `.env` without modifying existing values. Mirrors the Docker entrypoint's sync step.
 
 4. **Resolve `DATABASE_URL`** — converts the `.env` value to an absolute path (default `data/umanschat.db`). Like the Docker entrypoint, this is necessary because the standalone server calls `process.chdir(__dirname)`.
@@ -134,12 +133,21 @@ The standalone distribution is a single double-clickable `umanschat.exe` plus it
 
 On first launch, the user sees:
 - A console window with `[launcher]` progress lines.
-- `.env` is created from `.env.example` (if absent) with all keys present.
-- `data/umanschat.db` is created and migrations run.
+- `.env` is created from `.env.example` (if absent) in `%USERPROFILE%\.umans_chat_unofficial\` with all keys present.
+- `data/umanschat.db` is created in `%USERPROFILE%\.umans_chat_unofficial\data\` and migrations run.
 - The browser opens to `http://localhost:3001` showing the login page.
 - Because `userCount === 0`, the login page shows first-run admin registration. The first registered user becomes the admin and inherits any ownerless data. See [Authentication](./authentication.md).
 
-The user must then edit `.env` to set `LLM_API_KEY`, `AUTH_SECRET`, etc., and restart the exe (or use the Settings GUI).
+The user must then edit `.env` (in the user data folder) to set `LLM_API_KEY`, `AUTH_SECRET`, etc., and restart the exe (or use the Settings GUI).
+
+### User data location
+
+The exe distribution stores `.env` and `data/` (SQLite DB, cloudflared binary, update staging) in `%USERPROFILE%\.umans_chat_unofficial\` — not in the exe folder. This means:
+
+- Deleting, rebuilding, or replacing the exe folder does not affect user data.
+- On first launch of a new exe, if a legacy `appRoot/.env` and `appRoot/data` exist (from a prior version), the launcher automatically migrates them to the user data folder. The legacy files are left in `appRoot` as a backup.
+- The launcher sets `UMANS_USER_ROOT` env var for the server. When unset (dev/Docker), paths fall back to the current behavior (cwd-based).
+- When `UMANS_USER_ROOT` is unset but the process is a compiled exe (diagnostic direct run), `getDataDir()` falls back to `dirname(process.execPath)/data`, matching prior behavior.
 
 ## CI
 
@@ -276,13 +284,13 @@ The tunnel token (`TUNNEL_TOKEN`) is treated as a secret throughout:
 
 ### AUTH_URL dynamic switching
 
-When a tunnel is started, the public HTTPS hostname must be set as `AUTH_URL` so that Auth.js generates correct callback URLs (for Google OAuth and Notion OAuth). Critically, this takes effect **without a restart**:
+When a tunnel is started, the public HTTPS hostname is saved as `AUTH_URL` in `.env` (persisted) and mirrored to the internal `UMANS_CONFIGURED_AUTH_URL` env var. Auth.js no longer reads `AUTH_URL` from `process.env` for request-origin rewriting — at module load, `src/lib/auth-env.ts` copies it to the mirror and deletes `process.env.AUTH_URL` so `reqWithEnvURL` is a no-op. Under `AUTH_TRUST_HOST=true`, Auth.js derives the origin from the request headers (`X-Forwarded-Host` / `Host` + `X-Forwarded-Proto`), so both local and public access work simultaneously.
 
-- `POST /api/tunnel` sets `process.env.AUTH_URL = authUrl` directly.
-- NextAuth reads `AUTH_URL` per-request via its `reqWithEnvURL` mechanism, so the new value is picked up on the next HTTP request.
+- `POST /api/tunnel` saves `AUTH_URL` to `.env` and calls `setConfiguredAuthUrl(authUrl)` (sets `UMANS_CONFIGURED_AUTH_URL`, deletes `process.env.AUTH_URL`).
+- The `authorized` callback and Notion OAuth routes use `resolvePublicOrigin()` (from `src/lib/request-origin.ts`) to derive the origin from request headers, falling back to `UMANS_CONFIGURED_AUTH_URL` when no host header is present.
 - `AUTH_URL` must start with `https://` (enforced by the API route — a non-HTTPS value returns `400`).
 
-This is also the base URL for Notion's OAuth redirect URI (`{AUTH_URL}/api/connections/notion/callback`) and Google's (`{AUTH_URL}/api/auth/callback/google`), so it must match the URIs registered in the Notion and Google developer consoles.
+`AUTH_URL` is still the base for Notion's OAuth redirect URI (`{origin}/api/connections/notion/callback`) and Google's (`{origin}/api/auth/callback/google`), where `origin` is derived from the request. It must match the URIs registered in the Notion and Google developer consoles for the host you use.
 
 ### Setup steps
 

@@ -127,9 +127,27 @@ bun run pack:exe
 #    (or run: node dist/UmansChat/umanschat.cjs)
 ```
 
-On first launch the launcher creates `data/umanschat.db`, applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
+> **In-place rebuild preserves state:** re-running `bun run pack:exe` into an existing `dist/UmansChat/` stashes and restores your `.env` and `data/` (SQLite DB) so security settings, API keys, and the database survive a rebuild — matching the in-app auto-update behavior. A fresh extract into a new empty folder correctly starts unlocked for first admin creation.
+
+> **Data location:** `.env` and `data/` live in `%USERPROFILE%\.umans_chat_unofficial\`, not in the exe folder. Deleting or replacing the exe folder preserves your settings, API keys, and database. On upgrade from a prior version, the launcher auto-migrates legacy data from the exe folder.
+
+On first launch the launcher creates `data/umanschat.db` (in the user data folder), applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
 
 > **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`, shipped in `.env.example` for `EMBED_PROVIDER=local`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected. For the HTTP Python embedder (`EMBED_PROVIDER=http`), the default model is `LiquidAI/LFM2.5-Embedding-350M` (1024-dim) and runs server-side — no client download.
+
+### Auto-Update (exe only)
+
+The standalone exe checks for updates on startup and in **Settings → System**. When a newer release exists on GitHub, an amber dot appears on the settings button.
+
+1. Open Settings → System tab
+2. Click **Download and install** — the release zip is downloaded, extracted, and a marker file is written
+3. The launcher detects the marker within 5 seconds, stops the server, swaps files (preserving `data/` and `.env`), and restarts the new exe
+4. The browser auto-reloads when the new server comes up
+
+`data/` and `.env` live in `%USERPROFILE%\.umans_chat_unofficial\` and are never touched during updates. The old `umanschat.exe` is renamed to `.old` and cleaned up on next launch.
+
+> **Prerequisite**: The GitHub repository must be public for the Releases API and asset downloads to work without authentication.
+> **Docker** users update via `docker compose pull && docker compose up -d` — auto-update is exe-only.
 
 ## Releases (Docker + exe)
 
@@ -175,7 +193,7 @@ To expose the app over public HTTPS without port forwarding or a public IP, use 
 1. Create a named tunnel at [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel (type: Cloudflared).
 2. Add a public hostname and route it to `Service=http://app:3000`.
 3. Copy the tunnel token from the Cloudflare dashboard.
-4. Open UmansChat → Settings → Connections tab → Cloudflare Tunnel section.
+4. Open UmansChat → Settings → Access & Security tab → Cloudflare Tunnel section.
 5. Paste the tunnel token into the **Tunnel Token** field.
 6. Set **AUTH_URL** to your public hostname (e.g. `https://umanschat.example.com`). Must start with `https://`.
 7. Click **起動** (Start). The tunnel starts immediately — no app restart required.
@@ -263,6 +281,9 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `DATABASE_URL`          | SQLite database file path                                          | `data/umanschat.db`                          |
 | `HOST_OS`              | OS name injected into prompts (`Windows`, `macOS`, `Linux`; empty = auto-detect from `/proc/version`) | —                            |
 | `TZ`                   | Timezone for the date/time injected into prompts (empty = `Asia/Tokyo`) | —                            |
+| `LOG_LEVEL`             | Log threshold (`debug`/`info`/`warn`/`error`)                     | `info`                                               |
+| `LOG_FILE_ENABLED`      | Write logs to `data/logs/umanschat.log` (`true`/`false`; auto: exe→`true`, Docker→`false`) | auto                                   |
+| `LOG_FILE_MAX_SIZE`     | Max log file size in bytes before rotation (keeps one `.log.1` backup) | `5242880` (5MB)                                 |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
 | `NOTION_CLIENT_ID`       | Notion OAuth client ID (for Connections feature; see [Notion Connection Setup](#notion-connection-setup)) | — |
@@ -314,7 +335,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Semantic search** — search across all threads; results are ranked by cosine similarity.
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
 - **Tor** — toggle Tor in settings for anonymous scraping.
-- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, and Tor options. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
+- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, Tor options, and log level. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
 - **Global system instructions** — open Settings → AI & Models to create, edit, and delete named system instructions. Select one as your default; it applies to all threads unless a thread overrides it. In thread settings, pick a different instruction per-thread.
 - **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories.
 - **Personalization** — open Settings → Personalization. Pick a style preset (or "None" to disable). Adjust the 4 trait sliders (warmth, energy, structure, emoji; 0-2). Changes apply to all new messages immediately — no restart needed.

@@ -2,17 +2,24 @@ import { db } from "@/db";
 import { connections } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 import { exchangeNotionCode } from "@/lib/connections/notion";
+import { resolvePublicOrigin } from "@/lib/request-origin";
+import { getConfiguredAuthUrl } from "@/lib/auth-env";
+import { logger } from "@/lib/logger";
 import { redirect } from "next/navigation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/connections/notion/callback — Notion OAuth コールバック。
+ * GET /api/connections/notion/callback — Notion OAuth callback.
  *
- * Notion が ?code=...&state=... 付きでリダイレクトする。
- * state は CSRF 防止用にユーザー ID をエンコードしている。
- * コードをトークンに交換し、connections テーブルへ保存してルートへリダイレクト。
+ * Notion redirects with ?code=...&state=...
+ * state encodes the user ID for CSRF prevention.
+ * Exchanges the code for a token, saves it to the connections table, and redirects to the root.
+ *
+ * The redirect URI passed to the token exchange must match the one used in
+ * authorize — both derive the origin from the incoming request headers via
+ * resolvePublicOrigin so local and public access both work.
  */
 export async function GET(req: Request) {
   const user = await getSessionUser();
@@ -23,15 +30,16 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
 
-  // ユーザーが Notion 側で認可を拒否した場合
+  // User denied authorization on the Notion side
   if (error) return redirect("/?connection_error=notion_denied");
 
-  // CSRF チェック: state はログインユーザー ID と一致する必要がある
+  // CSRF check: state must match the logged-in user ID
   if (!code || !state || state !== user.id) {
     return new Response("Invalid OAuth state", { status: 400 });
   }
 
-  const redirectUri = `${process.env.AUTH_URL ?? "http://localhost:3001"}/api/connections/notion/callback`;
+  const origin = resolvePublicOrigin(req.headers, getConfiguredAuthUrl());
+  const redirectUri = `${origin}/api/connections/notion/callback`;
 
   try {
     const tokenResponse = await exchangeNotionCode(code, redirectUri);
@@ -48,7 +56,7 @@ export async function GET(req: Request) {
     });
     return redirect("/?connection_success=notion");
   } catch (err) {
-    console.error("[connections] Notion OAuth callback failed:", err);
+    logger.error("connections", "Notion OAuth callback failed", { error: err instanceof Error ? err.message : String(err) });
     return redirect("/?connection_error=notion_failed");
   }
 }

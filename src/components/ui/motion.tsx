@@ -99,7 +99,7 @@ export function AnimateModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-0"
           onClick={onClose}
           role="dialog"
           aria-label={ariaLabel}
@@ -110,7 +110,7 @@ export function AnimateModal({
           transition={{ duration: 0.2 }}
         >
           <motion.div
-            className={`max-h-[85vh] w-full ${panelClassName} overflow-y-auto rounded-3xl bg-popover p-6 ring-1 ring-border`}
+            className={`max-h-[90vh] sm:max-h-[85vh] w-full ${panelClassName} overflow-y-auto rounded-3xl bg-popover p-4 ring-1 ring-border sm:p-6 sm:rounded-3xl`}
             onClick={(e) => e.stopPropagation()}
             variants={fadeScaleIn}
             initial="initial"

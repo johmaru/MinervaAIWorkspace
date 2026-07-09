@@ -10,8 +10,8 @@ type Props = {
 };
 
 /**
- * URL 取り込み入力欄。Enter で POST /api/scrape を呼び、
- * ページをスクレイピングして恒久ナレッジ化する。
+ * URL import input. Calls POST /api/scrape on Enter,
+ * scrapes the page and persists it as permanent knowledge.
  */
 export function UrlInput({ onScraped }: Props) {
   const { t } = useI18n();

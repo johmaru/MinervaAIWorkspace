@@ -26,13 +26,13 @@ type PatchBody = {
 };
 
 /**
- * フォルダ一覧フック。useThreads と同構造。
+ * Folder list hook. Same structure as useThreads.
  *
- * - 初回マウントで GET /api/folders を取得。
- * - create(body?) は POST /api/folders → 先頭挿入。FolderSummary | null を返す。
- * - update(id, patch) は PATCH /api/folders?id=... → 一覧に反映。
- * - remove(id) は DELETE /api/folders/[id]。
- * - refresh() で一覧を再取得。
+ * - Fetches GET /api/folders on initial mount.
+ * - create(body?) does POST /api/folders → inserts at the top. Returns FolderSummary | null.
+ * - update(id, patch) does PATCH /api/folders?id=... → reflects in the list.
+ * - remove(id) does DELETE /api/folders/[id].
+ * - refresh() re-fetches the list.
  */
 export function useFolders() {
   const { t } = useI18n();
@@ -55,7 +55,7 @@ export function useFolders() {
     }
   }, [t]);
 
-  // 初回ロード。effect 本体で同期的 setState しないよう async IIFE で包む。
+  // Initial load. Wrapped in an async IIFE to avoid synchronous setState in the effect body.
   useEffect(() => {
     void (async () => {
       await refresh();

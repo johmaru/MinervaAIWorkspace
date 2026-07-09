@@ -11,40 +11,40 @@ vi.mock("@/lib/embed", () => ({ hashContent: vi.fn().mockReturnValue("hash") }))
 import { normalizeUrl, scrapeUrl, searchWeb } from "@/lib/scraper";
 
 describe("normalizeUrl", () => {
-  it("http URL を正規化", () => {
+  it("normalizes http URL", () => {
     expect(normalizeUrl("http://example.com/path/")).toBe("http://example.com/path");
   });
 
-  it("https URL を正規化", () => {
+  it("normalizes https URL", () => {
     expect(normalizeUrl("https://example.com")).toBe("https://example.com/");
   });
 
-  it("ルート URL の末尾スラッシュは保持", () => {
+  it("preserves trailing slash for root URL", () => {
     expect(normalizeUrl("https://example.com/")).toBe("https://example.com/");
   });
 
-  it("fragment を削除", () => {
+  it("removes fragment", () => {
     expect(normalizeUrl("https://example.com/page#section")).toBe("https://example.com/page");
   });
 
-  it("末尾スラッシュを削除（ルート以外）", () => {
+  it("removes trailing slash (non-root)", () => {
     expect(normalizeUrl("https://example.com/path/")).toBe("https://example.com/path");
   });
 
 
-  it("クエリ文字列は保持", () => {
+  it("preserves query string", () => {
     expect(normalizeUrl("https://example.com/path?query=1")).toBe("https://example.com/path?query=1");
   });
 
-  it("無効 scheme は空文字", () => {
+  it("invalid scheme returns empty string", () => {
     expect(normalizeUrl("ftp://example.com")).toBe("");
   });
 
-  it("javascript: は空文字", () => {
+  it("javascript: returns empty string", () => {
     expect(normalizeUrl("javascript:alert(1)")).toBe("");
   });
 
-  it("無効URLは空文字", () => {
+  it("invalid URL returns empty string", () => {
     expect(normalizeUrl("not a url")).toBe("");
     expect(normalizeUrl("")).toBe("");
   });
@@ -60,7 +60,7 @@ describe("scrapeUrl", () => {
     vi.unstubAllEnvs();
   });
 
-  it("成功時 ScrapeResult を返す", async () => {
+  it("returns ScrapeResult on success", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -89,7 +89,7 @@ describe("scrapeUrl", () => {
     );
   });
 
-  it("HTTP エラー時は例外を投げる", async () => {
+  it("throws on HTTP error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -101,7 +101,7 @@ describe("scrapeUrl", () => {
     await expect(scrapeUrl("https://example.com")).rejects.toThrow("fetch failed: timeout");
   });
 
-  it("HTTP エラーで body が JSON でない場合はステータスをメッセージに", async () => {
+  it("uses status code in message when body is not JSON on HTTP error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -115,20 +115,35 @@ describe("scrapeUrl", () => {
     await expect(scrapeUrl("https://example.com")).rejects.toThrow("HTTP 500");
   });
 
-  it("SCRAPER_URL env が未設定時は localhost:8000 を使う", async () => {
+  it("returns null early when SCRAPER_URL is empty", async () => {
     vi.stubEnv("SCRAPER_URL", "");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ url: "", title: "", content: "", status: 200 }),
-      }),
-    );
-    await scrapeUrl("https://example.com");
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-      "http://localhost:8000/scrape",
-      expect.anything(),
-    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "", title: "", content: "", status: 200 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await scrapeUrl("https://example.com");
+    expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("searchWeb empty SCRAPER_URL", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("returns empty results early when SCRAPER_URL is empty", async () => {
+    vi.stubEnv("SCRAPER_URL", "");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ query: "test", results: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await searchWeb("test", 5);
+    expect(result).toEqual({ query: "test", results: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -142,7 +157,7 @@ describe("searchWeb", () => {
     vi.unstubAllEnvs();
   });
 
-  it("成功時 WebSearchResponse を返す", async () => {
+  it("returns WebSearchResponse on success", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -176,7 +191,7 @@ describe("searchWeb", () => {
     );
   });
 
-  it("HTTP エラー時は例外を投げる", async () => {
+  it("throws on HTTP error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -188,7 +203,7 @@ describe("searchWeb", () => {
     await expect(searchWeb("python")).rejects.toThrow("search failed: timeout");
   });
 
-  it("HTTP エラーで body が JSON でない場合はステータスをメッセージに", async () => {
+  it("uses status code in message when body is not JSON on HTTP error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -202,7 +217,7 @@ describe("searchWeb", () => {
     await expect(searchWeb("python")).rejects.toThrow("HTTP 500");
   });
 
-  it("デフォルト maxResults は 5", async () => {
+  it("default maxResults is 5", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ query: "x", results: [] }),

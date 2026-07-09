@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseCandidates } from "@/lib/skillCandidate";
 
 describe("parseCandidates", () => {
-  it("配列形式の JSON から候補を抽出する", () => {
+  it("extracts candidates from array-format JSON", () => {
     const raw = JSON.stringify([
       {
         name: "Next.js params await",
@@ -24,12 +24,12 @@ describe("parseCandidates", () => {
     expect(result![0].reason).toBe("Common pitfall in Next.js 15+");
   });
 
-  it("空配列の場合は空配列を返す", () => {
+  it("returns empty array for empty array input", () => {
     const result = parseCandidates("[]");
     expect(result).toEqual([]);
   });
 
-  it("最大3件に制限する", () => {
+  it("limits to at most 3 candidates", () => {
     const raw = JSON.stringify([
       { name: "A", kind: "workflow", trigger: "t", tags: [], content: "c", confidence: 0.5, reason: "r" },
       { name: "B", kind: "workflow", trigger: "t", tags: [], content: "c", confidence: 0.5, reason: "r" },
@@ -40,7 +40,7 @@ describe("parseCandidates", () => {
     expect(result).toHaveLength(3);
   });
 
-  it("kind が不正な場合は workflow にフォールバック", () => {
+  it("falls back to workflow when kind is invalid", () => {
     const raw = JSON.stringify([
       { name: "X", kind: "invalid", trigger: "t", tags: [], content: "c", confidence: 0.5, reason: "r" },
     ]);
@@ -48,7 +48,7 @@ describe("parseCandidates", () => {
     expect(result![0].kind).toBe("workflow");
   });
 
-  it("confidence が範囲外の場合は clamp される", () => {
+  it("clamps confidence when out of range", () => {
     const raw = JSON.stringify([
       { name: "X", kind: "workflow", trigger: "t", tags: [], content: "c", confidence: 1.5, reason: "r" },
       { name: "Y", kind: "workflow", trigger: "t", tags: [], content: "c", confidence: -0.5, reason: "r" },
@@ -58,7 +58,7 @@ describe("parseCandidates", () => {
     expect(result![1].confidence).toBe(0);
   });
 
-  it("name が空の要素はスキップされる", () => {
+  it("skips entries with empty name", () => {
     const raw = JSON.stringify([
       { name: "", kind: "workflow", trigger: "t", tags: [], content: "c", confidence: 0.5, reason: "r" },
       { name: "Valid", kind: "workflow", trigger: "t", tags: [], content: "c", confidence: 0.5, reason: "r" },
@@ -68,21 +68,21 @@ describe("parseCandidates", () => {
     expect(result![0].name).toBe("Valid");
   });
 
-  it("null/undefined/空文字入力は null を返す", () => {
+  it("returns null for null/undefined/empty string input", () => {
     expect(parseCandidates(null)).toBeNull();
     expect(parseCandidates(undefined)).toBeNull();
     expect(parseCandidates("")).toBeNull();
   });
 
-  it("不正 JSON は null を返す", () => {
+  it("returns null for invalid JSON", () => {
     expect(parseCandidates("not json")).toBeNull();
   });
 
-  it("配列でない JSON は null を返す", () => {
+  it("returns null for non-array JSON", () => {
     expect(parseCandidates('{"name":"x"}')).toBeNull();
   });
 
-  it("markdown フェンスを除去する", () => {
+  it("removes markdown fences", () => {
     const raw = "```json\n" + JSON.stringify([
       { name: "Fenced", kind: "debugging", trigger: "t", tags: [], content: "c", confidence: 0.5, reason: "r" },
     ]) + "\n```";

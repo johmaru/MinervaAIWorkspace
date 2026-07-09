@@ -14,8 +14,8 @@ type Props = {
 };
 
 /**
- * スレッドを別フォルダに移動するモーダル。
- * フォルダ一覧をラジオボタンで表示 + 先頭に「フォルダなし」オプション。
+ * Modal to move a thread to another folder.
+ * Displays the folder list as radio buttons + a "No folder" option at the top.
  */
 export function MoveToFolderModal({
   open,
@@ -30,14 +30,14 @@ export function MoveToFolderModal({
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // モーダルを開くたびに選択をリセット
+  // Reset selection each time the modal opens
   useEffect(() => {
     if (open) {
       setSelected(currentFolderId);
     }
   }, [open, currentFolderId]);
 
-  // Esc で閉じる
+  // Close on Esc
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

@@ -26,13 +26,13 @@ export function HelpModal({ open, onClose, initialTopic }: Props) {
           ✕
         </MotionButton>
       </div>
-      <div className="flex gap-4" style={{ height: "60vh" }}>
+      <div className="flex flex-col gap-4 sm:flex-row" style={{ height: "60vh" }}>
         {/* Left nav */}
-        <nav className="w-56 shrink-0 overflow-y-auto border-r border-border/50 pr-2">
+        <nav className="shrink-0 overflow-x-auto border-b border-border/50 pb-2 sm:w-56 sm:overflow-y-auto sm:overflow-x-visible sm:border-r sm:border-b-0 sm:pb-0 sm:pr-2">
           <p className="mb-1 px-2 text-xs font-semibold text-muted-foreground">
             {t("help.categories.connections.label")}
           </p>
-          <ul className="space-y-0.5">
+          <ul className="flex gap-1 sm:block sm:space-y-0.5">
             <li>
               <button
                 type="button"

@@ -3,16 +3,17 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { messages, skills, threads } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
+import { logger } from "@/lib/logger";
 
 /**
- * スキル生成 — 会話全体を LLM で要約し、再利用可能なスキルとして保存。
+ * Skill generation — summarizes the entire conversation via the LLM and saves it as a reusable skill.
  *
- * ユーザーが「今までの内容スキルで保存して」等と要求した際に chat route の
- * after() で実行される。会話の全メッセージを LLM に渡し、
- * { name, content } の JSON を抽出 → embedding → contentHash で重複回避 → INSERT。
+ * Executed in the after() of the chat route when the user requests something like
+ * "save the content so far as a skill." All messages in the conversation are passed to the LLM,
+ * { name, content } JSON is extracted → embedding → duplicate avoidance via contentHash → INSERT.
  *
- * memories が直近ターン単位で抽出されるのに対し、
- * skills は会話全体からの要約。1会話 → 1スキル。
+ * While memories are extracted per recent turn, skills are summaries from the
+ * entire conversation. 1 conversation → 1 skill.
  */
 
 const SYSTEM_PROMPT = `You are a skill extractor. Analyze the conversation and extract a concrete reusable skill.
@@ -45,9 +46,9 @@ type ExtractedSkill = {
 };
 
 /**
- * LLM の生レスポンスから ExtractedSkill をパース。
- * markdown コードフェンスを除去し JSON をパース。
- * 不正な場合は null を返し、呼び出し元でスキップ。
+ * Parses ExtractedSkill from the LLM's raw response.
+ * Removes markdown code fences and parses JSON.
+ * Returns null on invalid input; the caller skips it.
  */
 export function parseSkillExtraction(raw: string | null | undefined): ExtractedSkill | null {
   if (!raw || !raw.trim()) return null;
@@ -58,7 +59,7 @@ export function parseSkillExtraction(raw: string | null | undefined): ExtractedS
     .trim();
   try {
     const parsed = JSON.parse(stripped) as unknown;
-    // プロンプトは配列を要求するが、単一オブジェクトも許容（後方互換）
+    // The prompt requests an array, but a single object is also accepted (backward compatibility)
     const arr = Array.isArray(parsed) ? parsed : [parsed];
     for (const item of arr) {
       if (typeof item !== "object" || item === null) continue;
@@ -89,21 +90,21 @@ export function parseSkillExtraction(raw: string | null | undefined): ExtractedS
 }
 
 /**
- * スレッドの全メッセージからスキルを抽出し保存。
+ * Extracts a skill from all messages in the thread and saves it.
  *
- * 1. messages を時系列で取得
- * 2. LLM で { name, content } を抽出
- * 3. embedText(content, "document") でベクトル化
- * 4. contentHash で重複回避
- * 5. skills テーブルに挿入
+ * 1. Get messages in chronological order
+ * 2. Extract { name, content } via LLM
+ * 3. Vectorize via embedText(content, "document")
+ * 4. Avoid duplicates via contentHash
+ * 5. Insert into the skills table
  *
- * user/assistant メッセージが無い場合はスキップ。
- * embed 失敗・LLM 失敗・重複時はログのみで終了（エラーを投げない）。
+ * Skips if there are no user/assistant messages.
+ * On embed failure, LLM failure, or duplicate, logs only and exits (does not throw).
  *
- * @param threadId 対象スレッド
- * @param userId スキル所有者
- * @param llm LLM クライアント
- * @param model LLM モデル名
+ * @param threadId Target thread
+ * @param userId Skill owner
+ * @param llm LLM client
+ * @param model LLM model name
  */
 export async function generateSkillFromConversation(
   threadId: string,
@@ -111,14 +112,14 @@ export async function generateSkillFromConversation(
   llm: OpenAI,
   model: string,
 ): Promise<void> {
-  // スレッド所有者を検証
+  // Verify thread owner
   const [thread] = await db
     .select({ userId: threads.userId })
     .from(threads)
     .where(eq(threads.id, threadId));
   if (!thread || thread.userId !== userId) return;
 
-  // 会話の全メッセージを時系列で取得
+  // Get all messages in chronological order
   const allMessages = await db
     .select({ role: messages.role, content: messages.content })
     .from(messages)
@@ -129,7 +130,7 @@ export async function generateSkillFromConversation(
   const hasAssistant = allMessages.some((m) => m.role === "assistant");
   if (!hasUser || !hasAssistant || allMessages.length === 0) return;
 
-  // LLM でスキル抽出
+  // Extract skill via LLM
   let extracted: ExtractedSkill | null;
   try {
     const completion = await llm.chat.completions.create({
@@ -146,17 +147,17 @@ export async function generateSkillFromConversation(
     });
     extracted = parseSkillExtraction(completion.choices[0]?.message?.content);
   } catch (err) {
-    console.error("[skill] LLM extraction failed:", err);
+    logger.error("skill", "LLM extraction failed", { error: err instanceof Error ? err.message : String(err) });
     return;
   }
 
   if (!extracted) {
-    console.log("[skill] extraction returned no result, skipping");
+    logger.info("skill", "extraction returned no result, skipping");
     return;
   }
 
-  // embedding 生成: name + trigger + tags + content の結合テキストから
-  // 検索性を向上（trigger/tags がクエリと一致しやすくなる）
+  // Generate embedding: from the combined text of name + trigger + tags + content
+  // to improve searchability (trigger/tags match queries more easily)
   const embedSource = [
     extracted.name,
     extracted.trigger,
@@ -167,11 +168,11 @@ export async function generateSkillFromConversation(
     .join("\n");
   const vector = await embedText(embedSource, "document");
   if (vector.length === 0) {
-    console.log("[skill] embedding failed, skipping");
+    logger.warn("skill", "embedding failed, skipping");
     return;
   }
 
-  // contentHash で重複回避（content のみで判定）
+  // Avoid duplicates via contentHash (content only)
   const contentHash = hashContent(extracted.content);
   const [dup] = await db
     .select({ id: skills.id })
@@ -179,7 +180,7 @@ export async function generateSkillFromConversation(
     .where(and(eq(skills.userId, userId), eq(skills.contentHash, contentHash)))
     .limit(1);
   if (dup) {
-    console.log("[skill] duplicate skill (same contentHash), skipping");
+    logger.info("skill", "duplicate skill (same contentHash), skipping");
     return;
   }
 
@@ -195,5 +196,5 @@ export async function generateSkillFromConversation(
     sourceThreadId: threadId,
   });
 
-  console.log(`[skill] generated from conversation: ${extracted.name}`);
+  logger.info("skill", "generated from conversation", { name: extracted.name });
 }

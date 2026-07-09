@@ -22,13 +22,13 @@ beforeEach(() => {
 });
 
 describe("GET /api/skill-candidates", () => {
-  it("未認証は 401", async () => {
+  it("returns 401 when unauthenticated", async () => {
     mockGetSessionUser.mockResolvedValue(null);
     const res = await GET(new Request("http://localhost/api/skill-candidates"));
     expect(res.status).toBe(401);
   });
 
-  it("不正 status パラメータは draft にフォールバック", async () => {
+  it("invalid status parameter falls back to draft", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
     const { db } = await import("@/db");
     (db as { select: unknown }).select = vi.fn().mockReturnValue({

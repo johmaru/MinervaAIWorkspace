@@ -7,7 +7,7 @@ import {
   isUmansProvider,
 } from "@/lib/llm";
 
-// fetch をモック
+// Mock fetch
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockClear();
@@ -46,17 +46,17 @@ const SAMPLE_API_RESPONSE = {
 };
 
 describe("isUmansProvider", () => {
-  it("api.code.umans.ai を含む場合は true", () => {
+  it("returns true when URL contains api.code.umans.ai", () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     expect(isUmansProvider()).toBe(true);
   });
 
-  it("OpenAI URL の場合は false", () => {
+  it("returns false for OpenAI URL", () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     expect(isUmansProvider()).toBe(false);
   });
 
-  it("未設定時は false", () => {
+  it("returns false when unset", () => {
     delete process.env.LLM_BASE_URL;
     expect(isUmansProvider()).toBe(false);
   });
@@ -67,7 +67,7 @@ describe("getUmansModels", () => {
     resetUmansModelsCache();
   });
 
-  it("Umansモードで /v1/models/info からモデル情報を取得", async () => {
+  it("fetches model info from /v1/models/info in Umans mode", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -87,7 +87,7 @@ describe("getUmansModels", () => {
     expect(glm?.deprecated).toBe(false);
   });
 
-  it("deprecated モデルの replacement をパース", async () => {
+  it("parses replacement for deprecated models", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -100,7 +100,7 @@ describe("getUmansModels", () => {
     expect(kimi?.replacement).toBe("umans-kimi-k2.7");
   });
 
-  it("display_name が無い場合は id にフォールバック", async () => {
+  it("falls back to id when display_name is missing", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -117,12 +117,12 @@ describe("getUmansModels", () => {
     expect(models[0].displayName).toBe("umans-coder");
   });
 
-  it("API 失敗時は MODEL_REASONING ハードコードにフォールバック", async () => {
+  it("falls back to MODEL_REASONING hardcoded values on API failure", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockRejectedValueOnce(new Error("network error"));
 
     const models = await getUmansModels();
-    // 7モデル（MODEL_REASONING の全エントリ）
+    // 7 models (all entries in MODEL_REASONING)
     expect(models).toHaveLength(7);
     expect(models.map((m) => m.id).sort()).toEqual(
       [
@@ -137,7 +137,7 @@ describe("getUmansModels", () => {
     );
   });
 
-  it("HTTP エラー時もフォールバック", async () => {
+  it("also falls back on HTTP error", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
 
@@ -145,14 +145,14 @@ describe("getUmansModels", () => {
     expect(models).toHaveLength(7);
   });
 
-  it("Umansモードでない場合は空配列（fetch しない）", async () => {
+  it("returns empty array when not in Umans mode (no fetch)", async () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     const models = await getUmansModels();
     expect(models).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("2回目の呼び出しはキャッシュを返し（fetch 1回のみ）", async () => {
+  it("second call returns cache (fetch only once)", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -170,7 +170,7 @@ describe("getModelDisplayNames", () => {
     resetUmansModelsCache();
   });
 
-  it("Umansモード時は id → display_name マッピングを返す", async () => {
+  it("returns id → display_name mapping in Umans mode", async () => {
     process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -182,7 +182,7 @@ describe("getModelDisplayNames", () => {
     expect(names["umans-qwen3.6-35b-a3b"]).toBe("Umans Qwen3.6 35B A3B");
   });
 
-  it("OAIモード時は空オブジェクト", async () => {
+  it("returns empty object in OAI mode", async () => {
     process.env.LLM_BASE_URL = "https://api.openai.com/v1";
     const names = await getModelDisplayNames();
     expect(names).toEqual({});

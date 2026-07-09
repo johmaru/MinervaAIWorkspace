@@ -27,9 +27,9 @@ type Props = {
 };
 
 /**
- * MemoryViewerModal — memories テーブルのビューア/エディタ。
- * 一覧表示 + 検索/フィルタ + 編集(PATCH) + 削除(論理) + 追加(POST)。
- * 対象は memories テーブルのみ（page_embeddings は対象外）。
+ * MemoryViewerModal — viewer/editor for the memories table.
+ * List display + search/filter + edit (PATCH) + delete (logical) + add (POST).
+ * Targets only the memories table (page_embeddings are excluded).
  */
 export function MemoryViewerModal({ open, onClose }: Props) {
   const { t } = useI18n();
@@ -39,17 +39,17 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   const [search, setSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  // 編集状態
+  // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [editKind, setEditKind] = useState<"fact" | "working">("fact");
   const [editImportance, setEditImportance] = useState(0.5);
   const [saving, setSaving] = useState(false);
 
-  // 削除確認状態
+  // Delete confirmation state
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
-  // 追加状態
+  // Add state
   const [addOpen, setAddOpen] = useState(false);
   const [addContent, setAddContent] = useState("");
   const [addKind, setAddKind] = useState<"fact" | "working">("fact");
@@ -76,7 +76,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     }
   }, [t]);
 
-  // モーダルを開いたときにメモリ一覧 + 最新スレッド取得
+  // Fetch memory list + latest threads when modal opens
   useEffect(() => {
     if (!open) return;
     setPendingDeleteId(null);
@@ -194,7 +194,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   return (
     <AnimateModal open={open} onClose={onClose} panelClassName="max-w-3xl" ariaLabel={t("memoryViewer.title")}>
       <div className="flex flex-col gap-4">
-        {/* ヘッダ */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("memoryViewer.title")}</h2>
           <MotionButton
@@ -215,7 +215,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
           <div className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-500">{error}</div>
         )}
 
-        {/* ツールバー */}
+        {/* Toolbar */}
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -243,7 +243,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
           </MotionButton>
         </div>
 
-        {/* 追加フォーム */}
+        {/* Add form */}
         {addOpen && (
           <div className="flex flex-col gap-3 rounded-xl bg-muted/50 p-3 ring-1 ring-border">
             <textarea
@@ -300,7 +300,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
           </div>
         )}
 
-        {/* リスト */}
+        {/* List */}
         {loading ? (
           <div className="py-8 text-center text-sm text-muted-foreground">{t("memoryViewer.loading")}</div>
         ) : filtered.length === 0 ? (
@@ -313,7 +313,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
                 className="flex flex-col gap-2 rounded-xl bg-muted/40 p-3 ring-1 ring-border"
               >
                 {editingId === m.id ? (
-                  // 編集モード
+                  // Edit mode
                   <div className="flex flex-col gap-2">
                     <textarea
                       value={editContent}
@@ -366,7 +366,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
                     </div>
                   </div>
                 ) : (
-                  // 表示モード
+                  // Display mode
                   <>
                     <div className="flex items-start gap-2">
                       <span

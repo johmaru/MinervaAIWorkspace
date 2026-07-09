@@ -16,9 +16,9 @@ type Props = {
 };
 
 /**
- * MCP サーバー管理パネル（入力エリアのポップオーバー用）。
- * サーバー一覧の選択（スレッド単位の有効/無効）＋
- * サーバー登録フォーム（HTTP / stdio）を提供する。
+ * MCP server management panel (for the popover in the input area).
+ * Provides server list selection (per-thread enable/disable) +
+ * server registration form (HTTP / stdio).
  */
 export function McpPanel({ selectedIds, onChange }: Props) {
   const { t } = useI18n();
@@ -93,7 +93,7 @@ export function McpPanel({ selectedIds, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-2 p-1">
-      {/* サーバー一覧 */}
+      {/* Server list */}
       {servers.length === 0 ? (
         <p className="px-1 py-2 text-xs text-muted-foreground">
           {t("threadSettings.mcpNoServers")}
@@ -130,7 +130,7 @@ export function McpPanel({ selectedIds, onChange }: Props) {
         </div>
       )}
 
-      {/* 登録フォーム トグル */}
+      {/* Registration form toggle */}
       <button
         type="button"
         onClick={() => setFormOpen((v) => !v)}

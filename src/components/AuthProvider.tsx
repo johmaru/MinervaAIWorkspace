@@ -11,9 +11,9 @@ type SessionUser = {
 const AuthContext = createContext<SessionUser | null>(null);
 
 /**
- * クライアントコンポーネントに認証ユーザーを提供。
- * Server Component (page.tsx) で auth() から取得したユーザーを渡す。
- * useUser() でニックネーム等を参照可能（例: Sidebar）。
+ * Provides the authenticated user to client components.
+ * The user is obtained via auth() in the Server Component (page.tsx) and passed down.
+ * Nickname etc. can be referenced via useUser() (e.g. in Sidebar).
  */
 export function AuthProvider({
   user,

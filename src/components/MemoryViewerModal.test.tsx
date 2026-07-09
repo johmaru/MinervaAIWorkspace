@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryViewerModal } from "@/components/MemoryViewerModal";
 import { I18nProvider } from "@/components/I18nProvider";
 
-// /api/memories, /api/threads の fetch をモック
+// Mock fetch for /api/memories, /api/threads
 const mockMemories = [
   {
     id: "m1",
@@ -70,12 +70,12 @@ function renderModal(open = true) {
 }
 
 describe("MemoryViewerModal", () => {
-  it("閉じている時は内容が表示されない", () => {
+  it("does not display content when closed", () => {
     renderModal(false);
     expect(screen.queryByText("User likes tea")).not.toBeInTheDocument();
   });
 
-  it("開くとメモリ一覧が表示される", async () => {
+  it("displays memory list when opened", async () => {
     renderModal(true);
     await waitFor(() => {
       expect(screen.getByText("User likes tea")).toBeInTheDocument();
@@ -83,7 +83,7 @@ describe("MemoryViewerModal", () => {
     });
   });
 
-  it("検索でフィルタされる", async () => {
+  it("filters by search", async () => {
     renderModal(true);
     await waitFor(() => {
       expect(screen.getByText("User likes tea")).toBeInTheDocument();
@@ -94,19 +94,19 @@ describe("MemoryViewerModal", () => {
     expect(screen.queryByText("Working on memory viewer")).not.toBeInTheDocument();
   });
 
-  it("fact フィルタで fact のみ表示", async () => {
+  it("fact filter shows only fact entries", async () => {
     renderModal(true);
     await waitFor(() => {
       expect(screen.getByText("User likes tea")).toBeInTheDocument();
     });
-    // フィルタ select を "fact" に変更
+    // Change filter select to "fact"
     const select = screen.getAllByRole("combobox")[0];
     fireEvent.change(select, { target: { value: "fact" } });
     expect(screen.getByText("User likes tea")).toBeInTheDocument();
     expect(screen.queryByText("Working on memory viewer")).not.toBeInTheDocument();
   });
 
-  it("working フィルタで working のみ表示", async () => {
+  it("working filter shows only working entries", async () => {
     renderModal(true);
     await waitFor(() => {
       expect(screen.getByText("Working on memory viewer")).toBeInTheDocument();

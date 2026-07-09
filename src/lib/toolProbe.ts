@@ -2,10 +2,10 @@ import type OpenAI from "openai";
 import { createLLM, defaultModel } from "@/lib/llm";
 
 /**
- * モデルが function calling (tool use) を安定してサポートするかの判定結果。
+ * Result of determining whether the model stably supports function calling (tool use).
  *
- * GLM-5.2 は `response_format` が不安定な実績があり、tool_calls も同様に
- * 不安定な可能性がある。そのため起動時に1回プローブして判定する。
+ * GLM-5.2 has a track record of unstable `response_format`, and tool_calls may
+ * similarly be unstable. Therefore, a probe is run once at startup to determine this.
  */
 export type ToolSupport = {
   supported: boolean;
@@ -15,14 +15,14 @@ export type ToolSupport = {
 let cached: ToolSupport | null = null;
 let probePromise: Promise<ToolSupport> | null = null;
 
-/** 設定変更時に呼んでキャッシュを破棄する（LLM 関連設定変更時）。 */
+/** Call to discard the cache on config changes (when LLM-related settings change). */
 export function resetToolProbeCache(): void {
   cached = null;
   probePromise = null;
 }
 
 /**
- * ダミー検索ツール定義。プローブ用で実際には呼ばれないことを期待する。
+ * Dummy search tool definition for probing. Expected to never actually be called.
  */
 const PROBE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -42,22 +42,21 @@ const PROBE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 ];
 
 /**
- * モデルが function calling をサポートするかプローブする。
+ * Probes whether the model supports function calling.
+ * Probe content: define a dummy search tool in `tools`, and call
+ * `chat.completions.create` once with `stream:false` using the message
+ * "Return the string 'probe-ok' without calling any tool."
  *
- * プローブ内容: `tools` にダミー検索ツールを定義し、
- * "Return the string 'probe-ok' without calling any tool." というメッセージで
- * 1回 `chat.completions.create` を `stream:false` で呼ぶ。
+ * - `finish_reason==="stop"` and content contains "probe-ok" → supported: true
+ * - `tool_calls` were called unprompted, or error/timeout → supported: false
  *
- * - `finish_reason==="stop"` かつ content に "probe-ok" → supported: true
- * - `tool_calls` が勝手に呼ばれた、またはエラー/タイムアウト → supported: false
+ * Results are cached in-process (same pattern as getUmansModels).
+ * The probe is started in the background at startup; `probeToolSupport`
+ * awaits until results are ready.
  *
- * 結果はプロセス内キャッシュ（getUmansModels のパターンと同様）。
- * 起動時にバックグラウンドでプローブを開始し、`probeToolSupport` は
- * 結果が揃うまで `await` する設計。
- *
- * @param llm OpenAI クライアント
- * @param model モデル id（未指定時は defaultModel()）
- * @param client テスト注入用。未指定時は createLLM() — ただし llm が必須。
+ * @param llm OpenAI client
+ * @param model Model id (defaults to defaultModel() if unspecified)
+ * @param client For test injection. If unspecified, createLLM() is used — but llm is required.
  */
 export async function probeToolSupport(
   llm: OpenAI,
@@ -92,7 +91,7 @@ async function runProbe(llm: OpenAI, model: string): Promise<ToolSupport> {
     const choice = completion.choices?.[0];
     if (!choice) return { supported: false, checkedAt: new Date() };
 
-    // ツールが勝手に呼ばれた → サポート外（指示に従えない）
+    // Tool was called unprompted → not supported (cannot follow instructions)
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       return { supported: false, checkedAt: new Date() };
     }
@@ -113,11 +112,11 @@ async function runProbe(llm: OpenAI, model: string): Promise<ToolSupport> {
 let warmupStarted = false;
 
 /**
- * プロセス起動時にバックグラウンドでプローブを開始し、初回リクエストの遅延を隠す。
+ * Starts the probe in the background at process startup to hide first-request latency.
  *
- * モジュール読み込み直後は環境変数が未設定の可能性があるため、microtask 遅延で
- * 実行する（エントリポイントでの env 読み込み後に実行させる）。
- * warmup 失敗は無害: 初回 `probeToolSupport()` 呼び出し時に再試行される。
+ * Environment variables may not be set immediately after module load, so it runs
+ * with a microtask delay (to execute after env loading at the entry point).
+ * Warmup failure is harmless: retried on the first `probeToolSupport()` call.
  */
 export function warmupToolProbe(): void {
   if (warmupStarted) return;
@@ -126,7 +125,7 @@ export function warmupToolProbe(): void {
     try {
       void probeToolSupport(createLLM(), defaultModel());
     } catch {
-      // warmup 失敗は無害（初回リクエスト時に再試行される）
+    // Warmup failure is harmless (retried on first request)
     }
   });
 }

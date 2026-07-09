@@ -25,40 +25,40 @@ from scrapling.fetchers import AsyncFetcher
 app = FastAPI()
 
 MAX_CONTENT_LENGTH = 50000
-FETCH_TIMEOUT = 30  # Scrapling のデフォルト
+FETCH_TIMEOUT = 30  # Scrapling default
 SCRAPE_FETCH_TIMEOUT = int(os.environ.get("SCRAPE_TIMEOUT", str(FETCH_TIMEOUT)))
 SEARXNG_SAFE_LIMIT = int(os.environ.get("SEARXNG_SAFE_LIMIT", "5"))
 SCRAPE_BATCH_SIZE = 2
 SCRAPE_BATCH_DELAY = 0.5  # seconds between scrape batches
 
-# 実行時に /config エンドポイントで上書き可能な設定
-# （起動時は compose environment / os.environ で初期化）
+# Settings overridable at runtime via the /config endpoint.
+# Initialized at startup from compose environment / os.environ.
 _runtime_scrape_proxy: str | None = os.environ.get("SCRAPE_PROXY") or None
 _runtime_scrape_timeout: int = SCRAPE_FETCH_TIMEOUT
-# URL 単位のスクレイプキャッシュ（プロセス内、TTL 300s）。
-# /search の1リクエスト内で複数クエリが同じ URL をスクレイピングするのを防ぐ。
+# Per-URL scrape cache (in-process, TTL 300s).
+# Prevents multiple queries in a single /search request from scraping the same URL.
 _SCRAPE_CACHE: dict[str, tuple[float, dict]] = {}
 _SCRAPE_CACHE_TTL = 300.0  # seconds
 
 
 def is_safe_host(hostname: str) -> bool:
-    """SSRF 対策: ホスト名を解決し、プライベート/リンクローカル/ループバック/
-    10進数IP表記を弾く。解決失敗時は fail-closed（不許可）。
+    """SSRF protection: resolve the hostname and reject private / link-local /
+    loopback / decimal-IP notation. fail-closed (deny) on resolution failure.
     """
     try:
         infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
-        # 解決できない = 存在しないドメイン。スクレイプしても意味がないので拒否。
+        # Unresolvable = nonexistent domain. Nothing to scrape, so reject.
         return False
     for info in infos:
         ip_str = info[4][0]
-        # IPv6 の %zone 除去（例: fe80::1%eth0）
+        # Strip IPv6 %zone (e.g. fe80::1%eth0)
         ip_str = ip_str.split("%", 1)[0]
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
-        # プライベート / リンクローカル / ループバック / 予約済み / 未割当 は全て拒否
+        # Reject all private / link-local / loopback / reserved / unspecified addresses
         if (
             ip.is_private
             or ip.is_loopback
@@ -77,23 +77,23 @@ class ScrapeRequest(BaseModel):
 
 @app.post("/scrape")
 async def scrape(req: ScrapeRequest):
-    # URL 正規化
+    # URL normalization
     try:
         parsed = urlparse(req.url)
         if parsed.scheme not in ("http", "https"):
             return JSONResponse(status_code=400, content={"error": "invalid url scheme"})
         normalized = parsed._replace(fragment="").geturl()
-        # ルート URL 以外の末尾スラッシュを削除
+        # Strip trailing slash for non-root URLs
         if normalized.endswith("/") and normalized != f"{parsed.scheme}://{parsed.netloc}/":
             normalized = normalized.rstrip("/")
     except Exception:
         return JSONResponse(status_code=400, content={"error": "invalid url"})
 
-    # SSRF 対策: ホスト名を解決し、内部IPを弾く（10進数IP表記も含む）
+    # SSRF protection: resolve the hostname and reject internal IPs (including decimal-IP notation)
     if not is_safe_host(parsed.hostname or ""):
         return JSONResponse(status_code=400, content={"error": "blocked: private or reserved IP"})
 
-    # robots.txt チェック
+    # robots.txt check
     if not await is_allowed(normalized):
         return JSONResponse(status_code=403, content={"error": "disallowed by robots.txt"})
     try:
@@ -135,11 +135,11 @@ ALLOWED_TIME_RANGES = {"day", "week", "month", "year"}
 
 @app.post("/search")
 async def search(req: SearchRequest):
-    """SearXNG で Web 検索し、上位 URL を並列スクレイピングして返す。
+    """Search the web via SearXNG and scrape the top URLs in parallel.
 
-    SearXNG はローカルコンテナ（JSON API）なので httpx で直接叩く。
-    スクレイピングは既存の is_safe_host / extract_title / extract_text を再利用。
-    robots.txt チェックは省略（検索エンジンが既に公開ページを返している前提）。
+    SearXNG is a local container (JSON API), so we call it directly via httpx.
+    Scraping reuses the existing is_safe_host / extract_title / extract_text.
+    robots.txt check is skipped (the search engine already returns public pages).
     """
     if not req.query.strip():
         return JSONResponse(status_code=400, content={"error": "query is required"})
@@ -148,8 +148,8 @@ async def search(req: SearchRequest):
     time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
 
     async def _fetch_page(client: httpx.AsyncClient, page_params: dict) -> list[dict]:
-        """SearXNG にページネーションで問い合わせ、SAFE_LIMIT 件ずつ取得して
-        max_results 件になるまで蓄積する。各ページ間に wait を入れる。"""
+        """Query SearXNG with pagination, fetching SAFE_LIMIT results at a time
+        and accumulating up to max_results. Inserts a wait between pages."""
         accumulated: list[dict] = []
         remaining = req.max_results
         pageno = 1
@@ -170,7 +170,7 @@ async def search(req: SearchRequest):
             accumulated.extend(batch)
             remaining -= len(batch)
             pageno += 1
-            # ページが要求件数に満たない = SearXNG の結果が尽きた → 追加リクエストしない
+            # Page returned fewer than requested = SearXNG results exhausted -> no further requests
             if len(batch) < want:
                 break
             if remaining > 0:
@@ -186,20 +186,20 @@ async def search(req: SearchRequest):
 
             results = await _fetch_page(client, params)
 
-            # time_range で0件の場合はフィルタなしで再試行（publishedDate 未設定の結果が消えるのを防ぐ）
+            # Retry without the filter when time_range yields 0 results (prevents results without publishedDate from being dropped)
             if not results and time_range:
                 retry_params = {k: v for k, v in params.items() if k != "time_range"}
                 try:
                     results = await _fetch_page(client, retry_params)
                 except Exception:
-                    pass  # 再試行失敗時は空のまま
+            pass  # On retry failure, leave results empty
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results={len(results)}", flush=True)
     except Exception as e:
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results=0 (error)", flush=True)
         return JSONResponse(status_code=502, content={"error": f"search failed: {str(e)}"})
 
-    # スクレイピングを SCRAPE_BATCH_SIZE 件同時バッチで実行（対象サイトへの
-    # レート制限/BAN 回避）。バッチ間に SCRAPE_BATCH_DELAY 秒 wait。
+    # Run scraping in batches of SCRAPE_BATCH_SIZE concurrent requests (to avoid
+    # rate-limiting / bans on target sites). Wait SCRAPE_BATCH_DELAY seconds between batches.
     t_scrape = time.monotonic()
     scraped: list[dict] = []
     for i in range(0, len(results), SCRAPE_BATCH_SIZE):
@@ -218,7 +218,7 @@ async def search(req: SearchRequest):
                 "scraped": False,
                 "content": "",
                 "scrape_title": "",
-                "raw_content": (r.get("content", "") or "")[:1000],  # SearXNG の content 全文(スクレイピング失敗時のフォールバック)
+                "raw_content": (r.get("content", "") or "")[:1000],  # Full SearXNG content (fallback when scraping fails)
             }
             if url:
                 scraped_r = next(scrape_iter, None)
@@ -241,11 +241,11 @@ class ConfigRequest(BaseModel):
 
 @app.post("/config")
 async def update_config(req: ConfigRequest):
-    """app コンテナから scraper の実行時設定を動的更新。
+    """Dynamically update the scraper's runtime settings from the app container.
 
-    SCRAPE_PROXY / SCRAPE_TIMEOUT は compose 起動時に固定されるため、
-    このエンドポイントでプロセス内変数を書き換えて即時反映する。
-    os.environ も同期し、次回起動時の整合性を保つ。
+    SCRAPE_PROXY / SCRAPE_TIMEOUT are fixed at compose startup, so this
+    endpoint rewrites in-process variables for immediate effect.
+    os.environ is also synced to keep the next startup consistent.
     """
     global _runtime_scrape_proxy, _runtime_scrape_timeout
     if req.scrape_proxy is not None:
@@ -262,10 +262,10 @@ async def update_config(req: ConfigRequest):
 
 
 async def scrape_url_safe(url: str) -> dict:
-    """既存のスクレイプロジックを再利用して URL を取得。失敗時は空 dict。
+    """Fetch a URL by reusing the existing scrape logic. Returns an empty dict on failure.
 
-    SSRF 保護（is_safe_host）を継承。robots.txt は /search 内では省略。
-    SCRAPE_PROXY 環境変数で Tor 経由を切り替え可能。
+    Inherits SSRF protection (is_safe_host). robots.txt is skipped within /search.
+    The SCRAPE_PROXY env var enables routing through Tor.
     """
     try:
         parsed = urlparse(url)
@@ -279,7 +279,7 @@ async def scrape_url_safe(url: str) -> dict:
     if not is_safe_host(parsed.hostname or ""):
         return {}
 
-    # キャッシュチェック（プロセス内、TTL 300s）
+    # Cache check (in-process, TTL 300s)
     now = time.monotonic()
     cached = _SCRAPE_CACHE.get(normalized)
     if cached and (now - cached[0]) < _SCRAPE_CACHE_TTL:
@@ -317,7 +317,7 @@ async def scrape_url_safe(url: str) -> dict:
 
 
 def extract_title(page) -> str:
-    """<title> → og:title → 空文字。"""
+    """<title> -> og:title -> empty string."""
     try:
         titles = page.css("title")
         if titles:
@@ -338,7 +338,7 @@ def extract_title(page) -> str:
 
 
 def extract_text(page) -> str:
-    """main → article → body の優先で本文を取得。不要タグを除去して get_all_text()。"""
+    """Get body text, preferring main -> article -> body. Strips unwanted tags and calls get_all_text()."""
     for selector in ("main", "article", "body"):
         try:
             containers = page.css(selector)
@@ -350,7 +350,7 @@ def extract_text(page) -> str:
                 ignore_tags=("script", "style", "nav", "footer", "header", "aside", "iframe", "noscript"),
             )
             text = str(text)
-            # 連続空行を正規化
+            # Normalize consecutive blank lines
             text = re.sub(r"\n{3,}", "\n\n", text).strip()
             if text:
                 return text[:MAX_CONTENT_LENGTH]
@@ -360,7 +360,7 @@ def extract_text(page) -> str:
 
 
 async def is_allowed(url: str) -> bool:
-    """robots.txt を取得して判定。取得失敗 / 404 は許可（fail-open）。"""
+    """Fetch robots.txt and decide. Fetch failure / 404 is allowed (fail-open)."""
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     try:
@@ -368,7 +368,7 @@ async def is_allowed(url: str) -> bool:
     except Exception:
         return True
     if page.status != 200:
-        # 404 含め取得できなければ許可
+        # Allow if robots.txt cannot be fetched (including 404)
         return True
     try:
         rules = parse_robots_txt(str(page.body, encoding="utf-8", errors="replace"))
@@ -383,7 +383,7 @@ async def is_allowed(url: str) -> bool:
 
 
 def parse_robots_txt(text: str) -> dict:
-    """User-agent: * ブロックの Disallow 行を抽出。Allow / wildcard は未サポート。"""
+    """Extract Disallow lines from the User-agent: * block. Allow / wildcard are unsupported."""
     disallow_paths: list[str] = []
     in_all_block = False
     for line in text.splitlines():
@@ -405,15 +405,15 @@ def parse_robots_txt(text: str) -> dict:
 
 @app.get("/tor-check")
 async def tor_check():
-    """Tor 接続確認: 直接接続と Tor 経由の出口IPを取得して比較。
+    """Tor connection check: fetch the exit IP via both a direct connection and via Tor, then compare.
 
-    SCRAPE_PROXY 環境変数が設定されていれば Tor 経由、なければ直接接続。
-    両方のIPを返し、Tor 経由かどうかを判定する。
+    If SCRAPE_PROXY is set, go through Tor; otherwise connect directly.
+    Returns both IPs and whether the connection is via Tor.
     """
     proxy = os.environ.get("SCRAPE_PROXY") or None
     ipify_url = "https://api.ipify.org?format=json"
 
-    # 直接接続のIP
+    # Direct connection IP
     direct_ip = None
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -423,7 +423,7 @@ async def tor_check():
     except Exception:
         pass
 
-    # Tor 経由のIP（SCRAPE_PROXY が設定されている場合）
+    # Tor-routed IP (when SCRAPE_PROXY is set)
     tor_ip = None
     tor_error = None
     if proxy:

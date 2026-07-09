@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/threads — スレッド一覧（新着順）。本文は含まずメタのみ。
+ * GET /api/threads — Thread list (newest first). Metadata only, no body.
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -41,7 +41,7 @@ type CreateBody = {
 };
 
 /**
- * POST /api/threads — 新規スレッド作成。
+ * POST /api/threads — Create a new thread.
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -90,8 +90,8 @@ type PatchBody = {
 };
 
 /**
- * PATCH /api/threads — 指定 id のスレッドを部分更新。
- * クエリ文字列 ?id=... で指定（一覧ページと同居するルートのため）。
+ * PATCH /api/threads — Partially update a thread by id.
+ * Specified via query string ?id=... (because it shares a route with the list page).
  */
 export async function PATCH(req: Request) {
   const user = await getSessionUser();

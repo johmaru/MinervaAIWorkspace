@@ -6,11 +6,18 @@
  *    launcher into dist/UmansChat/
  * 3. Build umanschat.exe via `bun build --compile` (bundles the Bun runtime)
  *
+ * Before wiping dist/, stashes the prior dist/UmansChat/.env and data/ so an
+ * in-place rebuild preserves live user config (REGISTRATION_LOCKED, secrets)
+ * and the SQLite DB — matching the in-app updater's preserve contract. See
+ * scripts/pack-preserve.ts.
+ *
  * Usage: bun scripts/pack-exe.ts
  */
-import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync, lstatSync, readlinkSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, cpSync, writeFileSync, rmSync, lstatSync, readlinkSync, readdirSync, readFileSync, mkdtempSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
+import { stashInstallState, restoreInstallState, applyExeEnvDefaults } from "./pack-preserve";
 
 const root = process.cwd();
 const distDir = join(root, "dist");
@@ -20,6 +27,28 @@ const outDir = join(distDir, "UmansChat");
 // up a stale dist/ (which causes recursive dist/UmansChat/dist/... nesting).
 // Deleting the entire dist/ (not just dist/UmansChat) ensures the trace sees
 // no dist tree at all. .next is cleaned to avoid reusing stale tracing output.
+// Stash the prior dist/UmansChat/.env and data/ BEFORE wiping, so an in-place
+// rebuild preserves live user config (REGISTRATION_LOCKED, secrets) and the
+// SQLite DB — matching the in-app updater's preserve contract. Stash is
+// created before the wipe so a copy failure aborts the pack with no data loss.
+const prevOutDir = join(distDir, "UmansChat");
+let stashDir: string | null = null;
+if (existsSync(prevOutDir)) {
+  stashDir = mkdtempSync(join(tmpdir(), "umanschat-pack-preserve-"));
+  const stashed = stashInstallState(prevOutDir, stashDir);
+  const stashedKeys: string[] = [];
+  if (stashed.env) stashedKeys.push(".env");
+  if (stashed.data) stashedKeys.push("data/");
+  if (stashedKeys.length > 0) {
+    console.log(`[pack] Stashed prior install state: ${stashedKeys.join(", ")}`);
+  } else {
+    // Nothing to preserve — drop the empty temp dir and null the handle so the
+    // restore path and finally block treat this as a fresh pack.
+    rmSync(stashDir, { recursive: true, force: true });
+    stashDir = null;
+  }
+}
+
 if (existsSync(distDir)) {
   rmSync(distDir, { recursive: true, force: true });
 }
@@ -27,6 +56,7 @@ const nextDir = join(root, ".next");
 if (existsSync(nextDir)) {
   rmSync(nextDir, { recursive: true, force: true });
 }
+
 
 console.log("[pack] Building standalone server...");
 execSync("bun run build", { cwd: root, stdio: "inherit", env: { ...process.env, DATABASE_URL: ":memory:" } });
@@ -82,6 +112,36 @@ for (const j of junctions) {
   }
 }
 
+// Stub sharp in @xenova/transformers to avoid native binary dependency.
+// transformers.js has a top-level `import sharp from 'sharp'` in image.js that
+// runs at module load. Even though text embedding never invokes sharp, the import
+// itself fails when the native binary (sharp-win32-x64.node + libvips DLLs) and its
+// transitive deps (semver, etc.) are missing — which is common in CI/clean installs.
+// We overwrite sharp's main entry point (lib/index.js, per package.json "main") with
+// a chainable no-op stub. This short-circuits the entire load chain — constructor.js,
+// libvips.js, semver, and all method modules are never required. The `import sharp`
+// succeeds, transformers loads, and text embedding works without native binaries.
+const transformersSharpDir = join(outDir, ".next", "node_modules", "@xenova");
+if (existsSync(transformersSharpDir)) {
+  for (const entry of readdirSync(transformersSharpDir)) {
+    if (!entry.startsWith("transformers-")) continue;
+    const sharpEntry = join(transformersSharpDir, entry, "node_modules", "sharp", "lib", "index.js");
+    if (existsSync(sharpEntry)) {
+      writeFileSync(sharpEntry, [
+        "// STUBBED by pack-exe.ts: sharp native binary is not available in the exe distribution.",
+        "// transformers.js only uses sharp for image processing; text embedding does not invoke it.",
+        "// Replaces the main entry point (package.json 'main') to short-circuit the entire",
+        "// load chain (constructor.js → libvips.js → semver → native binary).",
+        "// Returns a chainable no-op so `import sharp from 'sharp'` succeeds at module load.",
+        "module.exports = () => new Proxy(function () {}, {",
+        "  get: () => () => Promise.resolve({}),",
+        "});",
+      ].join("\n") + "\n");
+    }
+  }
+  console.log("[pack] Stubbed sharp in @xenova/transformers (native binary not needed for text embedding).");
+}
+
 // public/ → dist/UmansChat/public/
 const publicSrc = join(root, "public");
 if (existsSync(publicSrc)) {
@@ -119,10 +179,42 @@ cpSync(
   join(outDir, ".env.example"),
 );
 
+// Restore stashed live .env and data/ (if any), then re-apply exe-only service
+// defaults. The user's previous .env is authoritative — it overwrites any
+// host/OFT-copied .env from standalone so security keys (REGISTRATION_LOCKED,
+// ALLOWED_REGISTRATION_IPS), secrets, and LLM_* survive an in-place rebuild.
+// exeDefaults then strips Docker service hostnames (embedder/scraper/searxng)
+// that are unreachable in the exe distribution. Stash is removed in a finally so
+// a later pack failure does not leave temp dirs forever.
+try {
+  if (stashDir) {
+    restoreInstallState(stashDir, outDir);
+    console.log("[pack] Restored prior install state (.env/data) after assemble.");
+  }
+
+  // Re-apply exe-only defaults on the restored (or OFT-copied) .env.
+  const distEnvPath = join(outDir, ".env");
+  if (existsSync(distEnvPath)) {
+    const envContent = readFileSync(distEnvPath, "utf8");
+    writeFileSync(distEnvPath, applyExeEnvDefaults(envContent));
+    console.log("[pack] Sanitized .env for exe environment (Docker service hostnames removed).");
+  }
+} finally {
+  if (stashDir) {
+    rmSync(stashDir, { recursive: true, force: true });
+  }
+}
+
 // launcher → dist/UmansChat/umanschat.cjs
 cpSync(
   join(root, "launcher", "umanschat-launcher.cjs"),
   join(outDir, "umanschat.cjs"),
+);
+
+// launcher/user-data.cjs → dist/UmansChat/user-data.cjs (required by launcher)
+cpSync(
+  join(root, "launcher", "user-data.cjs"),
+  join(outDir, "user-data.cjs"),
 );
 
 // package.json → dist/UmansChat/ (required by bun build --compile)
@@ -130,6 +222,14 @@ cpSync(
   join(root, "package.json"),
   join(outDir, "package.json"),
 );
+
+// Override version from APP_VERSION env var (set by release workflow).
+// The dev placeholder "0.0.0" is replaced with the real release version.
+const distPkgPath = join(outDir, "package.json");
+const distPkg = JSON.parse(readFileSync(distPkgPath, "utf8"));
+distPkg.version = process.env.APP_VERSION || distPkg.version || "0.0.0";
+writeFileSync(distPkgPath, JSON.stringify(distPkg, null, 2));
+console.log(`[pack] Version set to ${distPkg.version}`);
 
 // node.exe → dist/UmansChat/node.exe (required to spawn server.js at runtime).
 // The compiled umanschat.exe bundles the launcher (run via Bun), but the app

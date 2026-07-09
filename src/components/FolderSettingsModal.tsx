@@ -11,21 +11,21 @@ type Patch = {
 };
 
 type Props = {
-  /** 既存フォルダ編集時は FolderSummary。新規作成時は null。 */
+  /** FolderSummary when editing an existing folder. null when creating new. */
   folder: FolderSummary | null;
   open: boolean;
   onClose: () => void;
-  /** 既存フォルダ更新。folder が非 null のとき使用。 */
+  /** Update an existing folder. Used when folder is non-null. */
   onSave?: (patch: Patch) => Promise<boolean>;
-  /** 新規フォルダ作成。folder が null のとき使用。 */
+  /** Create a new folder. Used when folder is null. */
   onCreate?: (patch: Patch) => Promise<boolean>;
 };
 
 /**
- * フォルダ設定モーダル。名前・Instruction・メモリスコープを編集。
- * folder が null のときは新規作成モード（DB 作成は保存時まで遅延）。
- * folder.id 変更時にローカル state を同期（スレッド切替と同じパターン）。
- * モーダル外クリック / Esc で閉じる（SettingsModal と同じ枠）。
+ * Folder settings modal. Edits name, Instruction, and memory scope.
+ * When folder is null, it is in create-new mode (DB creation is deferred until save).
+ * Syncs local state on folder.id change (same pattern as thread switching).
+ * Closes on outside click / Esc (same frame as SettingsModal).
  */
 export function FolderSettingsModal({ folder, open, onClose, onSave, onCreate }: Props) {
   const { t } = useI18n();
@@ -37,20 +37,20 @@ export function FolderSettingsModal({ folder, open, onClose, onSave, onCreate }:
   );
   const [saving, setSaving] = useState(false);
 
-  // folder 切替時にローカル state を同期
+  // Sync local state on folder switch
   useEffect(() => {
     setName(folder?.name ?? "");
     setInstruction(folder?.instruction ?? "");
     setMemoryScope(folder?.memoryScope ?? "global");
   }, [folder?.id, folder?.name, folder?.instruction, folder?.memoryScope]);
 
-  // 新規作成モードでは常に dirty（空欄でもデフォルトで保存可能）
+  // In create-new mode, always dirty (can save even when empty by default)
   const dirty = isNew ||
     name !== folder!.name ||
     instruction !== (folder!.instruction ?? "") ||
     memoryScope !== folder!.memoryScope;
 
-  // Esc で閉じる
+  // Close on Esc
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -92,7 +92,7 @@ export function FolderSettingsModal({ folder, open, onClose, onSave, onCreate }:
       </div>
 
         <div className="space-y-4">
-          {/* 名前 */}
+          {/* Name */}
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("folderModal.folderName")}
@@ -119,7 +119,7 @@ export function FolderSettingsModal({ folder, open, onClose, onSave, onCreate }:
             />
           </div>
 
-          {/* メモリスコープ */}
+          {/* Memory scope */}
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("folderModal.memoryScope")}

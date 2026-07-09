@@ -13,11 +13,11 @@ import { useI18n } from "@/components/I18nProvider";
 const ACTIVE_THREAD_STORAGE_KEY = "umanschat-active-thread";
 
 /**
- * アプリ全体のシェル。アクティブスレッド状態をここで保持し、
- * Sidebar（一覧 + 選択）と ChatWindow（単一会話）に配る。
+ * Application shell. Holds the active thread state here and
+ * distributes it to Sidebar (list + selection) and ChatWindow (single conversation).
  *
- * フォルダ機能: useFolders でフォルダ一覧を管理し、
- * Sidebar の右クリック操作でフォルダ CRUD + スレッド移動を行う。
+ * Folder feature: manages the folder list via useFolders,
+ * and performs folder CRUD + thread moving via Sidebar right-click actions.
  */
 export function ChatShell() {
   const { threads, isLoading, error, refresh, create, rename, remove, move } =
@@ -34,7 +34,7 @@ export function ChatShell() {
   const { t } = useI18n();
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // folder: null = 新規作成モード（DB 作成は保存時まで遅延）
+  // folder: null = create-new mode (DB creation is deferred until save)
   const [folderModal, setFolderModal] = useState<{
     folder: FolderSummary | null;
   } | null>(null);
@@ -43,8 +43,8 @@ export function ChatShell() {
 
   const closeHelp = useCallback(() => setHelpOpen(false), []);
 
-  // #29: 最後に選択したスレッドを localStorage に保存・復元
-  // マウント時に復元（threads ロード後に有効性チェック）
+  // #29: Persist and restore the last selected thread to localStorage
+  // Restore on mount (validity check after threads load)
   useEffect(() => {
     if (threads.length === 0) return;
     const saved =
@@ -54,11 +54,11 @@ export function ChatShell() {
     if (saved && threads.some((t) => t.id === saved) && !activeThreadId) {
       setActiveThreadId(saved);
     }
-    // 復元は初回のみ。activeThreadId 依存しない（一度設定したら再上書きしない）
+    // Restore only on first load. Does not depend on activeThreadId (once set, not overwritten)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threads]);
 
-  // activeThreadId 変更時に localStorage へ永続化
+  // Persist to localStorage when activeThreadId changes
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (activeThreadId) {
@@ -112,9 +112,9 @@ export function ChatShell() {
     void refresh();
   }, [refresh]);
 
-  // --- フォルダ操作 ---
+  // --- Folder operations ---
 
-  // #16: フォルダ作成をモーダル保存時に遅延。handleCreateFolder はモーダルを開くだけ。
+  // #16: Folder creation is deferred to modal save. handleCreateFolder only opens the modal.
   const handleCreateFolder = useCallback(() => {
     setFolderModal({ folder: null });
   }, []);
@@ -123,7 +123,7 @@ export function ChatShell() {
     setFolderModal({ folder });
   }, []);
 
-  // 新規フォルダ作成（モーダル保存時）
+  // Create a new folder (on modal save)
   const handleCreateNewFolder = useCallback(
     async (patch: {
       name: string;
@@ -140,7 +140,7 @@ export function ChatShell() {
     [createFolder, refreshFolders],
   );
 
-  // 既存フォルダ更新（モーダル保存時）
+  // Update an existing folder (on modal save)
   const handleSaveFolder = useCallback(
     async (patch: {
       name: string;
@@ -160,7 +160,7 @@ export function ChatShell() {
       const ok = await removeFolder(id);
       if (!ok) return;
       void refreshFolders();
-      void refresh(); // スレッドの folderId が DB 側で SET NULL になるため一覧更新
+      void refresh(); // Thread folderId becomes SET NULL on the DB side, so refresh the list
     },
     [removeFolder, refreshFolders, refresh],
   );
@@ -174,7 +174,7 @@ export function ChatShell() {
   );
   const handleCloseSidebar = useCallback(() => setSidebarOpen(false), []);
 
-  // Esc キーでサイドバーを閉じる
+  // Close sidebar with Esc key
   useEffect(() => {
     if (!sidebarOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -200,7 +200,7 @@ export function ChatShell() {
         )}
       </AnimatePresence>
 
-      {/* サイドバー: md 以上は常時表示、未満はオーバーレイ */}
+      {/* Sidebar: always visible on md+ screens, overlay on smaller screens */}
       <div
         className={`fixed inset-y-0 left-0 z-40 transition-transform duration-200 md:static md:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
@@ -230,7 +230,7 @@ export function ChatShell() {
       </div>
 
       <main className="flex h-full min-w-0 flex-1 flex-col">
-        {/* モバイルヘッダー: ハンバーガーボタン */}
+        {/* Mobile header: hamburger button */}
         <div className="flex items-center gap-2 bg-[var(--glass-bg)] px-3 py-2.5 backdrop-blur-md md:hidden">
           <button
             type="button"

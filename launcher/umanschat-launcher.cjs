@@ -16,9 +16,10 @@
  * does not support — Docker runs `node server.js` for parity).
  */
 const { spawn, exec } = require("child_process");
-const { mkdirSync, existsSync, readFileSync, writeFileSync } = require("fs");
+const { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, cpSync, rmSync, renameSync, unlinkSync } = require("fs");
 const { join, dirname, resolve } = require("path");
 const http = require("http");
+const { resolveUserDataRoot, migrateLegacyData, resolveDataPaths } = require("./user-data.cjs");
 
 const PORT = process.env.PORT || "3001";
 
@@ -31,8 +32,14 @@ const appRoot = isCompiled
   ? dirname(process.execPath)
   : __dirname;
 
-// 1. Ensure the data/ directory exists
-const dataDir = join(appRoot, "data");
+// 1. Resolve user data root (~/.umans_chat_unofficial) and migrate legacy appRoot data.
+// The exe folder becomes purely application binaries — safe to delete/replace.
+// On first launch with legacy appRoot/.env + appRoot/data, copies them to user folder.
+const userDataRoot = resolveUserDataRoot();
+mkdirSync(userDataRoot, { recursive: true });
+migrateLegacyData(appRoot, userDataRoot);
+const paths = resolveDataPaths(userDataRoot);
+const dataDir = paths.dataDir;
 mkdirSync(dataDir, { recursive: true });
 
 // Absolute path for DATABASE_URL (resolved after .env sync). Shared between
@@ -44,7 +51,7 @@ let dbPath = null;
 // 2. .env sync: append keys from .env.example to .env (existing keys are not modified)
 function syncEnv() {
   const examplePath = join(appRoot, ".env.example");
-  const envPath = join(appRoot, ".env");
+  const envPath = paths.envPath;
   if (!existsSync(examplePath)) return;
 
   const exampleRaw = readFileSync(examplePath, "utf8");
@@ -84,7 +91,7 @@ function syncEnv() {
 // Using an absolute path relative to appRoot guarantees the same file regardless of CWD.
 function resolveDbPath() {
   let dbUrl = `data/umanschat.db`;
-  const envPath = join(appRoot, ".env");
+  const envPath = paths.envPath;
   if (existsSync(envPath)) {
     const envRaw = readFileSync(envPath, "utf8");
     const m = envRaw.match(/^DATABASE_URL=(.+)$/m);
@@ -92,7 +99,7 @@ function resolveDbPath() {
   }
   // Return :memory: as-is without making it absolute (in-memory DB)
   if (dbUrl === ":memory:") return dbUrl;
-  return resolve(appRoot, dbUrl);
+  return resolve(userDataRoot, dbUrl);
 }
 
 // 3. Run migrations: use drizzle-orm's bun-sqlite migrator (no native addon).
@@ -154,12 +161,115 @@ function waitForServer(host, port, timeoutMs = 30000) {
   });
 }
 
+// ── Update application ──
+// Reads the marker file written by /api/update POST, swaps files from
+// staging into appRoot (preserving data/ and .env), replaces umanschat.exe
+// (rename-running → copy-new), then spawns the new exe and exits.
+async function applyUpdate() {
+  const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+  const stagingDir = marker.stagingDir;
+
+  if (!existsSync(stagingDir)) {
+    throw new Error("Staging directory not found: " + stagingDir);
+  }
+
+  console.log("[launcher] Applying update", marker.version, "...");
+
+  // 1. Stop the child node.exe (graceful, then force)
+  child.kill("SIGTERM");
+  await new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 5000);
+    child.on("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
+  // 2. Copy all files from staging to appRoot (skip data/ and .env)
+  const entries = readdirSync(stagingDir);
+  for (const entry of entries) {
+    if (entry === "data" || entry === ".env") continue;
+    if (entry === "umanschat.exe") continue; // Handle separately
+    const src = join(stagingDir, entry);
+    const dst = join(appRoot, entry);
+    cpSync(src, dst, { recursive: true, force: true });
+    console.log("[launcher] Updated:", entry);
+  }
+
+  // 3. Replace umanschat.exe (can't overwrite running exe → rename + copy)
+  const exePath = join(appRoot, "umanschat.exe");
+  const oldExePath = join(appRoot, "umanschat.exe.old");
+  const newExePath = join(stagingDir, "umanschat.exe");
+  if (existsSync(newExePath)) {
+    // Rename running exe (Windows allows renaming a running exe)
+    if (existsSync(oldExePath)) unlinkSync(oldExePath);
+    renameSync(exePath, oldExePath);
+    cpSync(newExePath, exePath);
+    console.log("[launcher] Replaced umanschat.exe");
+  }
+
+  // 4. Delete marker file
+  unlinkSync(markerPath);
+
+  // 5. Spawn new umanschat.exe (detached — survives parent exit)
+  const newProc = spawn(exePath, [], {
+    detached: true,
+    stdio: "ignore",
+    cwd: appRoot,
+  });
+  newProc.unref();
+  console.log("[launcher] Update complete. New process started.");
+
+  // 6. Exit current process
+  process.exit(0);
+}
+
 // ── Main processing ──
 console.log("[launcher] UmansChat starting...");
+// Clean up old exe from a previous update (Windows can't delete a running exe,
+// so the old one is renamed to .old and deleted on next startup)
+const oldExe = join(appRoot, "umanschat.exe.old");
+if (existsSync(oldExe)) {
+  try {
+    unlinkSync(oldExe);
+    console.log("[launcher] Cleaned up umanschat.exe.old");
+  } catch (err) {
+    console.warn("[launcher] Could not delete umanschat.exe.old:", err.message);
+  }
+}
 syncEnv();
 dbPath = resolveDbPath();
 mkdirSync(dirname(dbPath), { recursive: true });
 runMigrations();
+
+// Load .env into process.env (Next.js standalone doesn't load .env in production).
+// The server inherits process.env via spawn({ env: { ...process.env } }),
+// so .env values (EMBED_PROVIDER, EMBEDDER_URL, LLM_API_KEY, etc.) must be
+// loaded here before spawning the server.
+// Uses inline parsing instead of @next/env (Bun --compile doesn't resolve
+// external packages at runtime the same way Node does).
+// .env values always override inherited system env — the dist .env is the
+// authoritative config for the exe distribution (e.g., EMBED_PROVIDER=local
+// must override a leaked EMBED_PROVIDER=http from a Docker/dev session).
+const envPath = paths.envPath;
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (key) process.env[key] = val;
+  }
+}
+
+// Set UMANS_USER_ROOT so the server (and its helpers getDataDir/resolveEnvPath)
+// locate .env, data/, cloudflared, and update staging in the user folder.
+process.env.UMANS_USER_ROOT = userDataRoot;
 
 // 5. Start the standalone server.
 // The compiled umanschat.exe runs the launcher via Bun, but the app uses
@@ -172,21 +282,29 @@ if (!existsSync(nodeExe)) {
   process.exit(1);
 }
 const serverPath = join(appRoot, "server.js");
-const child = spawn(nodeExe, [serverPath], {
-  cwd: appRoot,
-  env: { ...process.env, PORT, DATABASE_URL: dbPath },
-  stdio: "inherit",
-});
 
-child.on("error", (err) => {
-  console.error("[launcher] Failed to start server:", err.message);
-  process.exit(1);
-});
+let updating = false;
+let child = null;
 
-child.on("exit", (code) => {
-  console.log(`[launcher] Server exited with code ${code}`);
-  process.exit(code ?? 0);
-});
+/** Spawn node.exe server.js and attach the exit handler. Reusable after update recovery. */
+function startServer() {
+  child = spawn(nodeExe, [serverPath], {
+    cwd: appRoot,
+    env: { ...process.env, PORT, DATABASE_URL: dbPath, UMANS_USER_ROOT: userDataRoot },
+    stdio: "inherit",
+  });
+  child.on("error", (err) => {
+    console.error("[launcher] Failed to start server:", err.message);
+    process.exit(1);
+  });
+  child.on("exit", (code) => {
+    if (updating) return; // Don't exit during update — applyUpdate handles lifecycle
+    console.log(`[launcher] Server exited with code ${code}`);
+    process.exit(code ?? 0);
+  });
+}
+
+startServer();
 
 // 6. Open the browser
 waitForServer("localhost", Number(PORT))
@@ -198,3 +316,18 @@ waitForServer("localhost", Number(PORT))
   .catch((err) => {
     console.error(`[launcher] ${err.message}`);
   });
+
+// 7. Poll for update marker every 5 seconds
+const markerPath = paths.markerPath;
+const updateInterval = setInterval(() => {
+  if (!updating && existsSync(markerPath)) {
+    updating = true;
+    clearInterval(updateInterval);
+    applyUpdate().catch((err) => {
+      console.error("[launcher] Update failed:", err.message);
+      try { unlinkSync(markerPath); } catch {}
+      updating = false;
+      startServer(); // Restart server with old files
+    });
+  }
+}, 5000);

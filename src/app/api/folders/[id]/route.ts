@@ -7,9 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * DELETE /api/folders/[id] — フォルダ削除。
- * 紐づく threads.folderId は ON DELETE SET NULL で null 化される。
- * メッセージ・embedding は残る（メモリは消えない）。
+ * DELETE /api/folders/[id] — Delete a folder.
+ * Associated threads.folderId is set to null via ON DELETE SET NULL.
+ * Messages and embeddings remain (memories are not lost).
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

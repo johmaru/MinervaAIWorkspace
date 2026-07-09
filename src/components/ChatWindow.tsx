@@ -26,7 +26,7 @@ export const ChatWindow = memo(function ChatWindow({
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // smooth スクロールの重複発火を抑制（連続 delta で smooth が積み重なりカクつくのを防ぐ）
+  // Suppress duplicate smooth-scroll triggers (consecutive deltas accumulate and cause janky scrolling)
   const scrollAnimRef = useRef<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
@@ -39,7 +39,7 @@ export const ChatWindow = memo(function ChatWindow({
   const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // スレッド切替時に mcpServerIds / connectionIds を同期（rapid はユーザー操作まで維持）
+  // Sync mcpServerIds / connectionIds on thread switch (rapid is preserved until user interaction)
   useEffect(() => {
     setMcpServerIds(thread?.mcpServerIds ?? []);
     setConnectionIds(thread?.connectionIds ?? []);
@@ -58,7 +58,7 @@ export const ChatWindow = memo(function ChatWindow({
     [updateThread],
   );
 
-  // メニュー外クリックで閉じる
+  // Close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -72,7 +72,7 @@ export const ChatWindow = memo(function ChatWindow({
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
-  // メニュー開閉時にコネクション一覧を取得
+  // Fetch connection list when menu opens/closes
   useEffect(() => {
     if (menuOpen) void fetchConnections();
   }, [menuOpen, fetchConnections]);
@@ -86,7 +86,7 @@ export const ChatWindow = memo(function ChatWindow({
   );
   const pendingRef = useRef<string | null>(null);
 
-  // OAuth コールバックのリダイレクトパラメータを処理
+  // Process OAuth callback redirect parameters
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("connection_success")) {
@@ -99,15 +99,15 @@ export const ChatWindow = memo(function ChatWindow({
     }
   }, []);
 
-  // 自動スクロール: ユーザーが下部付近にいる場合のみスムーズスクロール。
-  // 上にスクロール中はジャンプしない（ユーザーの閲覧を妨げない）。
+  // Auto-scroll: only smooth-scroll when the user is near the bottom.
+  // Do not jump while scrolling up (to avoid disrupting the user's reading).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distFromBottom < 150;
     if (!nearBottom) return;
-    // スクロール中は新しい smooth スクロールを発火しない（重複抑制でカクつき防止）。
+    // Do not fire a new smooth scroll while one is in progress (suppress duplicates to prevent jank).
     if (scrollAnimRef.current !== null) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     scrollAnimRef.current = window.setTimeout(() => {
@@ -115,7 +115,7 @@ export const ChatWindow = memo(function ChatWindow({
     }, 400);
   }, [messages]);
 
-  // 入力欄の自動高さ
+  // Auto-resize input height
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
@@ -129,7 +129,7 @@ export const ChatWindow = memo(function ChatWindow({
     for (const file of Array.from(files)) {
       await uploadAttachment(file);
     }
-    // input をリセットして同じファイルを再選択可能にする
+    // Reset input to allow re-selecting the same file
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -163,13 +163,13 @@ export const ChatWindow = memo(function ChatWindow({
       onConversationEnded?.();
     });
     setInput("");
-    // 送信後に保留中の添付ファイルをクリア
+    // Clear pending attachments after sending
     for (const att of pendingAttachments) removeAttachment(att.id);
   }
 
-  // 新規スレッド作成が完了し threadId が切り替わったら、保留中の入力を自動送信する。
-  // スレッドのロード（isLoading）が完了し thread が解決してから送信しないと、
-  // ロード効果の setMessages([]) が楽観的メッセージを上書きしてしまう競合を防ぐ。
+  // Auto-send pending input once new thread creation completes and threadId switches.
+  // Must wait until thread loading (isLoading) completes and thread resolves before sending,
+  // to avoid a race where the load effect's setMessages([]) overwrites the optimistic message.
   useEffect(() => {
     if (!threadId || pendingRef.current === null || isLoading || !thread) return;
     const content = pendingRef.current;
@@ -179,8 +179,8 @@ export const ChatWindow = memo(function ChatWindow({
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
-      // IME 変換中の Enter は送信しない（日本語入力の確定操作と競合するため）。
-      // isComposing は React の合成イベントで、ネイティブの keyCode === 229 と同等。
+      // Do not send on Enter during IME composition (conflicts with Japanese input confirmation).
+      // isComposing is a React synthetic event, equivalent to native keyCode === 229.
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       submit();
@@ -263,9 +263,9 @@ export const ChatWindow = memo(function ChatWindow({
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 8 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-2xl border border-border bg-background p-1 shadow-lg"
+                  className="absolute bottom-full left-0 z-50 mb-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-border bg-background p-1 shadow-lg"
                 >
-                  {/* ファイル添付 */}
+                  {/* File attachment */}
                   <button
                     type="button"
                     onClick={() => {
@@ -277,7 +277,7 @@ export const ChatWindow = memo(function ChatWindow({
                     <span>📎</span>
                     <span>{t("chat.inputMenuAttach")}</span>
                   </button>
-                  {/* MCP サーバー */}
+                  {/* MCP servers */}
                   <button
                     type="button"
                     onClick={() => setMcpOpen((v) => !v)}
@@ -292,7 +292,7 @@ export const ChatWindow = memo(function ChatWindow({
                     )}
                     <span className={`text-xs transition-transform duration-200 ${mcpOpen ? "rotate-90" : ""}`}>▶</span>
                   </button>
-                  {/* MCP パネル（展開時） */}
+                  {/* MCP panel (when expanded) */}
                   <AnimatePresence>
                     {mcpOpen && (
                       <motion.div
@@ -311,7 +311,7 @@ export const ChatWindow = memo(function ChatWindow({
                       </motion.div>
                     )}
                   </AnimatePresence>
-                  {/* コネクション */}
+                  {/* Connections */}
                   <button
                     type="button"
                     onClick={() => setConnOpen((v) => !v)}
@@ -326,7 +326,7 @@ export const ChatWindow = memo(function ChatWindow({
                     )}
                     <span className={`text-xs transition-transform duration-200 ${connOpen ? "rotate-90" : ""}`}>▶</span>
                   </button>
-                  {/* コネクションパネル（展開時） */}
+                  {/* Connection panel (when expanded) */}
                   <AnimatePresence>
                     {connOpen && (
                       <motion.div
@@ -533,14 +533,14 @@ function MessageBubble({
 }: MessageBubbleProps) {
   const { t } = useI18n();
   const isAssistant = m.role === "assistant";
-  // thinking 受信中も回答未生成の間はスピナー/進捗ラベルを表示する。
-  // answer が空で thinking も無い場合のみスピナーを表示し、thinking がある場合は
-  // 上の ThinkingBlock と併存する形で進捗ラベルを表示する。
+  // Show spinner/progress label while thinking is received but no answer is generated yet.
+  // Show spinner only when answer is empty and there is no thinking; when thinking exists,
+  // show a progress label alongside the ThinkingBlock above.
   const isStreamingThis = streaming && isAssistant && m.content === "";
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(m.content);
-  // m.content が変更された場合（ストリーミング等）、編集中でなければ editText を同期。
-  // 編集中はユーザー入力を保持し、古い内容で上書きしない。
+  // Sync editText when m.content changes (e.g. streaming), unless editing.
+  // Preserve user input during editing; do not overwrite with stale content.
   useEffect(() => {
     if (!editing) setEditText(m.content);
   }, [m.content, editing]);
@@ -548,7 +548,7 @@ function MessageBubble({
   const { siblings, currentIndex } = getSiblingInfo(m.id);
   const hasBranches = siblings.length > 1;
 
-  // assistant メッセージの再生成: 親 user メッセージの id が必要
+  // Regenerate assistant message: requires the parent user message id
   const handleRegenerate = () => {
     if (m.parentId) void onRegenerate(m.parentId);
   };
@@ -576,14 +576,14 @@ function MessageBubble({
           {m.metadata?.dualTrace && (
             <DualTraceDetails trace={m.metadata.dualTrace} />
           )}
-          {/* 回答未生成中はスピナー + 進捗ラベルを表示。thinking 受信中も表示し続ける。 */}
+          {/* Show spinner + progress label while no answer is generated. Also shown while thinking is received. */}
           {isStreamingThis && !m.thinking ? (
             <span aria-label={t("chat.waitingResponse")} className="inline-flex items-center gap-1.5 text-muted-foreground">
               <span className="loading-spinner inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
               {m.statusLabel ?? t("chat.waitingResponseAria")}
             </span>
           ) : null}
-          {/* thinking 受信中はスピナーを省き進捗ラベルのみ表示（ThinkingBlock と併存）。 */}
+          {/* While thinking is received, show only the progress label without spinner (coexists with ThinkingBlock). */}
           {isStreamingThis && m.thinking && m.statusLabel ? (
             <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="loading-spinner inline-block h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />

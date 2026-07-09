@@ -38,6 +38,7 @@ import {
 } from "@/lib/connections";
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 import { buildPersonalizationMessage } from "@/lib/personalization";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +108,13 @@ export async function POST(req: Request) {
     .from(messages)
     .where(eq(messages.threadId, body.threadId))
     .orderBy(asc(messages.createdAt), asc(messages.id));
+
+  logger.info("chat", "request", {
+    threadId: body.threadId,
+    model: body.model ?? thread.model ?? "default",
+    mode: body.mode ?? "send",
+    messageCount: allMessages.length,
+  });
 
   const mode = body.mode ?? "send";
   const prepared = await prepareTurn(body, mode, thread, allMessages);
@@ -209,7 +217,7 @@ export async function POST(req: Request) {
                   timeRange: body.timeRange,
                   locale,
                 }).catch((err) => {
-                  console.error("[chat] buildSearchContext failed:", err);
+                  logger.error("chat", "buildSearchContext failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
                 }),
                 buildUrlContext({
@@ -217,7 +225,7 @@ export async function POST(req: Request) {
                   send,
                   locale,
                 }).catch((err) => {
-                  console.error("[chat] buildUrlContext failed:", err);
+                  logger.error("chat", "buildUrlContext failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
                 }),
                 buildMemoryContext({
@@ -226,7 +234,7 @@ export async function POST(req: Request) {
                   userId: user.id,
                   currentThreadId: thread.id,
                 }).catch((err) => {
-                  console.error("[chat] buildMemoryContext failed:", err);
+                  logger.error("chat", "buildMemoryContext failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
                 }),
                 buildSkillContext({
@@ -234,7 +242,7 @@ export async function POST(req: Request) {
                   userId: user.id,
                   threadId: thread.id,
                 }).catch((err) => {
-                  console.error("[chat] buildSkillContext failed:", err);
+                  logger.error("chat", "buildSkillContext failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
                 }),
               ]);
@@ -268,7 +276,7 @@ export async function POST(req: Request) {
               }
             }
           } catch (err) {
-            console.error("[mcp] failed to load MCP servers:", err);
+            logger.error("mcp", "failed to load MCP servers", { error: err instanceof Error ? err.message : String(err) });
           }
         }
 
@@ -285,7 +293,7 @@ export async function POST(req: Request) {
               connectionTools.push(...getConnectionTools(conn));
             }
           } catch (err) {
-            console.error("[connections] failed to load connections:", err);
+            logger.error("connections", "failed to load connections", { error: err instanceof Error ? err.message : String(err) });
           }
         }
 
@@ -467,6 +475,7 @@ export async function POST(req: Request) {
             .where(eq(threads.id, body.threadId));
         }
         send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") });
+        logger.error("chat", "stream-error", { threadId: body.threadId, error: err instanceof Error ? err.message : String(err) });
       } finally {
         await db
           .update(threads)
@@ -482,6 +491,7 @@ export async function POST(req: Request) {
         }
 
         // Close the stream immediately (lower client's isStreaming).
+        logger.info("chat", "stream-complete", { threadId: body.threadId, duration: Date.now() - streamStartedAt, contentLength: assistantContent.length });
         controller.close();
 
         // Notify the after() callback of completion.
@@ -514,7 +524,7 @@ export async function POST(req: Request) {
         user.id,
       );
     } catch (err) {
-      console.error("[memory] generation failed:", err);
+      logger.error("memory", "generation failed", { error: err instanceof Error ? err.message : String(err) });
     }
 
     // Skill save trigger detection: user requests "save as skill" etc.
@@ -522,7 +532,7 @@ export async function POST(req: Request) {
       try {
         await generateSkillFromConversation(body.threadId, user.id, llm, finalModel);
       } catch (err) {
-        console.error("[skill] generation failed:", err);
+        logger.error("skill", "generation failed", { error: err instanceof Error ? err.message : String(err) });
       }
     } else {
       // Auto-extract skill candidates: when no explicit save request, extract candidates from the conversation.
@@ -538,7 +548,7 @@ export async function POST(req: Request) {
         try {
           await extractSkillCandidates(body.threadId, user.id, llm, finalModel);
         } catch (err) {
-          console.error("[skill-candidate] extraction failed:", err);
+          logger.error("skill-candidate", "extraction failed", { error: err instanceof Error ? err.message : String(err) });
         }
       }
     }
@@ -655,7 +665,7 @@ async function buildUrlContext({
   const blocks: string[] = [];
   for (let i = 0; i < urls.length; i++) {
     const r = settled[i];
-    if (r.status !== "fulfilled") continue;
+    if (r.status !== "fulfilled" || r.value === null) continue;
     const result = r.value;
     sources.push({
       url: result.url,
@@ -703,10 +713,10 @@ async function buildSearchContext({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content })),
   );
-  console.log(`[search-timing] decideSearch duration=${Date.now() - tDecide}ms searchLevel=${decision.searchLevel} queries=${decision.queries.length}`);
+  logger.info("search-timing", "decideSearch", { duration: Date.now() - tDecide, searchLevel: decision.searchLevel, queries: decision.queries.length });
 
   if (decision.searchLevel === "none" || decision.queries.length === 0) {
-    console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (no search)`);
+    logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "no search" });
     return null;
   }
 
@@ -718,10 +728,10 @@ async function buildSearchContext({
       decision.queries.slice(0, 2).map((q) => searchWikipedia(q).catch(() => null)),
     );
     const valid = wikiResults.filter((r): r is WikipediaResult => r !== null);
-    console.log(`[search-timing] wikipedia lookup duration=${Date.now() - tWiki}ms found=${valid.length}`);
+    logger.info("search-timing", "wikipedia lookup", { duration: Date.now() - tWiki, found: valid.length });
     if (valid.length === 0) {
       send("status", { label: t(locale, "chat.statusWikiMiss") });
-      console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (wiki miss)`);
+      logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "wiki miss" });
       return {
         role: "system",
         content: "Wikipedia lookup was attempted but no article was found. Answer from your training data and acknowledge the limitation.",
@@ -731,7 +741,7 @@ async function buildSearchContext({
     const contextContent = valid
       .map((r) => `Title: ${r.title}\nDescription: ${r.description}\nURL: ${r.url}\nExtract: ${r.extract}`)
       .join("\n\n");
-    console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (wiki hit)`);
+    logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "wiki hit" });
     return {
       role: "system",
       content: `Wikipedia lookup has been completed. Use this to answer the user's question directly. Do NOT attempt to search or scrape again.\n\nWikipedia results:\n${contextContent}`,
@@ -754,15 +764,15 @@ async function buildSearchContext({
       const tQuery = Date.now();
       try {
         const response = await searchWeb(query, maxResults, timeRange);
-        console.log(`[search-timing] query ${qi + 1}/${queries.length} duration=${Date.now() - tQuery}ms results=${response.results.length}`);
+        logger.info("search-timing", "query", { index: qi + 1, total: queries.length, duration: Date.now() - tQuery, results: response.results.length });
         return response;
       } catch {
-        console.log(`[search-timing] query ${qi + 1}/${queries.length} duration=${Date.now() - tQuery}ms results=0 (error)`);
+        logger.info("search-timing", "query", { index: qi + 1, total: queries.length, duration: Date.now() - tQuery, results: 0, error: true });
         return null;
       }
     }),
   );
-  console.log(`[search-timing] all queries parallel duration=${Date.now() - tParallel}ms count=${queries.length}`);
+  logger.info("search-timing", "all queries parallel", { duration: Date.now() - tParallel, count: queries.length });
   for (const response of queryResults) {
     if (!response) continue;
     for (const r of response.results.slice(0, maxResults)) {
@@ -786,7 +796,7 @@ async function buildSearchContext({
     // Communicate the search failure and have the model answer from training data,
     // making it explicit that information could not be retrieved.
     // Returning null would be treated as search not executed, also losing failure awareness.
-    console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms (no results)`);
+    logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "no results" });
     return {
       role: "system",
       content: "Web search was attempted but returned no results. Answer from your training data and acknowledge that you could not retrieve current information.",
@@ -796,9 +806,9 @@ async function buildSearchContext({
   // Each result's content is sliced by SEARCH_RESULT_CONTENT_SLICE, so even raw JSON is short enough.
   const tSummarize = Date.now();
   const contextContent = JSON.stringify(allResults, null, 2);
-  console.log(`[search-timing] skip-summarize duration=${Date.now() - tSummarize}ms chars=${contextContent.length}`);
+  logger.info("search-timing", "skip-summarize", { duration: Date.now() - tSummarize, chars: contextContent.length });
 
-  console.log(`[search-timing] buildSearchContext total=${Date.now() - tTotal}ms`);
+  logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal });
   return {
     role: "system",
     content: `Web search has already been completed. The results are provided below. Do NOT attempt to search or scrape again — do not output any tool-call commands. Answer the user's question directly using only these results.\n\nWeb search results:\n${contextContent}`,
@@ -1129,6 +1139,8 @@ async function streamCompletion({
   timeRange?: "day" | "week" | "month" | "year";
   locale: Locale;
 }) {
+  const llmStreamStartedAt = Date.now();
+  logger.info("chat", "llm-stream-start", { model });
   const thinkingEffort = process.env.THINKING_EFFORT;
   const validLevels = await getReasoningLevels(model);
   const reasoningEffort =
@@ -1248,17 +1260,21 @@ async function streamCompletion({
         send?.("status", { label: t(locale, "chat.statusToolScrape") });
         const tTool = Date.now();
         try {
-          const result = await scrapeUrl(parsedArgs.url);
+        const result = await scrapeUrl(parsedArgs.url);
+        if (result === null) {
+          toolContent = `Failed to scrape ${parsedArgs.url}`;
+        } else {
           sources.push({
             url: result.url,
             title: result.title,
             snippet: result.content.slice(0, 200),
           });
           toolContent = `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`;
+        }
         } catch {
           toolContent = `Failed to scrape ${parsedArgs.url}`;
         }
-        console.log(`[search-timing] tool scrape_webpage round=${rounds} duration=${Date.now() - tTool}ms`);
+        logger.info("search-timing", "tool", { tool: "scrape_webpage", round: rounds, duration: Date.now() - tTool });
       } else if (tc.name === "search_web" && parsedArgs.query) {
         send?.("status", { label: t(locale, "chat.statusToolSearch") });
         const tTool = Date.now();
@@ -1281,7 +1297,7 @@ async function streamCompletion({
         } catch {
           toolContent = `Search failed for: ${parsedArgs.query}`;
         }
-        console.log(`[search-timing] tool search_web round=${rounds} duration=${Date.now() - tTool}ms`);
+        logger.info("search-timing", "tool", { tool: "search_web", round: rounds, duration: Date.now() - tTool });
       } else if (tc.name === "search_wikipedia" && parsedArgs.query) {
         send?.("status", { label: t(locale, "chat.statusWikiLooking") });
         const tTool = Date.now();
@@ -1296,7 +1312,7 @@ async function streamCompletion({
         } catch {
           toolContent = `Wikipedia lookup failed for: ${parsedArgs.query}`;
         }
-        console.log(`[search-timing] tool search_wikipedia round=${rounds} duration=${Date.now() - tTool}ms`);
+        logger.info("search-timing", "tool", { tool: "search_wikipedia", round: rounds, duration: Date.now() - tTool });
       } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
         // MCP tool: function name format "{serverName}__{toolName}"
         const parsed = parseMcpToolFunctionName(tc.name);
@@ -1370,4 +1386,5 @@ async function streamCompletion({
 
     // Re-stream (next round)
   }
+  logger.info("chat", "llm-stream-end", { model, duration: Date.now() - llmStreamStartedAt });
 }

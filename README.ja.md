@@ -129,9 +129,13 @@ bun run pack:exe
 #    dist/UmansChat/ に umanschat.exe と必要ファイル一式が出力されます
 ```
 
+> **同一フォルダ再ビルド時の状態保持**: 既存の `dist/UmansChat/` に対して `bun run pack:exe` を再実行すると、`.env` と `data/`（SQLite DB）を退避・復元し、セキュリティ設定・API キー・データベースが再ビルド後も保持されます（アプリ内自動更新と同じ挙動）。新規フォルダへの展開は正しく初期状態（ロック解除）で起動し、最初の管理者作成が可能です。
+
+> **データの場所:** `.env` と `data/` は exe フォルダではなく `%USERPROFILE%\.umans_chat_unofficial\` に保存されます。exe フォルダを削除・入れ替えても設定・APIキー・データベースは保持されます。旧バージョンからのアップグレード時、ランチャーが exe フォルダから自動でデータを移行します。
+
 `dist/UmansChat/` フォルダをユーザーの Windows マシンにそのまま配布できます。`umanschat.exe` をダブルクリックすると：
 
-1. 同梱の SQLite データベース（`data/umanschat.db`）を初回起動時に作成し、マイグレーションを適用
+1. ユーザーデータフォルダ（`%USERPROFILE%\.umans_chat_unofficial\data\`）に SQLite データベース（`umanschat.db`）を初回起動時に作成し、マイグレーションを適用
 2. サーバーを起動し、ブラウザで `http://localhost:3001` を自動で開く
 3. 初回は管理者アカウントの作成を求められます
 
@@ -139,6 +143,20 @@ bun run pack:exe
 
 
 **オプションサービスの縮退**: スタンドアロン exe にはスクレイパー、SearXNG、Tor、Python embedder は同梱されません。これらの機能を使わずにチャットは正常に動作しますが、Web 検索・スクレイピングは空の結果を返します（エラーにはなりません）。スクレイピング/検索を利用したい場合は別途 Docker で該当サービスを起動し、`.env` の `SCRAPER_URL`・`SEARXNG_URL` を公開ポートに向けてください。
+
+### 自動更新（exe 版のみ）
+
+スタンドアロン exe は起動時および **設定 → システム** で更新を確認します。GitHub に新しいリリースがある場合、設定ボタンに amber（琥珀色）のドットが表示されます。
+
+1. 設定 → システムタブを開く
+2. **ダウンロードして更新** をクリック — リリース zip をダウンロード・展開し、マーカーファイルを書き込みます
+3. ランチャーが 5 秒以内にマーカーを検出し、サーバーを停止、ファイルを差し替え（`data/` と `.env` を保持）、新しい exe を起動します
+4. 新しいサーバーが起動するとブラウザが自動リロードされます
+
+`data/` と `.env` は `%USERPROFILE%\.umans_chat_unofficial\` にあり、更新時には一切触れられません。古い `umanschat.exe` は `.old` にリネームされ、次回起動時に削除されます。
+
+> **前提条件**: GitHub Releases API とアセットダウンロードを認証なしで利用するには、リポジトリを公開設定にする必要があります。
+> **Docker** ユーザーは `docker compose pull && docker compose up -d` で更新します — 自動更新は exe 版のみの機能です。
 
 ## リリース（Docker + exe）
 
@@ -185,7 +203,7 @@ docker compose up -d
 1. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel で名前付きトンネルを作成（タイプ: Cloudflared）。
 2. パブリックホスト名を追加し、`Service=http://app:3000` にルーティング。
 3. Cloudflare ダッシュボードからトンネルトークンをコピー。
-4. UmansChat → 設定 → コネクションタブ → Cloudflare Tunnel セクションを開く。
+4. UmansChat → 設定 → 公開・セキュリティタブ → Cloudflare Tunnel セクションを開く。
 5. **Tunnel Token** 欄にトークンを貼り付け。
 6. **AUTH_URL** に公開ホスト名を設定（例: `https://umanschat.example.com`）。`https://` で始まる必要があります。
 7. **起動** ボタンをクリック。トンネルが即座に起動します — アプリの再起動は不要です。
@@ -274,6 +292,9 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
 | `AUTH_SECRET`           | Auth.js JWT 暗号化シークレット（必須。`bunx auth secret` で生成） | —                                                  |
 | `AUTH_TRUST_HOST`       | リバースプロキシ背後でホストヘッダーを信頼（Docker 用）            | `true`                                               |
+| `LOG_LEVEL`             | ログレベル閾値（`debug`/`info`/`warn`/`error`）                    | `info`                                               |
+| `LOG_FILE_ENABLED`      | `data/logs/umanschat.log` へのファイル出力（`true`/`false`。自動: exe→`true`、Docker→`false`） | auto                                   |
+| `LOG_FILE_MAX_SIZE`     | ローテーション前の最大ファイルサイズ（`.log.1` バックアップを1つ保持） | `5242880` (5MB)                                 |
 | `TZ`                   | プロンプト日時表示のタイムゾーン（空 = `Asia/Tokyo`）              | —                                                    |
 | `NOTION_CLIENT_ID`      | Notion OAuth クライアント ID（コネクション機能。[Notion 連携設定](#notion-連携設定)を参照） | — |
 | `NOTION_CLIENT_SECRET`  | Notion OAuth クライアントシークレット                              | —                                                    |
@@ -301,7 +322,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 - **セマンティック検索** — 全スレッドを横断して検索し、コサイン類似度で順位付けします。
 - **Web スクレイピング** — Web 検索が有効な場合、結果がスクレイプされ、現在の回答の RAG ソースとして取り込まれます。
 - **Tor** — 設定で Tor を切り替え、匿名スクレイピングを有効にできます。
-- **設定** — 設定パネルを開き、LLM プロバイダ/モデル、Thinking Effort、埋め込みモデル、Web 検索件数、Tor オプションを変更できます。変更は `.env` に書き込まれ、埋め込みモデルの変更（マイグレーションが必要）以外は即座に反映されます。
+- **設定** — 設定パネルを開き、LLM プロバイダ/モデル、Thinking Effort、埋め込みモデル、Web 検索件数、Tor オプション、ログレベルを変更できます。変更は `.env` に書き込まれ、埋め込みモデルの変更（マイグレーションが必要）以外は即座に反映されます。
 - **グローバルシステムインストラクション** — 設定 → AI & Models で名前付きシステムインストラクションを作成・編集・削除。1つを既定として選択すると全スレッドに適用されます（スレッドで上書き可能）。スレッド設定でスレッド単位のインストラクションを選択できます。
 - **メモリマネージャー** — サイドバーの 🧠 ボタンから会話記憶（fact/working）の一覧表示・検索・フィルタ・編集（内容/種類/重要度）・削除（論理削除で RAG から除外）・手動追加ができます。
 - **パーソナライズ** — 設定 → パーソナライズを開きます。スタイルプリセットを選択（または「None」で無効化）。4つの特性スライダー（warmth, energy, structure, emoji; 0-2）を調整します。変更は全ての新規メッセージに即座に反映されます — 再起動不要です。

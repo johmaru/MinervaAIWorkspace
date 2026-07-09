@@ -1,19 +1,19 @@
 /**
- * Cloudflare Tunnel プロセス管理。
+ * Cloudflare Tunnel process management.
  *
- * 2つの実行環境に対応:
- *   - Docker Compose: docker compose --profile tunnel up/down で cloudflared コンテナを起動/停止
- *   - スタンドアロン exe: cloudflared バイナリを子プロセスとして起動/停止
+ * Supports two execution environments:
+ *   - Docker Compose: start/stop the cloudflared container via docker compose --profile tunnel up/down
+ *   - Standalone exe: start/stop the cloudflared binary as a child process
  *
- * exe 環境では cloudflared バイナリを data/cloudflared/ にダウンロードする。
- * セキュリティ条件:
- *   - バージョン固定 (CLOUDFLARED_VERSION)
- *   - SHA256 ハッシュ検証 (CLOUDFLARED_HASHES) — ローカル計算で確認済みの値
- *   - HTTPS のみ (GitHub Releases)
- *   - 自動更新なし (明示的バージョンアップのみ)
+ * In the exe environment, the cloudflared binary is downloaded to data/cloudflared/.
+ * Security conditions:
+ *   - Pinned version (CLOUDFLARED_VERSION)
+ *   - SHA256 hash verification (CLOUDFLARED_HASHES) — values confirmed by local computation
+ *   - HTTPS only (GitHub Releases)
+ *   - No auto-update (explicit version upgrades only)
  *
- * 対応プラットフォーム: Windows x64, Linux x64 のみ。
- * macOS は .tgz 展開が必要なため未対応（将来的に追加する場合は展開ロジックが必要）。
+ * Supported platforms: Windows x64, Linux x64 only.
+ * macOS is unsupported because .tgz extraction is required (extraction logic would be needed to add it in the future).
  */
 
 import { spawn, exec, type ChildProcess } from "node:child_process";
@@ -25,16 +25,19 @@ import {
   createReadStream,
 } from "node:fs";
 import { join, dirname } from "node:path";
+import { getDataDir } from "@/lib/user-data";
 import { createHash } from "node:crypto";
 import { request } from "node:https";
 import { platform } from "node:os";
+import { logger } from "@/lib/logger";
+import { getConfiguredAuthUrl } from "@/lib/auth-env";
 
 const execAsync = promisify(exec);
 
-// 固定バージョン + SHA256 ハッシュ（プラットフォーム別）
-// バージョンアップは開発者がこの値を更新して再ビルドする
-// ハッシュは各バイナリをダウンロードしてローカル計算で確認済み
-// 出典: https://github.com/cloudflare/cloudflared/releases/tag/2024.12.2
+// Pinned version + SHA256 hashes (per platform)
+// Version upgrades require a developer to update these values and rebuild
+// Hashes are confirmed by downloading each binary and computing locally
+// Source: https://github.com/cloudflare/cloudflared/releases/tag/2024.12.2
 const CLOUDFLARED_VERSION = "2024.12.2";
 const CLOUDFLARED_HASHES: Record<string, string> = {
   "cloudflared-windows-amd64.exe":
@@ -45,7 +48,7 @@ const CLOUDFLARED_HASHES: Record<string, string> = {
 
 const MAX_REDIRECTS = 5;
 
-/** プラットフォーム別のバイナリファイル名 */
+/** Binary filename per platform */
 function getBinaryName(): string {
   const plat = platform();
   if (plat === "win32") return "cloudflared-windows-amd64.exe";
@@ -55,31 +58,25 @@ function getBinaryName(): string {
   );
 }
 
-/** cloudflared バイナリのダウンロード先ディレクトリ */
+/** Download directory for the cloudflared binary */
 function getCloudflaredDir(): string {
-  // exe 環境では process.execPath のディレクトリ基準
-  // node/bun で直接実行の場合は process.cwd()
-  const isCompiled =
-    process.execPath.endsWith("umanschat.exe") ||
-    process.execPath.endsWith("umanschat");
-  const appRoot = isCompiled ? dirname(process.execPath) : process.cwd();
-  return join(appRoot, "data", "cloudflared");
+  return join(getDataDir(), "cloudflared");
 }
 
-/** Docker 環境かどうかを判定 */
+/** Determines whether running in a Docker environment */
 export function isDockerEnv(): boolean {
   return existsSync("/var/run/docker.sock");
 }
 
-/** cloudflared バイナリが存在するか確認 (exe 環境用) */
+/** Checks if the cloudflared binary exists (for exe environment) */
 export function isCloudflaredInstalled(): boolean {
-  if (isDockerEnv()) return true; // Docker 環境ではコンテナイメージを使用
+  if (isDockerEnv()) return true; // Docker environment uses the container image
   const binaryPath = join(getCloudflaredDir(), getBinaryName());
   return existsSync(binaryPath);
 }
 
-/** SHA256 ハッシュを計算 */
-function sha256File(filePath: string): Promise<string> {
+/** Computes the SHA256 hash of a file */
+export function sha256File(filePath: string): Promise<string> {
   const { promise, resolve, reject } = Promise.withResolvers<string>();
   const hash = createHash("sha256");
   const stream = createReadStream(filePath);
@@ -89,8 +86,8 @@ function sha256File(filePath: string): Promise<string> {
   return promise;
 }
 
-/** HTTPS でダウンロード（3xx リダイレクト対応） */
-function httpsDownload(
+/** Downloads via HTTPS (handles 3xx redirects) */
+export function httpsDownload(
   url: string,
   dest: string,
   redirects = 0,
@@ -98,24 +95,24 @@ function httpsDownload(
   const { promise, resolve, reject } = Promise.withResolvers<void>();
   const file = createWriteStream(dest);
 
-  const req = request(url, (res) => {
-    // 3xx リダイレクト対応: GitHub Releases は 302 → CDN へリダイレクトする
+  const req = request(url, { headers: { "User-Agent": "UmansChat-Updater" } }, (res) => {
+    // Handle 3xx redirects: GitHub Releases redirects 302 → CDN
     if (
       res.statusCode &&
       res.statusCode >= 300 &&
       res.statusCode < 400 &&
       res.headers.location
     ) {
-      res.resume(); // レスポンスボディを破棄
+      res.resume(); // Discard the response body
       file.close();
       if (redirects >= MAX_REDIRECTS) {
-        reject(new Error(`リダイレクト回数が上限(${MAX_REDIRECTS})を超えました`));
+        reject(new Error(`Redirect limit (${MAX_REDIRECTS}) exceeded`));
         return;
       }
       const nextUrl = res.headers.location;
-      // HTTPS のみ許可（http:// へのリダイレクトは拒否）
+      // Only allow HTTPS (reject redirects to http://)
       if (!nextUrl.startsWith("https://")) {
-        reject(new Error(`非HTTPSリダイレクトを拒否: ${nextUrl}`));
+        reject(new Error(`Non-HTTPS redirect rejected: ${nextUrl}`));
         return;
       }
       httpsDownload(nextUrl, dest, redirects + 1)
@@ -125,7 +122,7 @@ function httpsDownload(
     }
 
     if (res.statusCode !== 200) {
-      reject(new Error(`ダウンロード失敗: HTTP ${res.statusCode}`));
+      reject(new Error(`Download failed: HTTP ${res.statusCode}`));
       return;
     }
     res.pipe(file);
@@ -142,10 +139,10 @@ function httpsDownload(
   return promise;
 }
 
-/** cloudflared バイナリをダウンロード + SHA256 検証 (exe 環境用) */
+/** Downloads the cloudflared binary + verifies SHA256 (for exe environment) */
 export async function downloadCloudflared(): Promise<string> {
   if (isDockerEnv()) {
-    throw new Error("Docker 環境ではバイナリダウンロード不要");
+    throw new Error("Binary download not needed in Docker environment");
   }
 
   const dir = getCloudflaredDir();
@@ -154,16 +151,16 @@ export async function downloadCloudflared(): Promise<string> {
   const expectedHash = CLOUDFLARED_HASHES[binaryName];
 
   if (!expectedHash) {
-    throw new Error(`SHA256 ハッシュ未定義: ${binaryName}`);
+    throw new Error(`SHA256 hash undefined: ${binaryName}`);
   }
 
-  // 既にダウンロード済み + ハッシュ検証済みならスキップ
+  // Skip if already downloaded and hash-verified
   if (existsSync(binaryPath)) {
     const actualHash = await sha256File(binaryPath);
     if (actualHash === expectedHash) {
       return binaryPath;
     }
-    console.warn("[tunnel] ハッシュ不一致、再ダウンロードします");
+    logger.warn("tunnel", "Hash mismatch, re-downloading");
   }
 
   mkdirSync(dir, { recursive: true });
@@ -171,22 +168,22 @@ export async function downloadCloudflared(): Promise<string> {
 
   await httpsDownload(url, binaryPath);
 
-  // SHA256 検証
+  // SHA256 verification
   const actualHash = await sha256File(binaryPath);
   if (actualHash !== expectedHash) {
     throw new Error(
-      `SHA256 検証失敗: 期待値 ${expectedHash.slice(0, 16)}...、実際 ${actualHash.slice(0, 16)}...`,
+      `SHA256 verification failed: expected ${expectedHash.slice(0, 16)}..., actual ${actualHash.slice(0, 16)}...`,
     );
   }
 
-  console.log("[tunnel] cloudflared ダウンロード完了 + ハッシュ検証成功");
+  logger.info("tunnel", "cloudflared download complete + hash verification passed");
   return binaryPath;
 }
 
-/** Docker 環境: cloudflared コンテナを起動 */
+/** Docker environment: start the cloudflared container */
 async function startDockerTunnel(token: string): Promise<void> {
-  // --force-recreate で古い TUNNEL_TOKEN 環境変数を持つコンテナを確実に再作成する。
-  // これにより GUI でトークンを保存→起動した際に新しいトークンが確実に反映される。
+  // --force-recreate ensures the container with the old TUNNEL_TOKEN env var is recreated.
+  // This guarantees the new token is reflected when saving→starting from the GUI.
   await execAsync(
     `docker compose --profile tunnel up -d --force-recreate cloudflared`,
     {
@@ -197,7 +194,7 @@ async function startDockerTunnel(token: string): Promise<void> {
   );
 }
 
-/** Docker 環境: cloudflared コンテナを停止 */
+/** Docker environment: stop the cloudflared container */
 async function stopDockerTunnel(): Promise<void> {
   await execAsync(`docker compose --profile tunnel stop cloudflared`, {
     cwd: process.cwd(),
@@ -205,10 +202,10 @@ async function stopDockerTunnel(): Promise<void> {
   });
 }
 
-/** exe 環境: cloudflared 子プロセス */
+/** exe environment: cloudflared child process */
 let cloudflaredProcess: ChildProcess | null = null;
 
-/** exe 環境: cloudflared 子プロセスを起動 */
+/** exe environment: start the cloudflared child process */
 async function startExeTunnel(token: string): Promise<void> {
   const binaryPath = await downloadCloudflared();
   cloudflaredProcess = spawn(
@@ -220,12 +217,12 @@ async function startExeTunnel(token: string): Promise<void> {
     },
   );
   cloudflaredProcess.on("exit", (code) => {
-    console.log(`[tunnel] cloudflared exited with code ${code}`);
+    logger.info("tunnel", "cloudflared exited", { code });
     cloudflaredProcess = null;
   });
 }
 
-/** exe 環境: cloudflared 子プロセスを停止 */
+/** exe environment: stop the cloudflared child process */
 function stopExeTunnel(): void {
   if (cloudflaredProcess) {
     cloudflaredProcess.kill("SIGTERM");
@@ -233,14 +230,14 @@ function stopExeTunnel(): void {
   }
 }
 
-/** トンネルの実行状態 */
+/** Tunnel running state */
 export interface TunnelStatus {
   running: boolean;
   hasToken: boolean;
   authUrl: string;
 }
 
-/** トンネルが実行中かどうかを確認 */
+/** Checks whether the tunnel is running */
 export async function isTunnelRunning(): Promise<boolean> {
   if (isDockerEnv()) {
     try {
@@ -254,7 +251,7 @@ export async function isTunnelRunning(): Promise<boolean> {
           const obj = JSON.parse(line);
           if (obj.State === "running") return true;
         } catch {
-          // JSON パース失敗は無視
+          // Ignore JSON parse failure
         }
       }
       return false;
@@ -262,29 +259,29 @@ export async function isTunnelRunning(): Promise<boolean> {
       return false;
     }
   }
-  // exe 環境: プロセスが存在するか
+  // exe environment: check if the process exists
   return cloudflaredProcess !== null && !cloudflaredProcess.killed;
 }
 
-/** トンネル状態を取得 */
+/** Gets the tunnel status */
 export async function getTunnelStatus(): Promise<TunnelStatus> {
   return {
     running: await isTunnelRunning(),
     hasToken: !!process.env.TUNNEL_TOKEN,
-    authUrl: process.env.AUTH_URL || "http://localhost:3001",
+    authUrl: getConfiguredAuthUrl(),
   };
 }
 
-/** トンネルを起動。force=true の場合は既存プロセス/コンテナを停止してから再起動 */
+/** Starts the tunnel. If force=true, stops the existing process/container before restarting */
 export async function startTunnel(
   token: string,
   opts?: { force?: boolean },
 ): Promise<void> {
-  if (!token) throw new Error("TUNNEL_TOKEN が設定されていません");
+  if (!token) throw new Error("TUNNEL_TOKEN is not set");
 
-  // 既に起動中の場合:
-  //   force=false (デフォルト) → 何もしない
-  //   force=true → 停止してから再起動（トークン変更を確実に反映）
+  // If already running:
+  //   force=false (default) → do nothing
+  //   force=true → stop then restart (ensures token changes take effect)
   if (await isTunnelRunning()) {
     if (!opts?.force) return;
     await stopTunnel();
@@ -297,9 +294,9 @@ export async function startTunnel(
   }
 }
 
-/** トンネルを停止 */
+/** Stops the tunnel */
 export async function stopTunnel(): Promise<void> {
-  if (!(await isTunnelRunning())) return; // 既に停止中
+  if (!(await isTunnelRunning())) return; // Already stopped
 
   if (isDockerEnv()) {
     await stopDockerTunnel();

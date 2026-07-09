@@ -1,13 +1,14 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { redirectMock, signInMock, cookiesMock } = vi.hoisted(() => ({
+const { redirectMock, signInMock, cookiesMock, headersMock } = vi.hoisted(() => ({
   redirectMock: vi.fn(),
   signInMock: vi.fn(),
   cookiesMock: {
     has: vi.fn(),
     delete: vi.fn(),
   },
+  headersMock: new Map<string, string>(),
 }));
 
 // Mock next/navigation redirect — it throws a NEXT_REDIRECT error internally.
@@ -24,9 +25,10 @@ vi.mock("@/auth", () => ({
   signOut: vi.fn(),
 }));
 
-// Mock next/headers cookies — clearSessionCookies calls cookies().delete()
+// Mock next/headers — cookies for clearSessionCookies, headers for IP whitelist
 vi.mock("next/headers", () => ({
   cookies: async () => cookiesMock,
+  headers: async () => headersMock,
 }));
 
 import { db } from "@/db";
@@ -64,6 +66,11 @@ function formData(overrides: Record<string, string> = {}): FormData {
 }
 
 describe("register", () => {
+  beforeEach(() => {
+    vi.stubEnv("REGISTRATION_LOCKED", "false");
+    vi.stubEnv("ALLOWED_REGISTRATION_IPS", "");
+    headersMock.clear();
+  });
   it("creates a user with valid input (sync transaction)", async () => {
     const email = `sync-tx-${Date.now()}@example.com`;
     await expect(register(undefined, formData({ email }))).rejects.toThrow("NEXT_REDIRECT");
@@ -114,6 +121,30 @@ describe("register", () => {
     const result = await register(undefined, formData({ email }));
     expect(result).toEqual({ error: "auth.emailTaken" });
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+  it("returns error when REGISTRATION_LOCKED is true", async () => {
+    vi.stubEnv("REGISTRATION_LOCKED", "true");
+    const result = await register(undefined, formData({ email: `locked-${Date.now()}@example.com` }));
+    expect(result).toEqual({ error: "auth.registrationLocked" });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("returns error when IP is not whitelisted", async () => {
+    vi.stubEnv("ALLOWED_REGISTRATION_IPS", "10.0.0.0/8");
+    headersMock.set("cf-connecting-ip", "203.0.113.5");
+    const result = await register(undefined, formData({ email: `blocked-${Date.now()}@example.com` }));
+    expect(result).toEqual({ error: "auth.ipNotAllowed" });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("succeeds when IP is whitelisted", async () => {
+    vi.stubEnv("ALLOWED_REGISTRATION_IPS", "10.0.0.0/8");
+    headersMock.set("cf-connecting-ip", "10.0.0.5");
+    const email = `allowed-${Date.now()}@example.com`;
+    await expect(register(undefined, formData({ email }))).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirectMock).toHaveBeenCalledWith("/");
+    const [row] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    if (row) createdUserIds.push(row.id);
   });
 });
 

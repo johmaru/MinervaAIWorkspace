@@ -15,15 +15,15 @@ type Props = {
 };
 
 /**
- * 汎用コンテキストメニュー。createPortal で body 直下に描画。
- * ビューポート端でクランプ、click-outside / Esc / scroll で閉じる。
- * ライブラリ不使用。デスクトップ右クリック専用（モバイル long-press は未対応）。
+ * Generic context menu. Rendered directly under body via createPortal.
+ * Clamps at viewport edges, closes on click-outside / Esc / scroll.
+ * No library used. Desktop right-click only (mobile long-press not supported).
  */
 export function ContextMenu({ x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
-  // ビューポート端でクランプ
+  // Clamp at viewport edges
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -34,7 +34,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
     });
   }, [x, y]);
 
-  // click-outside / Esc / scroll で閉じる
+  // Close on click-outside / Esc / scroll
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose();

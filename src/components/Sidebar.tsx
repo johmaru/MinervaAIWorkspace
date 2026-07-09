@@ -1,7 +1,9 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
+import { Languages } from "lucide-react";
 
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -9,6 +11,7 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { SearchBar } from "@/components/SearchBar";
 import { UrlInput } from "@/components/UrlInput";
 import { SettingsModal } from "@/components/SettingsModal";
+import { clientFetch } from "@/lib/clientFetch";
 import { MemoryViewerModal } from "@/components/MemoryViewerModal";
 import { SkillManagerModal } from "@/components/SkillManagerModal";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
@@ -64,6 +67,7 @@ export const Sidebar = memo(function Sidebar({
 }: SidebarProps) {
   const { t } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hasUpdate, setHasUpdate] = useState(false);
   const [skillManagerOpen, setSkillManagerOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -74,12 +78,22 @@ export const Sidebar = memo(function Sidebar({
     threadId: string;
     currentFolderId: string | null;
   } | null>(null);
-  // #22: 削除確認ダイアログ（React state ベース・テスト可能・スタイル統一）
+  // #22: Delete confirmation dialog (React state-based, testable, unified styling)
   const [pendingDelete, setPendingDelete] = useState<{
     kind: "thread" | "folder";
     id: string;
     name: string;
   } | null>(null);
+
+  // Auto-update: check for updates on mount (exe distribution only)
+  useEffect(() => {
+    clientFetch("/api/update")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.updateAvailable && data.isExe) setHasUpdate(true);
+      })
+      .catch(() => {});
+  }, []);
 
   const toggleFolder = useCallback((id: string) => {
     setCollapsedFolders((prev) => {
@@ -90,7 +104,7 @@ export const Sidebar = memo(function Sidebar({
     });
   }, []);
 
-  // 空欄右クリック → 新規フォルダ作成
+  // Right-click on empty area → create new folder
   function handleNavContextMenu(e: React.MouseEvent<HTMLDivElement>) {
     if (e.target !== e.currentTarget) return;
     e.preventDefault();
@@ -172,7 +186,7 @@ export const Sidebar = memo(function Sidebar({
   );
 
 
-  // #22: ThreadRow の × ボタンも確認ダイアログを経由する
+  // #22: ThreadRow's × button also goes through the confirmation dialog
   const handleThreadDelete = useCallback(
     (id: string) => {
       const thread = threads.find((t) => t.id === id);
@@ -188,21 +202,34 @@ export const Sidebar = memo(function Sidebar({
       aria-label={t("sidebar.threadList")}
     >
       <div className="flex items-center justify-between px-3 py-3">
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <ThemeToggle />
           <LanguageToggle />
-          <MotionButton
-            type="button"
-            onClick={() => setSettingsOpen(true)}
+          <Link
+            href="/translate"
             className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
-            aria-label={t("sidebar.appSettings")}
-            whileTap={{ scale: 0.9 }}
+            aria-label={t("sidebar.translate")}
+            title={t("sidebar.translate")}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </MotionButton>
+            <Languages className="h-4 w-4" />
+          </Link>
+          <div className="relative">
+            <MotionButton
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground"
+              aria-label={t("sidebar.appSettings")}
+              whileTap={{ scale: 0.9 }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </MotionButton>
+            {hasUpdate && (
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500" />
+            )}
+          </div>
           <MotionButton
             type="button"
             onClick={() => setMemoryOpen(true)}
@@ -286,7 +313,7 @@ export const Sidebar = memo(function Sidebar({
         ) : (
           <AnimatePresence>
             <ul className="flex flex-col gap-0.5">
-              {/* フォルダセクション */}
+              {/* Folder section */}
               {folders.map((f) => {
                 const collapsed = collapsedFolders.has(f.id);
                 const folderThreads = threads.filter((t) => t.folderId === f.id);
@@ -331,7 +358,7 @@ export const Sidebar = memo(function Sidebar({
                 );
               })}
 
-              {/* 未割当セクション */}
+              {/* Unassigned section */}
               {unassignedThreads.length > 0 && (
                 <motion.li
                   className="mt-1"
@@ -396,7 +423,7 @@ export const Sidebar = memo(function Sidebar({
         onMove={onMoveThread}
       />
 
-      {/* #22: 削除確認ダイアログ */}
+      {/* #22: Delete confirmation dialog */}
       <AnimateModal
         open={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
@@ -442,7 +469,7 @@ type FolderRowProps = {
   collapsed: boolean;
   count: number;
   onToggle: (id: string) => void;
-  /** 右クリック・ケバブボタンどちらからでもメニューを開く */
+  /** Open menu from either right-click or kebab button */
   onOpenMenu: (e: React.MouseEvent, folder: FolderSummary) => void;
 };
 
@@ -491,7 +518,7 @@ const FolderRow = memo(function FolderRow({
         </span>
       )}
       <span className="text-xs text-muted-foreground">{count}</span>
-      {/* #28: ケバブメニュー（モバイル・キーボードからフォルダ設定/削除にアクセス） */}
+      {/* #28: Kebab menu (access folder settings/delete from mobile/keyboard) */}
       <button
         type="button"
         aria-label={t("sidebar.folderActions")}
@@ -536,7 +563,7 @@ const ThreadRow = memo(function ThreadRow({
 
   const commitRenameRef = useRef(false);
   async function commitRename() {
-    if (commitRenameRef.current) return; // 二重実行防止（onBlur + Enter）
+    if (commitRenameRef.current) return; // Prevent double execution (onBlur + Enter)
     const trimmed = draft.trim();
     if (!trimmed || trimmed === thread.title) {
       setEditing(false);
@@ -550,7 +577,7 @@ const ThreadRow = memo(function ThreadRow({
       setEditing(false);
       onRenamed();
     }
-    // 失敗時は編集状態を保持し、ユーザーが再試行できるようにする
+    // Keep edit state on failure so the user can retry
   }
 
   if (editing) {
@@ -599,7 +626,7 @@ const ThreadRow = memo(function ThreadRow({
         type="button"
         onClick={() => onDelete(thread.id)}
         aria-label={t("common.delete")}
-        className="hidden shrink-0 rounded px-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-red-500/10 hover:text-red-500 group-hover:block"
+        className="shrink-0 whitespace-nowrap rounded px-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-red-500/10 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
       >
         ×
       </button>

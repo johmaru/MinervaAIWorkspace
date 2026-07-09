@@ -10,17 +10,17 @@ export type SessionUser = {
 };
 
 /**
- * 認証済みユーザーを返す。未認証なら null。
- * ルートハンドラは null をチェックし 401 を返す:
+ * Returns the authenticated user, or null if unauthenticated.
+ * Route handlers check for null and return 401:
  *
  *   const user = await getSessionUser();
  *   if (!user) return new Response("Unauthorized", { status: 401 });
  *
- * null を返す（throw しない）ことで、各ハンドラがレスポンス形状を制御できる。
- * auth() はリクエスト Cookie から JWT を読み取る。
+ * Returns null (does not throw) so each handler controls its response shape.
+ * auth() reads the JWT from request cookies.
  *
- * DB 再作成等で JWT の userId が users テーブルに存在しない場合、
- * セッションを無効化し null を返す（各ルートが 401 → クライアントは /login へ遷移）。
+ * If the JWT's userId no longer exists in the users table (e.g. DB recreated),
+ * the session is invalidated and null is returned (each route returns 401 → client redirects to /login).
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await auth();

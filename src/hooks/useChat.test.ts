@@ -17,10 +17,10 @@ function renderHook<T>(callback: () => T) {
   return rtlRenderHook(callback, { wrapper });
 }
 
-// useChat は Phase 2 で DB-backed になった。
-// - 初回ロードで GET /api/threads/[id] を叩く → これはモックして決定的な履歴を返す。
-// - send() は POST /api/chat に SSE を投げる → 偽 SSE ストリームで差し替え。
-// 実 API と実 DB 永続化は route.test.ts で担保済み。ここではフックの挙動のみ。
+// useChat became DB-backed in Phase 2.
+// - Initial load calls GET /api/threads/[id] → mocked to return deterministic history.
+// - send() posts SSE to POST /api/chat → replaced with a fake SSE stream.
+// - Real API and real DB persistence are covered by route.test.ts. Only hook behavior here.
 
 const createdThreadIds: string[] = [];
 
@@ -78,15 +78,15 @@ async function createThreadInDb(): Promise<string> {
   return row.id;
 }
 
-describe("useChat — 初回ロード", () => {
-  it("threadId が null のときは空メッセージ", async () => {
+describe("useChat — initial load", () => {
+  it("returns empty messages when threadId is null", async () => {
     const { result } = renderHook(() => useChat(null));
     expect(result.current.messages).toEqual([]);
     expect(result.current.thread).toBeNull();
     expect(fetchMock()).not.toHaveBeenCalled();
   });
 
-  it("threadId 指定で GET /api/threads/[id] を呼び履歴を展開", async () => {
+  it("calls GET /api/threads/[id] with threadId and expands history", async () => {
     const id = await createThreadInDb();
     await db.insert(messages).values([
       { threadId: id, role: "user", content: "hi" },
@@ -112,7 +112,7 @@ describe("useChat — 初回ロード", () => {
     expect(result.current.thread?.title).toBe("useChat test");
   });
 
-  it("ロード失敗は error に設定", async () => {
+  it("sets error on load failure", async () => {
     fetchMock().mockResolvedValue(threadResponse({ error: "not found" }, 404));
     const { result } = renderHook(() => useChat("00000000-0000-0000-0000-000000000000"));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -120,8 +120,8 @@ describe("useChat — 初回ロード", () => {
   });
 });
 
-describe("useChat — 送信", () => {
-  it("threadId が null のときは送信しない", async () => {
+describe("useChat — send", () => {
+  it("does not send when threadId is null", async () => {
     const { result } = renderHook(() => useChat(null));
     await act(async () => {
       await result.current.send("hi");
@@ -129,7 +129,7 @@ describe("useChat — 送信", () => {
     expect(fetchMock()).not.toHaveBeenCalledWith("/api/chat", expect.anything());
   });
 
-  it("start → delta → done で楽観 id を実 id に差し替え", async () => {
+  it("replaces optimistic id with real id on start → delta → done", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -170,7 +170,7 @@ describe("useChat — 送信", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("thinking イベントで assistant メッセージの thinking に蓄積", async () => {
+  it("accumulates thinking in assistant message on thinking events", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -207,7 +207,7 @@ describe("useChat — 送信", () => {
     expect(assistant.thinking).toBe("考え中…続け");
   });
 
-  it("空文字・ストリーミング中は送信しない", async () => {
+  it("does not send on empty string or while streaming", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -230,7 +230,7 @@ describe("useChat — 送信", () => {
     expect(fetchMock()).not.toHaveBeenCalledWith("/api/chat", expect.anything());
   });
 
-  it("SSE error イベントは error に設定し部分回答を保持", async () => {
+  it("sets error on SSE error event and keeps partial response", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -260,7 +260,7 @@ describe("useChat — 送信", () => {
     expect(result.current.messages[1].content).toBe("partial");
   });
 
-  it("sources イベントで参照元 state を更新", async () => {
+  it("updates sources state on sources event", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -305,7 +305,7 @@ describe("useChat — 送信", () => {
     expect(result.current.sources[1].url).toBe("https://example.com/b");
   });
 
-  it("status イベントで assistant メッセージに statusLabel を設定し delta でクリア", async () => {
+  it("sets statusLabel on assistant message on status event and clears it on delta", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -337,14 +337,14 @@ describe("useChat — 送信", () => {
       await result.current.send("hi");
     });
 
-    // assistant メッセージ（user の次）の statusLabel は delta 受信後にクリア済み
+    // The assistant message's (next after user) statusLabel is cleared after receiving delta
     const assistant = result.current.messages.find((m) => m.role === "assistant");
     expect(assistant).toBeDefined();
     expect(assistant!.content).toBe("hello");
     expect(assistant!.statusLabel).toBeUndefined();
   });
 
-  it("status イベントで statusLabel が messages に伝播し thinking 受信後も保持", async () => {
+  it("propagates statusLabel to messages and keeps it after thinking is received", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -361,7 +361,7 @@ describe("useChat — 送信", () => {
             { event: "start", data: { userMessageId: "u1" } },
             { event: "status", data: { phase: "thinking", label: "考え中…" } },
             { event: "thinking", data: { delta: "推論" } },
-            // delta（回答本文）を送らずに done — statusLabel が保持されたまま終了
+            // Send done without delta (answer body) — statusLabel is retained until done
             { event: "done", data: { assistantMessageId: "a1" } },
           ]),
         );
@@ -379,13 +379,13 @@ describe("useChat — 送信", () => {
     const assistant = result.current.messages.find((m) => m.role === "assistant");
     expect(assistant).toBeDefined();
     expect(assistant!.thinking).toBe("推論");
-    // thinking 受信後も statusLabel は "考え中…" のまま（Step 1 + buildChain コピーの効果）
+    // After thinking is received, statusLabel retains the thinking-phase label (effect of Step 1 + buildChain copy)
     expect(assistant!.statusLabel).toBe("考え中…");
   });
 });
 
 describe("useChat — stop / clear", () => {
-  it("stop は AbortController を abort", async () => {
+  it("stop aborts the AbortController", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -396,8 +396,8 @@ describe("useChat — stop / clear", () => {
           }),
         );
       }
-      // 読み取りがabortされるまで待つ遅延ストリームは複雑なので、
-      // 即座に abort される前提で done を返す
+      // A delayed stream that waits until abort is complex,
+      // so assume immediate abort and return done
       return Promise.resolve(sseResponse([{ event: "done", data: {} }]));
     });
 
@@ -407,12 +407,12 @@ describe("useChat — stop / clear", () => {
     act(() => {
       result.current.stop();
     });
-    // abort が呼ばれても isStreaming は即 false にはならないが、
-    // stop() が例外を投げないことだけ確認
+    // Even if abort is called, isStreaming does not immediately become false,
+    // but we only verify that stop() does not throw
     expect(true).toBe(true);
   });
 
-  it("clear は messages を空にする", async () => {
+  it("clear empties messages", async () => {
     const id = await createThreadInDb();
     fetchMock().mockResolvedValue(
       threadResponse({
@@ -431,8 +431,8 @@ describe("useChat — stop / clear", () => {
   });
 });
 
-describe("useChat — 枝分かれ", () => {
-  it("getSiblingInfo: 兄弟がある場合は siblings と index を返す", async () => {
+describe("useChat — branching", () => {
+  it("getSiblingInfo: returns siblings and index when siblings exist", async () => {
     const id = await createThreadInDb();
     fetchMock().mockResolvedValue(
       threadResponse({
@@ -447,17 +447,17 @@ describe("useChat — 枝分かれ", () => {
     const { result } = renderHook(() => useChat(id));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // currentLeafId = "a2" なので表示されるのは u1 → a2
+    // currentLeafId = "a2", so the displayed chain is u1 → a2
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[1].content).toBe("answer2");
 
-    // a1 と a2 は兄弟（同じ parentId "u1"）
+    // a1 and a2 are siblings (same parentId "u1")
     const info = result.current.getSiblingInfo("a2");
     expect(info.siblings).toHaveLength(2);
     expect(info.currentIndex).toBeGreaterThanOrEqual(0);
   });
 
-  it("switchBranch: 別の枝に切り替える", async () => {
+  it("switchBranch: switches to another branch", async () => {
     const id = await createThreadInDb();
     fetchMock().mockResolvedValue(
       threadResponse({
@@ -477,11 +477,11 @@ describe("useChat — 枝分かれ", () => {
       result.current.switchBranch("a1");
     });
 
-    // a1 に切り替わる
+    // Switches to a1
     expect(result.current.messages[1].content).toBe("answer1");
   });
 
-  it("regenerate: ユーザーメッセージの下に新しい assistant を生成", async () => {
+  it("regenerate: generates a new assistant under the user message", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -514,12 +514,12 @@ describe("useChat — 枝分かれ", () => {
       await result.current.regenerate("u1");
     });
 
-    // 新しい assistant メッセージが表示される
+    // New assistant message is displayed
     expect(result.current.messages[1].content).toBe("new");
     expect(result.current.thread?.currentLeafId).toBe("a2");
   });
 
-  it("editMessage: ユーザーメッセージを編集して新しい枝を作成", async () => {
+  it("editMessage: edits a user message and creates a new branch", async () => {
     const id = await createThreadInDb();
     fetchMock().mockImplementation((url: string) => {
       if (url === `/api/threads/${id}`) {
@@ -552,7 +552,7 @@ describe("useChat — 枝分かれ", () => {
       await result.current.editMessage("u1", "edited question");
     });
 
-    // 新しい user メッセージ + 新しい assistant が表示される
+    // New user message + new assistant are displayed
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[0].content).toBe("edited question");
     expect(result.current.messages[1].content).toBe("edited");

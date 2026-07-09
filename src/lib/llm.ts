@@ -1,13 +1,13 @@
 import OpenAI from "openai";
 
 /**
- * OpenAI 互換クライアント。
- * LLM_BASE_URL で UmansAI / OpenAI / ローカル (vLLM, Ollama 等) を切替。
+ * OpenAI-compatible client.
+ * Switches between UmansAI / OpenAI / local (vLLM, Ollama, etc.) via LLM_BASE_URL.
  */
 export function createLLM() {
   const baseURL = process.env.LLM_BASE_URL;
   if (!baseURL) {
-    throw new Error("LLM_BASE_URL が未設定です。.env を確認してください。");
+    throw new Error("LLM_BASE_URL is not set. Please check your .env file.");
   }
   return new OpenAI({
     baseURL,
@@ -19,7 +19,7 @@ export function defaultModel(): string {
   return process.env.LLM_MODEL ?? "umans-glm-5.2";
 }
 
-/** 検索クエリ生成・要約に使うモデル。未設定時は umans-qwen3.6-35b-a3b。 */
+/** Model used for search query generation and summarization. Defaults to umans-qwen3.6-35b-a3b. */
 export function defaultSearchModel(): string {
   return process.env.WEB_SEARCH_MODEL || "umans-qwen3.6-35b-a3b";
 }
@@ -28,20 +28,20 @@ export function embedModel(): string {
   return process.env.EMBED_MODEL ?? "text-embedding-3-small";
 }
 
-/** LLM_BASE_URL が UmansAPI を指しているか（Umansモード）。 */
+/** Whether LLM_BASE_URL points to the UmansAPI (Umans mode). */
 export function isUmansProvider(): boolean {
   const baseURL = process.env.LLM_BASE_URL ?? "";
   return baseURL.includes("api.code.umans.ai");
 }
 
 /**
- * 利用可能なモデル一覧。
+ * List of available models.
  *
- * - Umansモード（LLM_BASE_URL が api.code.umans.ai を含む）:
- *   `/v1/models/info` から取得したモデル一覧を返す。API 失敗時は
- *   MODEL_REASONING（現行ハードコード）にフォールバック。
- * - OAI互換モード（OpenAI / vLLM / Ollama 等）:
- *   LLM_MODELS env（カンマ区切り）から構築。未設定時は defaultModel() のみ。
+ * - Umans mode (LLM_BASE_URL includes api.code.umans.ai):
+ *   Returns the model list fetched from `/v1/models/info`. On API failure,
+ *   falls back to MODEL_REASONING (current hardcoded values).
+ * - OAI-compatible mode (OpenAI / vLLM / Ollama, etc.):
+ *   Built from the LLM_MODELS env (comma-separated). If unset, only defaultModel().
  */
 export async function availableModels(): Promise<string[]> {
   if (isUmansProvider()) {
@@ -55,12 +55,12 @@ export async function availableModels(): Promise<string[]> {
 }
 
 /**
- * UmansAI 各モデルの reasoning effort 定義。
- * API: https://api.code.umans.ai/v1/models/info の capabilities.reasoning に基づく。
- * levels が空配列のモデルは思考強度を制御不能（reasoning_effort を送らない）。
+ * Reasoning effort definitions for each UmansAI model.
+ * Based on capabilities.reasoning from API: https://api.code.umans.ai/v1/models/info
+ * Models with an empty levels array cannot control reasoning intensity (no reasoning_effort sent).
  *
- * Umansモードの実稼働時は API 応答で上書きされる。これは API 取得失敗時の
- * フォールバック値として保持する（ユーザー選択: フォールバック時は現行ハードコードを残す）。
+ * In production Umans mode, these are overridden by API responses. Kept as
+ * fallback values for API fetch failure (user choice: keep current hardcoded values on fallback).
  */
 export type ReasoningConfig = {
   levels: string[];
@@ -79,7 +79,7 @@ export const MODEL_REASONING: Record<string, ReasoningConfig> = {
 };
 
 /**
- * UmansAPI の /v1/models/info から取得したモデル情報。
+ * Model information fetched from the UmansAPI /v1/models/info endpoint.
  */
 export type UmansModelInfo = {
   id: string;
@@ -89,22 +89,22 @@ export type UmansModelInfo = {
   replacement?: string;
 };
 
-// 起動時1回 fetch しプロセス内でキャッシュ（ユーザー選択: 起動時1回 fetch＆キャッシュ）。
+// Fetched once at startup and cached in-process (user choice: fetch once at startup & cache).
 let modelsInfoCache: UmansModelInfo[] | null = null;
 let modelsInfoFetchPromise: Promise<UmansModelInfo[]> | null = null;
 
-/** 設定変更時に呼んでキャッシュを破棄する（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_MODELS 変更時）。 */
+/** Call to discard the cache on config changes (when LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_MODELS change). */
 export function resetUmansModelsCache(): void {
   modelsInfoCache = null;
   modelsInfoFetchPromise = null;
 }
 
 /**
- * UmansAPI の /v1/models/info からモデル情報を取得・キャッシュ。
- * プロセス内で1回だけ fetch し、以降はキャッシュを返す。
- * API 失敗時は MODEL_REASONING（現行ハードコード）から構築した値にフォールバック。
+ * Fetches and caches model information from the UmansAPI /v1/models/info endpoint.
+ * Fetches only once per process; subsequent calls return the cache.
+ * On API failure, falls back to values built from MODEL_REASONING (current hardcoded values).
  *
- * Umansモードでない場合は空配列を返す（呼び出し元で OAI モード処理へ）。
+ * Returns an empty array when not in Umans mode (caller handles OAI mode).
  */
 export async function getUmansModels(): Promise<UmansModelInfo[]> {
   if (modelsInfoCache) return modelsInfoCache;
@@ -121,7 +121,7 @@ export async function getUmansModels(): Promise<UmansModelInfo[]> {
 async function fetchUmansModels(): Promise<UmansModelInfo[]> {
   const baseURL = process.env.LLM_BASE_URL;
   if (!baseURL || !isUmansProvider()) {
-    // Umansモードでない場合は空配列（呼び出し元で OAI モード処理へ）。
+    // Not in Umans mode; return empty array (caller handles OAI mode).
     return [];
   }
   try {
@@ -152,7 +152,7 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
       replacement: m.deprecation?.replacement,
     }));
   } catch {
-    // フォールバック: 現行ハードコード MODEL_REASONING から構築。
+    // Fallback: build from the current hardcoded MODEL_REASONING.
     return Object.entries(MODEL_REASONING).map(([id, cfg]) => ({
       id,
       displayName: id,
@@ -163,9 +163,9 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
 }
 
 /**
- * 指定モデルの有効な reasoning effort レベル一覧を返す。
- * Umansモード時は API 由外の値を優先、それ以外は MODEL_REASONING を参照。
- * モデルが未知、または levels が空（制御不可）の場合は空配列を返す。
+ * Returns the valid reasoning effort levels for the specified model.
+ * In Umans mode, prefers API-sourced values; otherwise uses MODEL_REASONING.
+ * Returns an empty array if the model is unknown or levels is empty (not controllable).
  */
 export async function getReasoningLevels(model: string): Promise<string[]> {
   if (isUmansProvider()) {
@@ -177,8 +177,8 @@ export async function getReasoningLevels(model: string): Promise<string[]> {
 }
 
 /**
- * 指定モデルのデフォルト reasoning effort を返す。
- * Umansモード時は API 由外の値を優先。制御不可モデル（levels 空 / defaultLevel null）は null。
+ * Returns the default reasoning effort for the specified model.
+ * In Umans mode, prefers API-sourced values. Returns null for non-controllable models (empty levels / null defaultLevel).
  */
 export async function getDefaultReasoningEffort(model: string): Promise<string | null> {
   if (isUmansProvider()) {
@@ -190,8 +190,8 @@ export async function getDefaultReasoningEffort(model: string): Promise<string |
 }
 
 /**
- * 指定モデルが enable_thinking: false で思考を完全OFFできるか。
- * Umansモード時は API 由外の can_disable フラグを優先。
+ * Whether the specified model can fully disable thinking via enable_thinking: false.
+ * In Umans mode, prefers the API-sourced can_disable flag.
  */
 export async function canDisableThinking(model: string): Promise<boolean> {
   if (isUmansProvider()) {
@@ -203,15 +203,15 @@ export async function canDisableThinking(model: string): Promise<boolean> {
 }
 
 /**
- * 推論を無効化するためのリクエストパラメータを構築。
- * 優先順位:
- * 1. canDisable: true → enable_thinking: false（GLM-5.2 は levels に none を含むが
- *    reasoning_effort: "none" が無視されるため、enable_thinking を優先）
- * 2. levels に "none" を含む → reasoning_effort: "none"
- * 3. どちらも不可 → 空オブジェクト（制御不能）
+ * Builds request parameters to disable reasoning.
+ * Priority:
+ * 1. canDisable: true → enable_thinking: false (GLM-5.2 includes "none" in levels, but
+ *    reasoning_effort: "none" is ignored, so enable_thinking takes precedence)
+ * 2. levels includes "none" → reasoning_effort: "none"
+ * 3. Neither possible → empty object (not controllable)
  *
- * 戻り型を Record<string, unknown> に緩和し、呼び出し元の as キャストで
- * ChatCompletionCreateParams* 型に合わせる（enable_thinking は SDK 型に非存在）。
+ * Return type is relaxed to Record<string, unknown>, cast by the caller
+ * to ChatCompletionCreateParams* types (enable_thinking is not in the SDK types).
  */
 export async function buildDisableReasoningParams(
   model: string,
@@ -226,7 +226,7 @@ export async function buildDisableReasoningParams(
   return {};
 }
 
-/** モデル id → display_name のマッピング。OAIモード時は空オブジェクト。 */
+/** Mapping of model id → display_name. Empty object in OAI mode. */
 export async function getModelDisplayNames(): Promise<Record<string, string>> {
   if (!isUmansProvider()) return {};
   const models = await getUmansModels();

@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 
 /**
- * 言語切替ボタン（EN / JA）。ThemeToggle と同じパターンで
- * サイドバーヘッダーに配置する。マウント前は hydration 不一致を避けるため空描画。
+ * Language toggle button (EN / JA). Uses the same pattern as ThemeToggle,
+ * placed in the sidebar header. Renders empty before mount to avoid hydration mismatch.
  */
 export function LanguageToggle() {
   const { locale, setLocale } = useI18n();

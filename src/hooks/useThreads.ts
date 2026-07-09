@@ -13,14 +13,14 @@ export type ThreadSummary = {
 };
 
 /**
- * サイドバー用スレッド一覧フック（Phase 5）。
+ * Thread list hook for the sidebar (Phase 5).
  *
- * - 初回マウントで GET /api/threads を取得。
- * - create() は POST /api/threads で新規スレッドを作り、一覧に先頭挿入。
- * - rename(id, title) は PATCH /api/threads?id=...。
- * - move(id, folderId) は PATCH /api/threads?id=... で folderId を更新。
- * - remove(id) は DELETE /api/threads/[id]。
- * - refresh() で一覧を再取得（チャット送信後に updatedAt 順序を更新するため）。
+ * - Fetches GET /api/threads on initial mount.
+ * - create() does POST /api/threads to create a new thread, inserted at the top of the list.
+ * - rename(id, title) does PATCH /api/threads?id=...
+ * - move(id, folderId) does PATCH /api/threads?id=... to update folderId.
+ * - remove(id) does DELETE /api/threads/[id].
+ * - refresh() re-fetches the list (to update updatedAt ordering after sending a chat).
  */
 export function useThreads() {
   const { t } = useI18n();
@@ -43,7 +43,7 @@ export function useThreads() {
     }
   }, [t]);
 
-  // 初回ロード。effect 本体で同期的 setState しないよう async IIFE で包む。
+  // Initial load. Wrapped in an async IIFE to avoid synchronous setState in the effect body.
   useEffect(() => {
     void (async () => {
       await refresh();

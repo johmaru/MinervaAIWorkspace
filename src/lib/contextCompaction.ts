@@ -1,6 +1,7 @@
 import type OpenAI from "openai";
+import { logger } from "@/lib/logger";
 
-/** チャット履歴のメッセージ形式（route.ts の DbMessage と構造的互換）。 */
+/** Chat history message format (structurally compatible with DbMessage in route.ts). */
 export type DbMessage = {
   id: string;
   parentId: string | null;
@@ -9,10 +10,10 @@ export type DbMessage = {
 };
 
 /**
- * テキストのトークン数をヒューリスティックで推定。
- * GLM/Qwen のトークナイザはクライアント側で利用不可なため、
- * CJK 文字 ≈ 1 token、その他 ≈ 4 chars/token で概算。
- * 保守的な過大見積もり（80%閾値の安全マージンとして機能）。
+ * Heuristically estimates the token count of a text.
+ * GLM/Qwen tokenizers are unavailable client-side, so this approximates
+ * CJK characters ≈ 1 token, others ≈ 4 chars/token.
+ * Conservative overestimate (acts as safety margin for the 80% threshold).
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
@@ -34,8 +35,8 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * メッセージ配列の総トークン数を推定。
- * 各メッセージ +4 tokens overhead（role タグ・フォーマット）。
+ * Estimates the total token count of a message array.
+ * Each message adds +4 tokens overhead (role tags, formatting).
  */
 export function estimateMessagesTokens(
   messages: { role: string; content: string }[],
@@ -48,12 +49,12 @@ export function estimateMessagesTokens(
 }
 
 /**
- * 会話履歴が長すぎる場合、古いメッセージを要約して圧縮する。
- * システム指示メッセージは要約対象外（呼び出し側が system メッセージを除外して渡す）。
+ * When conversation history is too long, summarizes older messages to compact it.
+ * System instruction messages are excluded from summarization (caller filters out system messages).
  *
- * - history.length <= 6: そのまま返す（短すぎて要約不要）
- * - それ以外: 先頭 history.slice(0, -4) を要約、末尾4メッセージ(2ターン)は保持
- * - エラー時: 元の history をそのまま返す（チャットをブロックしない）
+ * - history.length <= 6: return as-is (too short to summarize)
+ * - otherwise: summarize history.slice(0, -4), keep the last 4 messages (2 turns)
+ * - on error: return the original history as-is (does not block chat)
  */
 export async function compactHistory({
   history,
@@ -105,7 +106,7 @@ ${formatted}`;
 
     return [summaryMsg, ...recent];
   } catch (err) {
-    console.error("[chat] compaction failed:", err);
+    logger.error("chat", "compaction failed", { error: err instanceof Error ? err.message : String(err) });
     return history;
   }
 }

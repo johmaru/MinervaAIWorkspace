@@ -4,61 +4,61 @@ import { t, getRequestLocale } from "@/lib/i18n";
 import { ja, en } from "@/lib/i18n/dictionaries";
 import { DEFAULT_LOCALE, LOCALE_COOKIE_NAME, SUPPORTED_LOCALES } from "@/lib/i18n/types";
 
-describe("t() — 翻訳取得", () => {
-  it("ja 辞書から common.save を取得", () => {
+describe("t() — translation retrieval", () => {
+  it("retrieves common.save from the ja dictionary", () => {
     expect(t("ja", "common.save")).toBe("保存");
   });
 
-  it("en 辞書から common.save を取得", () => {
+  it("retrieves common.save from the en dictionary", () => {
     expect(t("en", "common.save")).toBe("Save");
   });
 
-  it("ja で補間文字列 chat.referenceCount を置換", () => {
+  it("replaces interpolation string chat.referenceCount in ja", () => {
     expect(t("ja", "chat.referenceCount", { count: 3 })).toBe("📚 参照元: 3件");
   });
 
-  it("en で補間文字列 chat.referenceCount を置換", () => {
+  it("replaces interpolation string chat.referenceCount in en", () => {
     expect(t("en", "chat.referenceCount", { count: 3 })).toBe("📚 References: 3");
   });
 
-  it("存在しないキーは key をそのまま返す（フォールバック）", () => {
+  it("returns the key as-is for nonexistent keys (fallback)", () => {
     expect(t("ja", "nonexistent.key")).toBe("nonexistent.key");
   });
 
-  it("ネストした存在しないキーもフォールバック", () => {
+  it("falls back for nested nonexistent keys", () => {
     expect(t("en", "common.nonexistent")).toBe("common.nonexistent");
   });
 
-  it("複数プレースホルダを置換", () => {
+  it("replaces multiple placeholders", () => {
     expect(t("ja", "chat.branchPosition", { current: 1, total: 3 })).toBe("枝 1 / 3");
   });
 
-  it("未対応ロケールは DEFAULT_LOCALE にフォールバック", () => {
+  it("falls back to DEFAULT_LOCALE for unsupported locales", () => {
     expect(t("fr" as never, "common.save")).toBe(t(DEFAULT_LOCALE, "common.save"));
   });
 });
 
-describe("getRequestLocale() — Cookie 検出", () => {
-  it("Cookie umanschat-locale=en から en を検出", () => {
+describe("getRequestLocale() — cookie detection", () => {
+  it("detects en from cookie umanschat-locale=en", () => {
     const req = new Request("http://localhost/api/test", {
       headers: { cookie: `${LOCALE_COOKIE_NAME}=en` },
     });
     expect(getRequestLocale(req)).toBe("en");
   });
 
-  it("Cookie なし時に DEFAULT_LOCALE を返す", () => {
+  it("returns DEFAULT_LOCALE when no cookie is present", () => {
     const req = new Request("http://localhost/api/test");
     expect(getRequestLocale(req)).toBe(DEFAULT_LOCALE);
   });
 
-  it("不正値 umanschat-locale=fr を DEFAULT_LOCALE にフォールバック", () => {
+  it("falls back to DEFAULT_LOCALE for invalid value umanschat-locale=fr", () => {
     const req = new Request("http://localhost/api/test", {
       headers: { cookie: `${LOCALE_COOKIE_NAME}=fr` },
     });
     expect(getRequestLocale(req)).toBe(DEFAULT_LOCALE);
   });
 
-  it("他の Cookie が混在していても正しく検出", () => {
+  it("correctly detects when other cookies are mixed in", () => {
     const req = new Request("http://localhost/api/test", {
       headers: { cookie: `theme=dark; ${LOCALE_COOKIE_NAME}=en; foo=bar` },
     });
@@ -66,10 +66,10 @@ describe("getRequestLocale() — Cookie 検出", () => {
   });
 });
 
-describe("辞書キー構造の一貫性", () => {
+describe("dictionary key structure consistency", () => {
   /**
-   * ja と en が全く同じキー構造を持つことを実行時に検証。
-   * 型レベル（en: typeof ja）でも担保されるが、実行時テストで二重確認。
+   * Verifies at runtime that ja and en have exactly the same key structure.
+   * Also guaranteed at the type level (en: typeof ja), but double-checked via runtime test.
    */
   function collectKeys(obj: unknown, prefix: string = ""): string[] {
     if (typeof obj !== "object" || obj === null) return [];
@@ -85,13 +85,13 @@ describe("辞書キー構造の一貫性", () => {
     return keys;
   }
 
-  it("ja と en が同じキーセットを持つ", () => {
+  it("ja and en have the same key set", () => {
     const jaKeys = collectKeys(ja).sort();
     const enKeys = collectKeys(en).sort();
     expect(enKeys).toEqual(jaKeys);
   });
 
-  it("SUPPORTED_LOCALES に ja と en が含まれる", () => {
+  it("SUPPORTED_LOCALES includes ja and en", () => {
     expect(SUPPORTED_LOCALES).toContain("ja");
     expect(SUPPORTED_LOCALES).toContain("en");
   });

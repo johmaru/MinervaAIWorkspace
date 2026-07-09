@@ -5,10 +5,11 @@ import { mkdirSync, renameSync, unlinkSync, readdirSync, statSync, openSync, rea
 import { execSync } from "node:child_process";
 import { dirname, basename, join } from "node:path";
 import * as schema from "./schema";
+import { logger } from "../lib/logger";
 
 /**
- * アプリ全体で共有する Drizzle DB インスタンスの型。
- * better-sqlite3 は sync ドライバ。
+ * Type of the Drizzle DB instance shared across the app.
+ * better-sqlite3 is a sync driver.
  */
 export type Db = BetterSQLite3Database<typeof schema>;
 
@@ -19,20 +20,20 @@ const globalForDb = globalThis as unknown as {
 
 const dbPath = process.env.DATABASE_URL || join(process.cwd(), "data", "umanschat.db");
 
-// データディレクトリを確保（初回起動時）
+// Ensure the data directory exists (on first launch)
 mkdirSync(dirname(dbPath), { recursive: true });
 /**
- * SQLite オープン。DELETE ジャーナルモードを使用する。
+ * Opens SQLite. Uses DELETE journal mode.
  *
- * WAL モードはプロセス間で共有される mmap された -shm ファイルを必要とするが、
- * Docker Desktop (Windows) のバインドマウントではファイル共有レイヤが
- * その mmap を正しく処理せず、破損した 3 バイトの -shm を生成して
- * 最終的に SQLITE_CORRUPT を引き起こす。DELETE モードは通常の -journal
- * ロールバックファイルを使い、バインドマウント上で正しく動作する。
- * トレードオフ（読み書きのブロック）はシングルユーザーのチャットアプリでは無関係。
+ * WAL mode requires an mmap'd -shm file shared across processes, but
+ * Docker Desktop (Windows) bind mounts do not handle the file-sharing layer's
+ * mmap correctly, producing a corrupted 3-byte -shm and ultimately
+ * SQLITE_CORRUPT. DELETE mode uses a regular -journal rollback file
+ * and works correctly on bind mounts.
+ * The trade-off (read/write blocking) is irrelevant for a single-user chat app.
  *
- * 起動時に integrity_check を実行し、破損時は sqlite3 .recover で
- * 自動修復する（healthy な DB では高速な no-op）。
+ * Runs an integrity_check at startup; on corruption, auto-recovers via
+ * sqlite3 .recover (a fast no-op for a healthy DB).
  */
 export function openDatabase(dbPath: string): Database.Database {
   const applyPragmas = (db: Database.Database) => {
@@ -41,12 +42,12 @@ export function openDatabase(dbPath: string): Database.Database {
     db.pragma("foreign_keys = ON");
   };
 
-  // 読み取り専用プローブで整合性を確認してから読み書き用に開き直す。
-  // better-sqlite3 は読み書きモードで破損 DB を開いた際、コンストラクタが
-  // 例外を投げてもネイティブのファイルハンドルを解放しない（Windows で顕著）。
-  // ハンドルが残っていると renameSync が EBUSY で失敗し recoverDatabase が
-  // バックアップを退避できなくなる。readonly プローブはヘッダー検証を行わず
-  // 開けるため、close() で確実にハンドルを解放できる。
+  // Verify integrity with a read-only probe before reopening in read-write mode.
+  // When better-sqlite3 opens a corrupted DB in read-write mode, the constructor
+  // may throw an exception without releasing the native file handle (prominent on Windows).
+  // If the handle remains, renameSync fails with EBUSY and recoverDatabase
+  // cannot move the backup aside. The readonly probe does not validate the header
+  // and opens anyway, so close() reliably releases the handle.
   let probe: Database.Database | null = null;
   try {
     probe = new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -54,12 +55,12 @@ export function openDatabase(dbPath: string): Database.Database {
     probe.close();
     probe = null;
     if (status !== "ok") {
-      // 整合性チェック失敗 → 修復へ（ハンドルは解放済み、rename 可能）。
+      // Integrity check failed → proceed to recovery (handle released, rename possible).
       return recoverDatabase(dbPath);
     }
   } catch {
-    // プローブの open または integrity_check が失敗（例: SQLITE_NOTADB）。
-    // ハンドルを確実に解放してから修復へ。
+    // Probe open or integrity_check failed (e.g. SQLITE_NOTADB).
+    // Ensure the handle is released before proceeding to recovery.
     if (probe) {
       try { probe.close(); } catch { /* noop */ }
       probe = null;
@@ -67,7 +68,7 @@ export function openDatabase(dbPath: string): Database.Database {
     return recoverDatabase(dbPath);
   }
 
-  // healthy な DB を読み書きモードで開き直す。
+  // Reopen the healthy DB in read-write mode.
   const instance = new Database(dbPath);
   applyPragmas(instance);
   return instance;
@@ -75,7 +76,7 @@ export function openDatabase(dbPath: string): Database.Database {
 
 const SQLITE_MAGIC = Buffer.from("SQLite format 3\x00");
 
-// path の先頭 16 バイトが SQLite magic なら真。読み込み失敗時は偽。
+// Returns true if the first 16 bytes of path match the SQLite magic. Returns false on read failure.
 function isSqliteFile(path: string): boolean {
   let fd: number;
   try { fd = openSync(path, "r"); } catch { return false; }
@@ -85,8 +86,8 @@ function isSqliteFile(path: string): boolean {
   return n >= 16 && buf.subarray(0, 16).equals(SQLITE_MAGIC);
 }
 
-// デプロイ済みバグが dbPath に SQL テキストを書き込み、実 DB を
-// *.corrupt-* に退避していた場合、その実 DB から回復を試みる。
+// If a deployed bug wrote SQL text to dbPath and moved the real DB to
+// *.corrupt-*, attempts to recover from that real DB.
 function findRealBackup(dbPath: string, backupPath: string): string | null {
   const dir = dirname(dbPath);
   let files: string[];
@@ -97,7 +98,7 @@ function findRealBackup(dbPath: string, backupPath: string): string | null {
     .map((f) => join(dir, f))
     .filter((f) => f !== backupPath);
   if (candidates.length === 0) return null;
-  // 一番新しいものを選び、SQLite ヘッダーを持つか確認。
+  // Select the newest one and verify it has a SQLite header.
   candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
   for (const f of candidates) {
     if (isSqliteFile(f)) return f;
@@ -110,26 +111,26 @@ function recoverDatabase(dbPath: string): Database.Database {
   try {
     renameSync(dbPath, backupPath);
   } catch {
-    // ファイルが存在しない等の場合は backupPath 未生成で続行。
+    // If the file does not exist, etc., continue without creating backupPath.
   }
   for (const ext of ["-wal", "-shm", "-journal"]) {
-    try { unlinkSync(dbPath + ext); } catch { /* 存在しない場合は無視 */ }
+    try { unlinkSync(dbPath + ext); } catch { /* Ignore if not present */ }
   }
-  // .recover は SQL テキストを stdout に出力する。シェルの `>` で dbPath
-  // に書き込むと SQL テキストファイルになり SQLITE_NOTADB でクラッシュする。
-  // 正しくは .recover の出力を別の sqlite3 プロセスにパイプしてバイナリ DB
-  // を構築する: `sqlite3 <backup> .recover | sqlite3 <newdb>`。
-  // backupPath が SQLite でない（=デプロイ済みバグの SQL テキスト）場合、
-  // 直前の実 DB バックアップから回復を試みる。
+  // .recover outputs SQL text to stdout. Using the shell's `>` to write to dbPath
+  // produces an SQL text file that crashes with SQLITE_NOTADB.
+  // The correct approach is to pipe .recover output to another sqlite3 process
+  // to build a binary DB: `sqlite3 <backup> .recover | sqlite3 <newdb>`.
+  // If backupPath is not SQLite (i.e. SQL text from a deployed bug),
+  // attempt recovery from the previous real DB backup.
   let recoverSource = backupPath;
   if (!isSqliteFile(backupPath)) {
     recoverSource = findRealBackup(dbPath, backupPath) ?? backupPath;
   }
   try {
-    // 新規空 DB を作成（存在しない場合）。.recover の SQL をパイプで流し込む。
+    // Create a new empty DB (if it doesn't exist). Pipe .recover SQL into it.
     execSync(`sqlite3 "${recoverSource}" ".recover" | sqlite3 "${dbPath}"`, { stdio: "ignore" });
   } catch {
-    // sqlite3 CLI 不在または .recover 失敗 → 空の新規ファイル。マイグレーションがスキーマを再構築。
+    // sqlite3 CLI missing or .recover failed → empty new file. Migration rebuilds the schema.
     new Database(dbPath).close();
   }
   try {
@@ -137,16 +138,16 @@ function recoverDatabase(dbPath: string): Database.Database {
     healed.pragma("journal_mode = DELETE");
     healed.pragma("synchronous = NORMAL");
     healed.pragma("foreign_keys = ON");
-    console.warn(`[db] Recovered from corruption. Backup: ${backupPath}`);
+    logger.warn("db", "Recovered from corruption", { backup: backupPath });
     return healed;
   } catch {
-    // 回復したファイルが開けない場合は空の新規 DB にフォールバック。
+    // If the recovered file cannot be opened, fall back to a fresh empty DB.
     new Database(dbPath).close();
     const fresh = new Database(dbPath);
     fresh.pragma("journal_mode = DELETE");
     fresh.pragma("synchronous = NORMAL");
     fresh.pragma("foreign_keys = ON");
-    console.warn(`[db] Recovery failed; started fresh DB. Backup: ${backupPath}`);
+    logger.warn("db", "Recovery failed; started fresh DB", { backup: backupPath });
     return fresh;
   }
 }
@@ -158,6 +159,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export const db: Db = globalForDb.db ?? drizzle(sqlite, { schema });
+logger.info("db", "opened", { path: dbPath });
 if (process.env.NODE_ENV !== "production") {
   globalForDb.db = db;
 }

@@ -1,12 +1,12 @@
 /**
- * Notion OAuth クライアント。
+ * Notion OAuth client.
  *
- * - exchangeNotionCode: 認可コード → アクセストークン交換（HTTP Basic 認証）
- * - refreshNotionToken: リフレッシュトークンでアクセストークン更新
- * - callNotionApi: Notion API 呼び出し（401 時に自動リフレッシュ＆1回リトライ）
+ * - exchangeNotionCode: authorization code → access token exchange (HTTP Basic auth)
+ * - refreshNotionToken: refreshes the access token using the refresh token
+ * - callNotionApi: calls the Notion API (auto-refreshes and retries once on 401)
  *
- * Notion アクセストークンは長寿命だが、ユーザー取り消し等で無効化されうる。
- * 401 を検知したらリフレッシュしてリトライし、新しいトークンを呼び出し元へ返す。
+ * Notion access tokens are long-lived but can be invalidated by user revocation, etc.
+ * On detecting a 401, it refreshes and retries, returning the new tokens to the caller.
  */
 
 const NOTION_VERSION = "2026-03-11";
@@ -35,8 +35,8 @@ function basicAuthHeader(): string {
 }
 
 /**
- * 認可コードをアクセストークンと交換する。
- * Notion のトークンエンドポイントは HTTP Basic 認証（CLIENT_ID:CLIENT_SECRET）を要求する。
+ * Exchanges an authorization code for an access token.
+ * Notion's token endpoint requires HTTP Basic auth (CLIENT_ID:CLIENT_SECRET).
  */
 export async function exchangeNotionCode(
   code: string,
@@ -62,8 +62,8 @@ export async function exchangeNotionCode(
 }
 
 /**
- * リフレッシュトークンで新しいアクセストークンを取得する。
- * 古い refresh_token は無効化され、新しい refresh_token が返される。
+ * Obtains a new access token using the refresh token.
+ * The old refresh_token is invalidated, and a new refresh_token is returned.
  */
 export async function refreshNotionToken(
   refreshToken: string,
@@ -88,8 +88,8 @@ export async function refreshNotionToken(
 }
 
 /**
- * Notion API を呼び出す。401 の場合はトークンをリフレッシュして1回リトライする。
- * リフレッシュされた場合、新しいトークンを呼び出し元へ返す（DB へ永続化のため）。
+ * Calls the Notion API. On 401, refreshes the token and retries once.
+ * If refreshed, returns the new tokens to the caller (for DB persistence).
  */
 export async function callNotionApi(
   accessToken: string,
@@ -114,7 +114,7 @@ export async function callNotionApi(
 
   let res = await doFetch(accessToken);
 
-  // 401 → リフレッシュしてリトライ
+  // 401 → refresh and retry
   if (res.status === 401) {
     try {
       const refreshed = await refreshNotionToken(refreshToken);

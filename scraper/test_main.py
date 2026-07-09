@@ -1,7 +1,7 @@
-"""scraper/main.py の単体テスト。
+"""Unit tests for scraper/main.py.
 
-ネットワーク不要テスト（parse_robots_txt, extract_text, extract_title）と
-実URLテスト（/scrape エンドポイント、SCRAPE_TEST_URL env で制御）。
+Network-free tests (parse_robots_txt, extract_text, extract_title) and
+real-URL tests (/scrape endpoint, controlled via the SCRAPE_TEST_URL env var).
 """
 import asyncio
 import os
@@ -142,7 +142,7 @@ class TestScrapeEndpoint:
         assert resp.status_code == 400
 
     def test_missing_url_returns_422(self, client):
-        # Pydantic バリデーション
+        # Pydantic validation
         resp = client.post("/scrape", json={})
         assert resp.status_code == 422
 
@@ -188,11 +188,11 @@ class TestIsSafeHost:
         assert is_safe_host("3232235521") is False
 
     def test_nonexistent_domain_rejected(self):
-        # fail-closed: DNS解決失敗は不許可
+        # fail-closed: DNS resolution failure is denied
         assert is_safe_host("nonexistent-xyz-invalid.test") is False
 
     def test_public_domain_allowed(self):
-        # example.com は公開IPに解決されるはず
+        # example.com should resolve to a public IP
         assert is_safe_host("example.com") is True
 
 
@@ -222,12 +222,12 @@ class TestSearchEndpoint:
         assert "query is required" in resp.json()["error"]
 
     def test_missing_query_returns_422(self, client):
-        # Pydantic バリデーション
+        # Pydantic validation
         resp = client.post("/search", json={})
         assert resp.status_code == 422
 
     def test_searxng_unreachable_returns_502(self, client, monkeypatch):
-        # SearXNG が未起動/無効アドレス → 502
+        # SearXNG not started / invalid address -> 502
         monkeypatch.setenv("SEARXNG_URL", "http://invalid-searxng-host:8080")
         resp = client.post("/search", json={"query": "python programming", "max_results": 3})
         assert resp.status_code == 502
@@ -268,7 +268,7 @@ class TestScrapeUrlSafe:
 
 
 class TestSearchTimeRange:
-    """time_range を SearXNG リクエスト params に透過するか検証（httpx をモック）。"""
+    """Verify that time_range is passed through to the SearXNG request params (httpx is mocked)."""
 
     @staticmethod
     def _ok_response() -> MagicMock:
@@ -318,7 +318,7 @@ class TestSearchTimeRange:
         assert "time_range" not in params
 
     def test_default_no_time_range(self, client):
-        # time_range を送らない（後方互換: 既存呼び出しは全期間）
+        # No time_range sent (backward compat: existing calls query all time)
         mock_get = AsyncMock(return_value=self._ok_response())
         with patch("httpx.AsyncClient.get", mock_get):
             resp = client.post(
@@ -329,7 +329,7 @@ class TestSearchTimeRange:
         assert "time_range" not in params
 
     def test_no_engines_param(self, client):
-        """engines パラメータは SearXNG 設定に委譲し、送信しない"""
+        """The engines parameter is delegated to SearXNG config and not sent"""
         mock_get = AsyncMock(return_value=self._ok_response())
         with patch("httpx.AsyncClient.get", mock_get):
             resp = client.post("/search", json={"query": "test", "max_results": 3})
@@ -338,10 +338,10 @@ class TestSearchTimeRange:
         assert "engines" not in params
 
 class TestSearchTimeRangeRetry:
-    """time_range で0件時にフィルタなしで再試行するか検証（httpx をモック）。"""
+    """Verify that a 0-result time_range search retries without the filter (httpx is mocked)."""
 
     def test_empty_with_time_range_retries_without_filter(self, client):
-        """time_range ありで0件 → time_range なしで再リクエストする"""
+        """0 results with time_range -> re-request without time_range"""
         empty_resp = MagicMock()
         empty_resp.status_code = 200
         empty_resp.json.return_value = {"results": []}
@@ -363,21 +363,21 @@ class TestSearchTimeRangeRetry:
         assert resp.status_code == 200
         assert mock_get.await_count == 2
 
-        # 1回目: time_range=year
+        # 1st call: time_range=year
         first_params = mock_get.call_args_list[0].kwargs.get("params", {})
         assert first_params.get("time_range") == "year"
 
-        # 2回目: time_range なし
+        # 2nd call: no time_range
         second_params = mock_get.call_args_list[1].kwargs.get("params", {})
         assert "time_range" not in second_params
 
-        # 再試行の結果が返される
+        # The retry result is returned
         data = resp.json()
         assert len(data["results"]) == 1
         assert data["results"][0]["url"] == "https://example.com/news"
 
     def test_empty_without_time_range_no_retry(self, client):
-        """time_range なしで0件 → 再試行しない"""
+        """0 results without time_range -> no retry"""
         empty_resp = MagicMock()
         empty_resp.status_code = 200
         empty_resp.json.return_value = {"results": []}
@@ -394,7 +394,7 @@ class TestSearchTimeRangeRetry:
         assert data["results"] == []
 
     def test_results_with_time_range_no_retry(self, client):
-        """time_range ありで結果あり → 再試行しない"""
+        """Results present with time_range -> no retry"""
         results_resp = MagicMock()
         results_resp.status_code = 200
         results_resp.json.return_value = {
@@ -415,7 +415,7 @@ class TestSearchTimeRangeRetry:
         assert len(data["results"]) == 1
 
     def test_retry_failure_returns_empty(self, client):
-        """再試行も0件 → 空のまま返す"""
+        """Retry also returns 0 results -> return empty"""
         empty_resp = MagicMock()
         empty_resp.status_code = 200
         empty_resp.json.return_value = {"results": []}
@@ -432,12 +432,12 @@ class TestSearchTimeRangeRetry:
         assert data["results"] == []
 
     def test_retry_exception_returns_empty(self, client):
-        """再試行で例外 → 空のまま返す（全体は失敗しない）"""
+        """Retry raises an exception -> return empty (overall does not fail)"""
         empty_resp = MagicMock()
         empty_resp.status_code = 200
         empty_resp.json.return_value = {"results": []}
 
-        # 1回目は0件、2回目（再試行）は例外
+        # 1st call returns 0 results, 2nd call (retry) raises an exception
         mock_get = AsyncMock(side_effect=[empty_resp, RuntimeError("connection reset")])
         with patch("httpx.AsyncClient.get", mock_get):
             resp = client.post(
@@ -452,8 +452,8 @@ class TestSearchTimeRangeRetry:
 
 
 class TestSearchPagination:
-    """SearXNG への問い合わせが SEARXNG_SAFE_LIMIT 件ずつページネーションで
-    分割されるか検証（httpx をモック）。"""
+    """Verify that SearXNG queries are paginated in chunks of SEARXNG_SAFE_LIMIT
+    results (httpx is mocked)."""
 
     @staticmethod
     def _make_results(n: int, prefix: str = "https://example.com/r") -> list[dict]:
@@ -463,7 +463,7 @@ class TestSearchPagination:
         ]
 
     def test_max_results_within_safe_limit_single_request(self, client):
-        """max_results <= SAFE_LIMIT なら1回のリクエストで完了"""
+        """max_results <= SAFE_LIMIT completes in a single request"""
         results_resp = MagicMock()
         results_resp.status_code = 200
         results_resp.json.return_value = {"results": self._make_results(5)}
@@ -483,7 +483,7 @@ class TestSearchPagination:
         assert params.get("pageno") == 1
 
     def test_max_results_exceeds_safe_limit_paginates(self, client):
-        """max_results=8, SAFE_LIMIT=5 → 2回リクエスト（pageno=1 で5件, pageno=2 で3件）"""
+        """max_results=8, SAFE_LIMIT=5 -> 2 requests (5 on pageno=1, 3 on pageno=2)"""
         page1 = MagicMock()
         page1.status_code = 200
         page1.json.return_value = {"results": self._make_results(5)}
@@ -506,12 +506,12 @@ class TestSearchPagination:
         second_params = mock_get.call_args_list[1].kwargs.get("params", {})
         assert first_params.get("pageno") == 1
         assert second_params.get("pageno") == 2
-        # 8件すべて返却
+        # All 8 results returned
         data = resp.json()
         assert len(data["results"]) == 8
 
     def test_pagination_stops_when_page_returns_empty(self, client):
-        """ページが空を返したら追加リクエストを行わない"""
+        """Stop making further requests when a page returns empty"""
         page1 = MagicMock()
         page1.status_code = 200
         page1.json.return_value = {"results": self._make_results(5)}
@@ -529,13 +529,13 @@ class TestSearchPagination:
             )
 
         assert resp.status_code == 200
-        # page1 で5件、page2 が空で停止 → 2回
+        # page1 yields 5, page2 is empty and stops -> 2 requests
         assert mock_get.await_count == 2
         data = resp.json()
         assert len(data["results"]) == 5
 
     def test_pagination_stops_on_non_200(self, client):
-        """SearXNG が非200を返したら追加リクエストを行わない"""
+        """Stop making further requests when SearXNG returns non-200"""
         page1 = MagicMock()
         page1.status_code = 200
         page1.json.return_value = {"results": self._make_results(5)}
@@ -558,8 +558,8 @@ class TestSearchPagination:
 
 
 class TestBatchScraping:
-    """スクレイピングが SCRAPE_BATCH_SIZE 件同時バッチで実行され、
-    バッチ間に wait が入るか検証。"""
+    """Verify that scraping runs in concurrent batches of SCRAPE_BATCH_SIZE
+    and that a wait occurs between batches."""
 
     @staticmethod
     def _make_results(n: int) -> list[dict]:
@@ -569,7 +569,7 @@ class TestBatchScraping:
         ]
 
     def test_batch_count_for_seven_results(self, client):
-        """max_results=7, BATCH_SIZE=2 → scrape_url_safe は7回呼ばれる（4バッチ: 2+2+2+1）"""
+        """max_results=7, BATCH_SIZE=2 -> scrape_url_safe is called 7 times (4 batches: 2+2+2+1)"""
         searxng_resp = MagicMock()
         searxng_resp.status_code = 200
         searxng_resp.json.return_value = {"results": self._make_results(7)}
@@ -585,19 +585,19 @@ class TestBatchScraping:
             )
 
         assert resp.status_code == 200
-        # SearXNG は SAFE_LIMIT=5 なので2ページ（5+2）= 2回 + scrape 間の sleep
-        # scrape_url_safe は結果7件全てに対して1回ずつ = 7回
+        # SearXNG uses SAFE_LIMIT=5, so 2 pages (5+2) = 2 requests + sleep between scrapes
+        # scrape_url_safe is called once for each of the 7 results = 7 calls
         assert mock_scrape.await_count == 7
         data = resp.json()
         assert len(data["results"]) == 7
-        # 全件スクレイピング成功
+        # All results scraped successfully
         assert all(r["scraped"] for r in data["results"])
-        # バッチ間 sleep は結果7件 / バッチ2 = 4バッチ → 3回のバッチ間 wait
-        # (SearXNG ページネーションの wait も asyncio.sleep なので合計はそれ以上)
+        # Sleep between batches: 7 results / batch 2 = 4 batches -> 3 inter-batch waits
+        # (SearXNG pagination waits also use asyncio.sleep, so the total is higher)
         assert mock_sleep.await_count >= 3
 
     def test_batch_delay_between_scrape_batches(self, client):
-        """バッチ間に SCRAPE_BATCH_DELAY が渡されるか検証"""
+        """Verify that SCRAPE_BATCH_DELAY is used between batches"""
         searxng_resp = MagicMock()
         searxng_resp.status_code = 200
         searxng_resp.json.return_value = {"results": self._make_results(5)}
@@ -618,13 +618,13 @@ class TestBatchScraping:
             )
 
         assert resp.status_code == 200
-        # 5件 / バッチ2 = 3バッチ → 2回のバッチ間 wait (SCRAPE_BATCH_DELAY)
-        # ページネーションは SAFE_LIMIT=5 なので1ページで完了 → wait なし
-        # スクレイプバッチ間の wait だけ SCRAPE_BATCH_DELAY が渡る
+        # 5 results / batch 2 = 3 batches -> 2 inter-batch waits (SCRAPE_BATCH_DELAY)
+        # Pagination completes in a single page since SAFE_LIMIT=5 -> no wait
+        # Only the inter-scrape-batch waits use SCRAPE_BATCH_DELAY
         assert SCRAPE_BATCH_DELAY in sleep_delays
 
     def test_empty_results_no_scrape_calls(self, client):
-        """結果0件 → scrape_url_safe は呼ばれない"""
+        """0 results -> scrape_url_safe is not called"""
         empty_resp = MagicMock()
         empty_resp.status_code = 200
         empty_resp.json.return_value = {"results": []}

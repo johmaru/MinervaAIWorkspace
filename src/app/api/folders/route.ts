@@ -12,7 +12,7 @@ function isValidScope(v: unknown): v is MemoryScope {
 }
 
 /**
- * GET /api/folders — フォルダ一覧（新着順）。
+ * GET /api/folders — List folders (newest first).
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -28,9 +28,9 @@ type FolderBody = {
 };
 
 /**
- * POST /api/folders — 新規フォルダ作成。
- * デフォルト値: name="New folder", instruction=null, memoryScope="global"。
- * 不正な memoryScope は "global" にフォールバック。
+ * POST /api/folders — Create a new folder.
+ * Defaults: name="New folder", instruction=null, memoryScope="global".
+ * Invalid memoryScope falls back to "global".
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -66,9 +66,9 @@ type PatchBody = {
 };
 
 /**
- * PATCH /api/folders?id=... — フォルダ部分更新。
- * 指定されたフィールドのみ更新。updatedAt は毎回更新。
- * 不正な memoryScope は 400。空白 name は "New folder" に正規化。
+ * PATCH /api/folders?id=... — Partially update a folder.
+ * Updates only the specified fields. updatedAt is always updated.
+ * Invalid memoryScope returns 400. Blank name is normalized to "New folder".
  */
 export async function PATCH(req: Request) {
   const user = await getSessionUser();

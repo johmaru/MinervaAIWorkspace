@@ -1,24 +1,25 @@
 import { createHash } from "crypto";
+import { logger } from "@/lib/logger";
 
 /**
- * 埋め込み生成のプロバイダ抽象化。
+ * Provider abstraction for embedding generation.
  *
- * 2つのバックエンドを `EMBED_PROVIDER` env で切替:
- *   - `local`（デフォ）: @xenova/transformers で ONNX モデルをローカル実行
- *   - `http`: Python `sentence-transformers` サービス（embedder）に HTTP で委譲
+ * Switches between two backends via `EMBED_PROVIDER` env:
+ *   - `local` (default): runs an ONNX model locally via @xenova/transformers
+ *   - `http`: delegates to a Python `sentence-transformers` service (embedder) via HTTP
  *
- * `kind`（`"query" | "document"`）は非対称モデル（LFM2.5 など）の prompt prefix
- * 制御用。`http` プロバイダのみが使用し、`local`（Xenova）では無視される。
+ * `kind` (`"query" | "document"`) controls the prompt prefix for asymmetric models
+ * (e.g. LFM2.5). Only the `http` provider uses it; `local` (Xenova) ignores it.
  */
 
-// 埋め込みモデルは環境変数で切り替え可能。
-// 主要候補（transformers.js で動作確認済み）:
-//   Xenova/all-MiniLM-L6-v2               (384次元, 英語中心, 高速)
-//   Xenova/paraphrase-multilingual-MiniLM-L12-v2 (384次元, 多言語, 推奨: 日本語含む)
-//   Xenova/multilingual-e5-small           (384次元, 多言語)
-//   Xenova/multilingual-e5-base            (768次元, 多言語, 高精度)
-// HTTP プロバイダ（Python embedder サービス）:
-//   LiquidAI/LFM2.5-Embedding-350M         (1024次元, 多言語, sentence-transformers)
+// Embedding model is configurable via env.
+// Verified candidates (working with transformers.js):
+//   Xenova/all-MiniLM-L6-v2               (384-dim, English-focused, fast)
+//   Xenova/paraphrase-multilingual-MiniLM-L12-v2 (384-dim, multilingual, recommended: includes Japanese)
+//   Xenova/multilingual-e5-small           (384-dim, multilingual)
+//   Xenova/multilingual-e5-base            (768-dim, multilingual, higher accuracy)
+// HTTP provider (Python embedder service):
+//   LiquidAI/LFM2.5-Embedding-350M         (1024-dim, multilingual, sentence-transformers)
 let MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
 let EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
@@ -34,26 +35,26 @@ type Pipeline = {
 let pipelinePromise: Promise<Pipeline> | null = null;
 
 /**
- * transformers.js パイプラインを遅延初期化。
- * 初回呼び出しでモデルをロード（ダウンロード）する。
+ * Lazily initializes the transformers.js pipeline.
+ * On first call, loads (downloads) the model.
  */
 async function getPipeline(): Promise<Pipeline> {
   if (!pipelinePromise) {
     pipelinePromise = (async () => {
       const transformers = await import("@xenova/transformers");
-      // sharp は画像処理用。テキスト embedding には不要。
-      // ネイティブバイナリ不足のエラーを回避するため無効化。
+      // sharp is for image processing. Not needed for text embedding.
+      // Disabled to avoid errors from missing native binaries.
       try {
         transformers.env.backends.onnx.wasm.wasmPaths = "";
       } catch {
-        // env 設定は失敗しても続行
+        // Continue even if env setting fails
       }
-      // sharp のロードを回避: process.env でフラグを設定
-      // transformers.js v2 は sharp の有無を自動検出するが、
-      // バンドル版 sharp のビルド失敗を避けるため明示的に無効化
+      // Avoid loading sharp: set flags via process.env
+      // transformers.js v2 auto-detects sharp availability, but
+      // explicitly disabled to avoid build failures with bundled sharp
       const { pipeline } = transformers;
       return pipeline("feature-extraction", MODEL_ID, {
-        // progress_callback なし（サイレント）
+        // No progress_callback (silent)
       }) as unknown as Pipeline;
     })();
   }
@@ -61,21 +62,21 @@ async function getPipeline(): Promise<Pipeline> {
 }
 
 /**
- * HTTP プロバイダ（Python embedder）が有効か。
- * `EMBED_PROVIDER=http` または `EMBEDDER_URL` 設定時。
+ * Whether the HTTP provider (Python embedder) is enabled.
+ * True when `EMBED_PROVIDER=http` or `EMBEDDER_URL` is set.
  */
 function isHttpProvider(): boolean {
   return process.env.EMBED_PROVIDER === "http";
 }
 /**
- * HTTP プロバイダでベクトル生成を委譲。
- * embedder の `/embed` に POST し `vectors` を返す。
- * fetch 失敗 / 503（モデルロード中）時は空配列（local と同じ挙動）。
+ * Delegates vector generation to the HTTP provider.
+ * POSTs to the embedder's `/embed` and returns `vectors`.
+ * On fetch failure / 503 (model loading), returns empty array (same as local).
  */
 async function embedViaHttp(texts: string[], kind?: EmbedKind): Promise<number[][]> {
   const url = process.env.EMBEDDER_URL;
   if (!url) {
-    console.error("[embed] EMBED_PROVIDER=http ですが EMBEDDER_URL 未設定");
+    logger.error("embed", "EMBED_PROVIDER=http but EMBEDDER_URL is not set");
     return texts.map(() => []);
   }
   try {
@@ -85,22 +86,22 @@ async function embedViaHttp(texts: string[], kind?: EmbedKind): Promise<number[]
       body: JSON.stringify({ texts, kind }),
     });
     if (!res.ok) {
-      // 503 = モデルロード中。空配列で呼び出し側にスキップさせる。
-      console.error(`[embed] embedder HTTP ${res.status}`);
+      // 503 = model loading. Return empty arrays so the caller skips.
+      logger.error("embed", "embedder HTTP error", { status: res.status });
       return texts.map(() => []);
     }
     const data = (await res.json()) as { vectors: number[][] };
     return data.vectors;
   } catch (err) {
-    console.error("[embed] embedder fetch failed:", err);
+    logger.error("embed", "embedder fetch failed", { error: err instanceof Error ? err.message : String(err) });
     return texts.map(() => []);
   }
 }
 
 /**
- * 設定変更時に呼んで transformers.js パイプラインキャッシュを破棄する
- * （EMBED_MODEL / EMBED_DIM / EMBED_PROVIDER 変更時）。
- * 次回 embedText 呼び出しで新しい設定でパイプラインを再ロードする。
+ * Call to discard the transformers.js pipeline cache on config changes
+ * (when EMBED_MODEL / EMBED_DIM / EMBED_PROVIDER change).
+ * Next embedText call reloads the pipeline with the new config.
  */
 export function resetEmbedPipeline(): void {
   pipelinePromise = null;
@@ -108,21 +109,21 @@ export function resetEmbedPipeline(): void {
   EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 }
 /**
- * テキストの contentHash（SHA-256）を計算。
- * 再 embed 回避用。
+ * Computes the contentHash (SHA-256) of a text.
+ * Used to avoid re-embedding.
  */
 export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
 /**
- * テキストから embedding ベクトルを生成。
- * 正規化済み。次元は EMBED_DIM 参照。
+ * Generates an embedding vector from text.
+ * Normalized. Dimensions follow EMBED_DIM.
  *
- * `kind` は非対称モデルの prompt prefix 制御用（LFM2.5 は `query:` / `document:`）。
- * HTTP プロバイダのみ使用。`local`（Xenova）では無視される。
+ * `kind` controls the prompt prefix for asymmetric models (LFM2.5 uses `query:` / `document:`).
+ * Only used by the HTTP provider. Ignored by `local` (Xenova).
  *
- * エラー時は空配列を返す（呼び出し側でスキップ）。
+ * Returns an empty array on error (caller skips).
  */
 export async function embedText(text: string, kind?: EmbedKind): Promise<number[]> {
   if (!text.trim()) return [];
@@ -136,16 +137,16 @@ export async function embedText(text: string, kind?: EmbedKind): Promise<number[
     const vectors = output.tolist();
     return vectors[0];
   } catch (err) {
-    console.error("[embed] embedding failed:", err);
+    logger.error("embed", "embedding failed", { error: err instanceof Error ? err.message : String(err) });
     return [];
   }
 }
 
 /**
- * 複数テキストをバッチ embedding。
- * transformers.js はバッチ入力をサポートするが、
- * メモリ効率のため最大16件ずつ処理する。
- * HTTP プロバイダではバッチ化を embedder 側に委譲。
+ * Batch-embeds multiple texts.
+ * transformers.js supports batch input, but processes in chunks of
+ * up to 16 at a time for memory efficiency.
+ * The HTTP provider delegates batching to the embedder side.
  */
 export async function embedTexts(texts: string[], kind?: EmbedKind): Promise<number[][]> {
   if (texts.length === 0) return [];
@@ -162,8 +163,8 @@ export async function embedTexts(texts: string[], kind?: EmbedKind): Promise<num
       const vectors = output.tolist();
       results.push(...vectors);
     } catch (err) {
-      console.error("[embed] batch embedding failed:", err);
-      // エラー時は空ベクトルで埋める
+      logger.error("embed", "batch embedding failed", { error: err instanceof Error ? err.message : String(err) });
+      // Fill with empty vectors on error
       for (let j = 0; j < batch.length; j++) {
         results.push([]);
       }

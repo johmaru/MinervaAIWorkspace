@@ -2,12 +2,12 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeToolCallMarkup, hasToolCallMarkup } from "@/lib/toolCallSanitizer";
 
-// リテラルタグ文字列をソースに置かないよう、実行時に組み立てる。
+// Assemble at runtime to avoid placing literal tag strings in source.
 const lt = String.fromCharCode(60); // <
 const gt = String.fromCharCode(62); // >
 
 describe("sanitizeToolCallMarkup", () => {
-  it("GLM/Qwen tool_call 完全形を除去し前文と後文を残す", () => {
+  it("removes GLM/Qwen tool_call complete form, keeping preceding and following text", () => {
     const tc = lt + "tool_call" + gt;
     const tcc = lt + "/tool_call" + gt;
     const ak = lt + "arg_key" + gt;
@@ -25,7 +25,7 @@ describe("sanitizeToolCallMarkup", () => {
     expect(result).not.toMatch(/arg_value/);
   });
 
-  it("GLM/Qwen tool_call ストリーミング部分（閉じタグなし）を除去し前文を残す", () => {
+  it("removes GLM/Qwen tool_call streaming partial (no closing tag), keeping preceding text", () => {
     const tc = lt + "tool_call" + gt;
     const ak = lt + "arg_key" + gt;
     const akc = lt + "/arg_key" + gt;
@@ -37,7 +37,7 @@ describe("sanitizeToolCallMarkup", () => {
     expect(result).not.toMatch(/arg_value/);
   });
 
-  it("XMLタグ形式 <search_web>…</search_web> を除去する", () => {
+  it("removes XML tag format <search_web>…</search_web>", () => {
     const content = '確認します。\n<search_web>query="test query"</search_web>\n回答です。';
     const result = sanitizeToolCallMarkup(content);
     expect(result).toContain("確認します。");
@@ -46,7 +46,7 @@ describe("sanitizeToolCallMarkup", () => {
     expect(result).not.toMatch(/query=/);
   });
 
-  it("コードフェンス形式を除去する", () => {
+  it("removes code fence format", () => {
     const content = '確認します。\n```search_web\nquery="test"\n```\n回答です。';
     const result = sanitizeToolCallMarkup(content);
     expect(result).toContain("確認します。");
@@ -54,19 +54,19 @@ describe("sanitizeToolCallMarkup", () => {
     expect(result).not.toMatch(/search_web/);
   });
 
-  it("正規の HTML（<details>, <summary>）は除去しない", () => {
+  it("does not remove legitimate HTML (<details>, <summary>)", () => {
     const content = "<details><summary>詳細</summary>中身</details>";
     const result = sanitizeToolCallMarkup(content);
     expect(result).toBe(content);
   });
 
-  it("通常の Markdown は変更しない", () => {
+  it("does not modify normal Markdown", () => {
     const content = "# 見出し\n\n**太字** と *斜体* と `code`。\n\n- リスト1\n- リスト2";
     const result = sanitizeToolCallMarkup(content);
     expect(result).toBe(content);
   });
 
-  it("マークアップのみの場合は空文字列を返す", () => {
+  it("returns empty string when content is only markup", () => {
     const tc = lt + "tool_call" + gt;
     const tcc = lt + "/tool_call" + gt;
     const content = tc + "search_web" + tcc;
@@ -76,23 +76,23 @@ describe("sanitizeToolCallMarkup", () => {
 });
 
 describe("hasToolCallMarkup", () => {
-  it("tool_call マークアップを含む場合 true を返す", () => {
+  it("returns true when content contains tool_call markup", () => {
     const tc = lt + "tool_call" + gt;
     const content = "調べてみます。\n" + tc + "search_web";
     expect(hasToolCallMarkup(content)).toBe(true);
   });
 
-  it("通常コンテンツの場合 false を返す", () => {
+  it("returns false for normal content", () => {
     const content = "GLM-5.2 は多くの言語を扱えます。\n\n詳細な回答です。";
     expect(hasToolCallMarkup(content)).toBe(false);
   });
 
-  it("コードフェンス形式のツール呼び出しを含む場合 true を返す", () => {
+  it("returns true when content contains code fence format tool call", () => {
     const content = '```search_web\nquery="test"';
     expect(hasToolCallMarkup(content)).toBe(true);
   });
 
-  it("XMLタグ形式のツール呼び出しを含む場合 true を返す", () => {
+  it("returns true when content contains XML tag format tool call", () => {
     const content = '<search_web>query="test"</search_web>';
     expect(hasToolCallMarkup(content)).toBe(true);
   });

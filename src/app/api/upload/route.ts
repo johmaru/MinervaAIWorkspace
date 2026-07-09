@@ -9,18 +9,18 @@ export const dynamic = "force-dynamic";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 /**
- * POST /api/upload — ファイルアップロード（multipart/form-data）。
+ * POST /api/upload — File upload (multipart/form-data).
  *
  * formData:
  * - threadId: string
- * - file: File（画像/PDF/テキスト）
+ * - file: File (image/PDF/text)
  *
- * 処理:
- * - 画像 (image/*): base64 dataURL として保存。vision モデルへ inline 渡し可能。
- * - PDF (application/pdf): pdf-parse でテキスト抽出。
- * - テキスト (text/*): UTF-8 で読み込み。
+ * Processing:
+ * - Image (image/*): saved as base64 dataURL. Can be passed inline to vision models.
+ * - PDF (application/pdf): text extracted via pdf-parse.
+ * - Text (text/*): read as UTF-8.
  *
- * レスポンス: { id, filename, mimeType, dataUrl?, extractedText? }
+ * Response: { id, filename, mimeType, dataUrl?, extractedText? }
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -48,12 +48,12 @@ export async function POST(req: Request) {
   let extractedText: string | null = null;
 
   if (mimeType.startsWith("image/")) {
-    // 画像: base64 dataURL に変換
+    // Image: convert to base64 dataURL
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64 = buffer.toString("base64");
     dataUrl = `data:${mimeType};base64,${base64}`;
   } else if (mimeType === "application/pdf") {
-    // PDF: pdf-parse でテキスト抽出
+    // PDF: extract text via pdf-parse
     const buffer = Buffer.from(await file.arrayBuffer());
     try {
       const mod = await import("pdf-parse");
@@ -69,13 +69,13 @@ export async function POST(req: Request) {
     mimeType.startsWith("application/xml") ||
     filename.endsWith(".md") || filename.endsWith(".txt") || filename.endsWith(".json") || filename.endsWith(".csv") || filename.endsWith(".xml") || filename.endsWith(".yml") || filename.endsWith(".yaml") || filename.endsWith(".ts") || filename.endsWith(".js") || filename.endsWith(".py")
   ) {
-    // テキスト: UTF-8 で読み込み
+    // Text: read as UTF-8
     extractedText = await file.text();
   } else {
     return new Response(`Unsupported file type: ${mimeType}`, { status: 415 });
   }
 
-  // DB に保存（messageId は送信時にリンク）
+  // Save to DB (messageId is linked at send time)
   const [attachment] = await db
     .insert(attachments)
     .values({

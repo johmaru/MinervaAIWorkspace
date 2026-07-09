@@ -7,6 +7,13 @@ import { db } from "@/db";
 import { users, accounts } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyPassword } from "@/lib/password";
+import { canCreateNewAccount } from "@/lib/registration-gate";
+import { logger } from "@/lib/logger";
+import { neutralizeAuthUrlForDualAccess } from "@/lib/auth-env";
+
+// Strip sticky AUTH_URL so Auth.js derives origin from request headers
+// (dual local + Cloudflare access). Must run before NextAuth().
+neutralizeAuthUrlForDualAccess();
 
 /**
  * Auth.js v5 main configuration.
@@ -29,7 +36,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // アダプターの account 系メソッド（linkAccount 等）は実行されない。
     accountsTable: accounts as never,
   }),
-  session: { strategy: "jwt" }, // Required for Credentials
+  session: { strategy: "jwt", maxAge: 6 * 60 * 60 }, // 6h — short-lived for tunnel-exposed instances
   providers: [
     Credentials({
       credentials: { email: {}, password: {} },
@@ -46,9 +53,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           })
           .from(users)
           .where(eq(users.email, email));
-        if (!user || !user.passwordHash) return null; // Reject Credentials for OAuth-only users
+        if (!user || !user.passwordHash) {
+          logger.warn("auth", "login-failure", { provider: "credentials" });
+          return null; // Reject Credentials for OAuth-only users
+        }
         const ok = await verifyPassword(password, user.passwordHash);
-        if (!ok) return null;
+        if (!ok) {
+          logger.warn("auth", "login-failure", { provider: "credentials" });
+          return null;
+        }
+        logger.info("auth", "login-success", { provider: "credentials" });
         return { id: user.id, name: user.nickname, email: user.email };
       },
     }),
@@ -105,6 +119,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
         return true;
       }
+      // Registration gate: lock + IP whitelist (extracted for testability)
+      if (!(await canCreateNewAccount(false))) return false;
       // Create new Google user (passwordHash is null)
       const nickname = user.name ?? email.split("@")[0];
       const [newUser] = await db
@@ -131,6 +147,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         scope: account.scope ?? null,
         idToken: account.id_token ?? null,
       });
+      logger.info("auth", "login-success", { provider: account?.provider });
       return true;
     },
     jwt: async ({ token, user }) => {

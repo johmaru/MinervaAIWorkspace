@@ -12,14 +12,14 @@ export const dynamic = "force-dynamic";
 type Body = { url: string };
 
 /**
- * POST /api/scrape — Web ページをスクレイピングして知識化。
+ * POST /api/scrape — Scrapes a web page and converts it to knowledge.
  *
- * 1. URL 正規化 + バリデーション
- * 2. urlHash で既存ページを検索（キャッシュチェック + 取得失敗時の stale 復帰用）
- * 3. microservice にスクレイプ依頼
- * 4. upsertPage で pages を upsert + page_embeddings を再生成（contentHash でキャッシュ）
+ * 1. URL normalization + validation
+ * 2. Search for existing page by urlHash (cache check + stale recovery on fetch failure)
+ * 3. Request scrape from microservice
+ * 4. Upsert pages via upsertPage + regenerate page_embeddings (cached by contentHash)
  *
- * レスポンス: { id, url, title, contentPreview, cached } | { error }
+ * Response: { id, url, title, contentPreview, cached } | { error }
  */
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -38,14 +38,14 @@ export async function POST(req: Request) {
 
   const urlHash = hashContent(normalized);
 
-  // キャッシュチェック: 同一 URL で既存ページを検索（取得失敗時の stale 復帰用）
+  // Cache check: search for existing page by URL (for stale recovery on fetch failure)
   const [existing] = await db.select().from(pages).where(eq(pages.urlHash, urlHash));
 
-  let result: ScrapeResultLike;
+  let result: ScrapeResultLike | null;
   try {
     result = await scrapeUrl(normalized);
   } catch (err) {
-    // 既存ページがあり取得失敗 → 古い内容を維持してキャッシュヒット扱い
+    // Existing page found but fetch failed → keep stale content and treat as cache hit
     if (existing) {
       return Response.json({
         id: existing.id,
@@ -60,9 +60,26 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
+  // Scraper service unavailable (SCRAPER_URL not configured). Fall back to
+  // cached page if available, otherwise return a clear 503.
+  if (result === null) {
+    if (existing) {
+      return Response.json({
+        id: existing.id,
+        url: existing.url,
+        title: existing.title,
+        cached: true,
+        stale: true,
+      });
+    }
+    return Response.json(
+      { error: "scraper service unavailable (SCRAPER_URL not configured)" },
+      { status: 503 },
+    );
+  }
 
-  // 既存ページで contentHash が同じ → キャッシュヒット（upsertPage にも同等判定があるが、
-  // ここでは contentPreview を返さず早期リターンで再 embed を含め完全にスキップ）
+  // Existing page with same contentHash → cache hit (upsertPage has equivalent logic,
+  // but here we skip entirely including re-embedding by returning early without contentPreview)
   const contentHash = hashContent(result.content);
   if (existing && existing.contentHash === contentHash) {
     return Response.json({
@@ -73,7 +90,7 @@ export async function POST(req: Request) {
     });
   }
 
-  // upsert + embed（pageStore に集約）
+  // Upsert + embed (aggregated in pageStore)
   const id = await upsertPage(normalized, result.title, result.content);
 
   return Response.json({

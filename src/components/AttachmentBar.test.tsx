@@ -35,32 +35,32 @@ function renderBar(props: { attachments: MessageAttachment[]; onRemove?: (id: st
   );
 }
 
-describe("AttachmentBar — 表示", () => {
-  it("添付ファイルなしの場合は何も表示しない", () => {
+describe("AttachmentBar — display", () => {
+  it("renders nothing when there are no attachments", () => {
     const { container } = renderBar({ attachments: [] });
     expect(container.firstChild).toBeNull();
   });
 
-  it("画像添付ファイルはサムネイル表示", () => {
+  it("renders image attachments as thumbnails", () => {
     renderBar({ attachments: [makeAttachment()] });
     const img = screen.getByAltText("test.png");
     expect(img.tagName).toBe("IMG");
     expect(img).toHaveAttribute("src", "data:image/png;base64,iVBORw0KGgo=");
   });
 
-  it("テキスト添付ファイルはファイルアイコン表示", () => {
+  it("renders text attachments with a file icon", () => {
     renderBar({
       attachments: [makeAttachment({ filename: "doc.pdf", mimeType: "application/pdf", dataUrl: null })],
     });
     expect(screen.getByText("doc.pdf")).toBeInTheDocument();
   });
 
-  it("ファイル名が表示される", () => {
+  it("displays the filename", () => {
     renderBar({ attachments: [makeAttachment({ filename: "photo.jpg" })] });
     expect(screen.getByText("photo.jpg")).toBeInTheDocument();
   });
 
-  it("複数添付ファイルを表示", () => {
+  it("renders multiple attachments", () => {
     renderBar({
       attachments: [
         makeAttachment({ id: "a1", filename: "img1.png" }),
@@ -72,20 +72,20 @@ describe("AttachmentBar — 表示", () => {
   });
 });
 
-describe("AttachmentBar — 削除", () => {
-  it("onRemove がある場合は削除ボタンを表示", () => {
+describe("AttachmentBar — remove", () => {
+  it("shows a remove button when onRemove is provided", () => {
     const onRemove = vi.fn();
     renderBar({ attachments: [makeAttachment()], onRemove });
     const btn = screen.getByLabelText("test.png を削除");
     expect(btn).toBeInTheDocument();
   });
 
-  it("onRemove がない場合は削除ボタンを表示しない", () => {
+  it("does not show a remove button when onRemove is absent", () => {
     renderBar({ attachments: [makeAttachment()] });
     expect(screen.queryByLabelText("test.png を削除")).not.toBeInTheDocument();
   });
 
-  it("削除ボタン押下で onRemove を呼ぶ", () => {
+  it("calls onRemove when the remove button is clicked", () => {
     const onRemove = vi.fn();
     renderBar({ attachments: [makeAttachment({ id: "att-x" })], onRemove });
     fireEvent.click(screen.getByLabelText("test.png を削除"));

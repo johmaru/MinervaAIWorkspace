@@ -48,6 +48,9 @@ type SettingsResponse = {
   // Cloudflare Tunnel
   tunnelToken: string;
   hasTunnelToken: boolean;
+  // Security
+  registrationLocked: boolean;
+  allowedRegistrationIps: string;
   // Default global instruction selection (per user, DB)
   activeInstructionId: string | null;
   // Personalization (per user, DB)
@@ -56,6 +59,10 @@ type SettingsResponse = {
   personalEnergy: number;
   personalStructure: number;
   personalEmoji: number;
+  // Logging
+  logLevel: string;
+  logFileEnabled: string;
+  logFilePath: string;
 };
 
 type TorConnection = {
@@ -95,6 +102,17 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   // Cloudflare Tunnel state
   const [tunnelRunning, setTunnelRunning] = useState(false);
   const [tunnelBusy, setTunnelBusy] = useState(false);
+  // Auto-update state (exe distribution only)
+  const [updateInfo, setUpdateInfo] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    updateAvailable: boolean;
+    downloadUrl: string | null;
+    releaseNotes: string | null;
+    isExe: boolean;
+  } | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [connections, setConnections] = useState<{
     id: string;
@@ -169,6 +187,62 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setConnections((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  // Auto-update: check for updates on modal open
+  const fetchUpdateInfo = useCallback(async () => {
+    setUpdateBusy(true);
+    try {
+      const res = await clientFetch("/api/update");
+      if (!res.ok) return;
+      const data = await res.json();
+      setUpdateInfo(data);
+    } catch {
+      // Ignore
+    } finally {
+      setUpdateBusy(false);
+    }
+  }, []);
+
+  const handleDownloadUpdate = useCallback(async () => {
+    if (!updateInfo?.downloadUrl) return;
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      const res = await clientFetch("/api/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          downloadUrl: updateInfo.downloadUrl,
+          version: updateInfo.latestVersion,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUpdateMessage(data.error || "Update failed");
+        return;
+      }
+      setUpdateMessage(t("settings.updateDownloaded"));
+      // Poll for server restart: reload when version changes
+      const oldVersion = updateInfo.currentVersion;
+      const poll = setInterval(async () => {
+        try {
+          const res = await clientFetch("/api/update");
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data.currentVersion !== oldVersion) {
+            clearInterval(poll);
+            window.location.reload();
+          }
+        } catch {
+          // Server down during restart — keep polling
+        }
+      }, 2000);
+    } catch (err) {
+      setUpdateMessage(err instanceof Error ? err.message : t("common.communicationError"));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }, [updateInfo, t]);
+
   useEffect(() => {
     if (open) {
       setMessage(null);
@@ -178,8 +252,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       void fetchTorStatus();
       void fetchConnections();
       void fetchInstructions();
+      void fetchUpdateInfo();
     }
-  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions]);
+  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions, fetchUpdateInfo]);
 
   const update = useCallback(<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -187,31 +262,56 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   }, []);
 
   const selectedOption = settings?.embedModelOptions.find((o) => o.model === form.embedModel);
-  const needsMigration =
+  const embedDirty =
     settings !== null &&
+    (form.embedModel !== settings.embedModel ||
+     (selectedOption?.dim ?? form.embedDim) !== settings.embedDim ||
+     (selectedOption?.provider ?? form.embedProvider) !== settings.embedProvider);
+  const needsMigration =
+    embedDirty &&
     selectedOption !== undefined &&
+    settings !== null &&
     settings.dbVectorDim > 0 &&
-    (selectedOption.dim !== settings.dbVectorDim ||
-     (settings.dbPageEmbeddingsDim > 0 && selectedOption.dim !== settings.dbPageEmbeddingsDim));
+    selectedOption.dim !== settings.dbVectorDim;
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setMessage(null);
     try {
+      const body: Record<string, unknown> = {
+        ...form,
+        // Secret fields are not sent when empty (existing values are preserved).
+        // GET returns llmApiKey/notionClientSecret as empty strings,
+        // so only send when the user enters a new value.
+        llmApiKey: form.llmApiKey || undefined,
+        notionClientSecret: form.notionClientSecret || undefined,
+      };
+      // Embed fields are only sent when the user changed them (embedDirty).
+      // Sending embedModel/embedDim/embedProvider when unchanged would be harmless
+      // for persistence, but strips applyMigration noise and avoids triggering
+      // resetEmbedPipeline on the server for a no-op.
+      if (embedDirty) {
+        body.embedDim = selectedOption?.dim ?? form.embedDim;
+        body.embedProvider = selectedOption?.provider ?? form.embedProvider;
+        if (needsMigration && migrationConfirmed) body.applyMigration = true;
+      } else {
+        delete body.embedModel;
+        delete body.embedDim;
+        delete body.embedProvider;
+        delete body.applyMigration;
+      }
+      // If embed changed + migration needed but not confirmed, strip embed
+      // fields so the server saves the other settings without touching embed.
+      if (embedDirty && needsMigration && !migrationConfirmed) {
+        delete body.embedModel;
+        delete body.embedDim;
+        delete body.embedProvider;
+        delete body.applyMigration;
+      }
       const res = await clientFetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          // Secret fields are not sent when empty (existing values are preserved).
-          // GET returns llmApiKey/notionClientSecret as empty strings,
-          // so only send when the user enters a new value.
-          llmApiKey: form.llmApiKey || undefined,
-          notionClientSecret: form.notionClientSecret || undefined,
-          embedDim: selectedOption?.dim ?? form.embedDim,
-          embedProvider: selectedOption?.provider ?? form.embedProvider,
-          applyMigration: needsMigration && migrationConfirmed,
-        }),
+        body: JSON.stringify(body),
       });
       const data = (await res.json()) as {
         success?: boolean;
@@ -233,10 +333,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         return;
       }
       if (data.migrationApplied) {
-        setMessage({
-          type: "success",
-          text: t("settings.migrationComplete"),
-        });
+        setMessage({ type: "success", text: t("settings.migrationComplete") });
+      } else if (embedDirty && needsMigration && !migrationConfirmed) {
+        // Embed change deferred — other settings were saved, but embed is untouched.
+        setMessage({ type: "success", text: t("settings.savedWithoutEmbed") });
       } else {
         setMessage({ type: "success", text: t("settings.saved") });
       }
@@ -247,7 +347,29 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [form, selectedOption, needsMigration, migrationConfirmed, fetchSettings, t]);
+  }, [form, selectedOption, embedDirty, needsMigration, migrationConfirmed, fetchSettings, t]);
+  // Partial settings persistence — sends only the changed key(s) immediately
+  // (security lock, GSI default selection, allowed IPs on blur).
+  // Does NOT re-fetch settings (would clobber the in-progress form).
+  // On failure, shows an error; the caller is responsible for rolling back form state.
+  const persistPartial = useCallback(async (body: Partial<SettingsResponse>): Promise<boolean> => {
+    try {
+      const res = await clientFetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage({ type: "error", text: data.error || t("settings.saveFailed") });
+        return false;
+      }
+      return true;
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
+      return false;
+    }
+  }, [t]);
 
   const handleTorToggle = useCallback(async () => {
     setTorBusy(true);
@@ -419,19 +541,23 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         const res = await clientFetch(`/api/global-instructions/${id}`, { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         // Clear selection if the deleted row was active
-        if (form.activeInstructionId === id) update("activeInstructionId", null);
+        if (form.activeInstructionId === id) {
+          update("activeInstructionId", null);
+          void persistPartial({ activeInstructionId: null });
+        }
         await fetchInstructions();
       } catch (err) {
         setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
       }
     },
-    [form.activeInstructionId, update, fetchInstructions, t],
+    [form.activeInstructionId, update, persistPartial, fetchInstructions, t],
   );
   const tabs = [
     { icon: "🤖", label: t("settings.tabAiModels") },
     { icon: "🔍", label: t("settings.tabSearchNetwork") },
     { icon: "🖥️", label: t("settings.tabSystem") },
     { icon: "🔗", label: t("settings.tabConnections") },
+    { icon: "🌐", label: t("settings.tabServerAccess") },
     { icon: "🎨", label: t("personalization.title") },
   ];
 
@@ -449,15 +575,15 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         </MotionButton>
       </div>
 
-      <div className="flex gap-4" style={{ minHeight: "400px" }}>
+      <div className="flex flex-col gap-4 sm:flex-row" style={{ minHeight: "400px" }}>
         {/* Vertical tab rail */}
-        <div className="flex w-40 shrink-0 flex-col gap-1">
+        <div className="flex shrink-0 gap-1 overflow-x-auto sm:w-40 sm:flex-col sm:overflow-visible">
           {tabs.map((tab, i) => (
             <button
               key={i}
               type="button"
               onClick={() => setActiveTab(i)}
-              className={`flex items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200 ${
+              className={`shrink-0 whitespace-nowrap flex items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-all duration-200 ${
                 activeTab === i
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -611,7 +737,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                         type="radio"
                         name="active-instruction"
                         checked={form.activeInstructionId === instr.id}
-                        onChange={() => update("activeInstructionId", instr.id)}
+                      onChange={() => {
+                        update("activeInstructionId", instr.id);
+                        void persistPartial({ activeInstructionId: instr.id });
+                      }}
                       />
                       <span>{instr.name}</span>
                     </label>
@@ -623,7 +752,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             )}
             {/* Clear selection */}
             {form.activeInstructionId && (
-              <button type="button" onClick={() => update("activeInstructionId", null)} className="mt-1 rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
+              <button type="button" onClick={() => { update("activeInstructionId", null); void persistPartial({ activeInstructionId: null }); }} className="mt-1 rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
                 {t("settings.gsiClearSelection")}
               </button>
             )}
@@ -871,6 +1000,87 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               />
             </div>
           </div>
+          {/* Update */}
+          {updateInfo?.isExe && (
+            <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="block text-xs font-medium text-foreground">
+                    {t("settings.updateVersion")}: {updateInfo.currentVersion}
+                  </span>
+                  {updateInfo.updateAvailable ? (
+                    <span className="block text-xs text-amber-500">
+                      {t("settings.updateAvailable")}: {updateInfo.latestVersion}
+                    </span>
+                  ) : (
+                    <span className="block text-xs text-muted-foreground">
+                      {t("settings.updateLatest")}
+                    </span>
+                  )}
+                </div>
+                {updateInfo.updateAvailable ? (
+                  <MotionButton
+                    type="button"
+                    onClick={handleDownloadUpdate}
+                    disabled={updateBusy}
+                    className="rounded-xl bg-foreground px-3 py-1.5 text-xs text-background transition-all duration-200 hover:opacity-90 disabled:opacity-50"
+                  >
+                    {updateBusy ? t("settings.updateProcessing") : t("settings.updateInstall")}
+                  </MotionButton>
+                ) : (
+                  <MotionButton
+                    type="button"
+                    onClick={fetchUpdateInfo}
+                    disabled={updateBusy}
+                    className="rounded-xl bg-muted px-3 py-1.5 text-xs text-foreground transition-all duration-200 hover:opacity-80 disabled:opacity-50"
+                  >
+                    {updateBusy ? t("settings.updateChecking") : t("settings.updateCheck")}
+                  </MotionButton>
+                )}
+              </div>
+              {updateMessage && (
+                <p className="text-xs text-muted-foreground">{updateMessage}</p>
+              )}
+            </div>
+          )}
+          {/* Logging */}
+          <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
+            <span className="block text-xs font-medium text-foreground">{t("settings.logSectionTitle")}</span>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.logLevelLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.logLevelHint")}</span>
+              </label>
+              <select
+                value={form.logLevel ?? "info"}
+                onChange={(e) => update("logLevel", e.target.value)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="debug">debug</option>
+                <option value="info">info</option>
+                <option value="warn">warn</option>
+                <option value="error">error</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.logFileEnabledLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.logFileEnabledHint")}</span>
+              </label>
+              <select
+                value={form.logFileEnabled ?? "true"}
+                onChange={(e) => update("logFileEnabled", e.target.value)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="true">{t("common.enabled")}</option>
+                <option value="false">{t("common.disabled")}</option>
+              </select>
+            </div>
+            <div>
+              <span className="block text-[10px] text-muted-foreground">{t("settings.logFilePathLabel")}</span>
+              <p className="break-all text-[10px] text-muted-foreground/70">{form.logFilePath}</p>
+            </div>
+          </div>
           </div>
           )}
           {activeTab === 3 && (
@@ -921,6 +1131,37 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
+            {/* "Connect to Notion" button becomes available after saving */}
+            {connections.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
+            ) : (
+              connections.map((conn) => (
+                <div key={conn.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-3">
+                  {conn.workspaceIcon && <img src={conn.workspaceIcon} alt="" className="h-5 w-5 rounded" />}
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{conn.workspaceName ?? "Notion"}</p>
+                    <p className="text-xs text-muted-foreground">{conn.ownerEmail ?? conn.ownerName}</p>
+                  </div>
+                  <button type="button" onClick={() => void handleDisconnect(conn.id)} className="text-xs text-muted-foreground hover:text-foreground">
+                    {t("settings.disconnect")}
+                  </button>
+                </div>
+              ))
+            )}
+            {form.notionClientId ? (
+              <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                {t("settings.connectNotion")}
+              </a>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+            )}
+          </div>
+          </div>
+          )}
+          {activeTab === 4 && (
+          <div className="space-y-6">
+        {/* Server Access — AUTH_URL + Tunnel + Security */}
+          <div className="mt-3 space-y-3">
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">AUTH_URL</span>
@@ -984,34 +1225,48 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 />
               </div>
             </div>
-            {/* "Connect to Notion" button becomes available after saving */}
-            {connections.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
-            ) : (
-              connections.map((conn) => (
-                <div key={conn.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-3">
-                  {conn.workspaceIcon && <img src={conn.workspaceIcon} alt="" className="h-5 w-5 rounded" />}
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{conn.workspaceName ?? "Notion"}</p>
-                    <p className="text-xs text-muted-foreground">{conn.ownerEmail ?? conn.ownerName}</p>
-                  </div>
-                  <button type="button" onClick={() => void handleDisconnect(conn.id)} className="text-xs text-muted-foreground hover:text-foreground">
-                    {t("settings.disconnect")}
-                  </button>
-                </div>
-              ))
-            )}
-            {form.notionClientId ? (
-              <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
-                {t("settings.connectNotion")}
-              </a>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
-            )}
+            {/* Security — registration lock + IP whitelist */}
+            <div className="mt-4 space-y-3 rounded-2xl bg-muted/30 p-4">
+              <h3 className="text-sm font-semibold text-foreground">{t("settings.security")}</h3>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.registrationLocked ?? false}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    update("registrationLocked", next);
+                    void persistPartial({ registrationLocked: next }).then((ok) => {
+                      if (!ok) update("registrationLocked", !next);
+                    });
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                />
+                <span>
+                  <span className="block text-sm text-foreground">{t("settings.registrationLocked")}</span>
+                  <span className="block text-xs text-muted-foreground">{t("settings.registrationLockedDesc")}</span>
+                </span>
+              </label>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-sm text-foreground">{t("settings.allowedIps")}</span>
+                  <span className="block text-xs text-muted-foreground">{t("settings.allowedIpsDesc")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.allowedRegistrationIps ?? ""}
+                  onChange={(e) => update("allowedRegistrationIps", e.target.value)}
+                  placeholder={t("settings.allowedIpsPlaceholder")}
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                  onBlur={() => {
+                    void persistPartial({ allowedRegistrationIps: form.allowedRegistrationIps ?? "" });
+                  }}
+                />
+              </div>
+            </div>
           </div>
           </div>
           )}
-          {activeTab === 4 && (
+          {activeTab === 5 && (
           <div className="space-y-6">
             <div className="mt-3 space-y-4">
               {/* Style/tone presets */}
@@ -1120,7 +1375,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           <MotionButton
             type="button"
             onClick={handleSave}
-            disabled={saving || (needsMigration && !migrationConfirmed)}
+            disabled={saving}
             className="rounded-xl bg-foreground px-4 py-2 text-sm text-background transition-all duration-200 hover:opacity-90 disabled:opacity-50"
           >
             {saving ? t("common.saving") : t("common.save")}

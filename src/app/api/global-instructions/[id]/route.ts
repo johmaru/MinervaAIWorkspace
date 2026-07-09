@@ -12,9 +12,9 @@ type PatchBody = {
 };
 
 /**
- * DELETE /api/global-instructions/[id] — 名前付きグローバルインストラクション削除。
- * ON DELETE SET NULL により、削除された行が active/global だった場合は
- * users.activeInstructionId / threads.globalInstructionId は自動的に null になる。
+ * DELETE /api/global-instructions/[id] — Delete a named global instruction.
+ * Via ON DELETE SET NULL, if the deleted row was active/global,
+ * users.activeInstructionId / threads.globalInstructionId are automatically set to null.
  */
 export async function DELETE(
   _req: Request,
@@ -32,8 +32,8 @@ export async function DELETE(
 }
 
 /**
- * PATCH /api/global-instructions/[id] — 名前付きグローバルインストラクション部分更新。
- * name は空を許さず（空なら400）。content は空も許可（実質無効化）。
+ * PATCH /api/global-instructions/[id] — Partial update of a named global instruction.
+ * name must not be empty (returns 400 if empty). content allows empty (effectively disables it).
  */
 export async function PATCH(
   req: Request,

@@ -38,28 +38,28 @@ function renderWithProvider() {
   );
 }
 
-describe("ThemeToggle — ダークモード切替", () => {
-  it("ボタンが描画される", () => {
+describe("ThemeToggle — dark mode toggle", () => {
+  it("renders a button", () => {
     renderWithProvider();
     const btn = screen.getByRole("button");
     expect(btn).toBeInTheDocument();
   });
 
-  it("ライトモード時は月アイコン（ダークへ切り替え可能）", () => {
+  it("shows moon icon in light mode (can switch to dark)", () => {
     renderWithProvider();
     const btn = screen.getByRole("button");
     expect(btn).toHaveAttribute("aria-label", "ダークモードに切り替え");
   });
 
-  it("クリックでダークモードに切り替わる", () => {
+  it("switches to dark mode on click", () => {
     renderWithProvider();
     const btn = screen.getByRole("button");
     fireEvent.click(btn);
-    // クリック後、html の class に "dark" が付与される
+    // After click, the html class gets "dark" added
     expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 
-  it("ダークモード時は太陽アイコン（ライトへ切り替え可能）", () => {
+  it("shows sun icon in dark mode (can switch to light)", () => {
     render(
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
         <I18nProvider>

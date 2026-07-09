@@ -4,15 +4,15 @@ import type { Locale } from "@/lib/i18n/types";
 import { t } from "@/lib/i18n";
 
 /**
- * 検索判定ルーターの結果。
- * LLM にツールを持たせず、アプリ側で検索要否を判定するために使う。
+ * Search decision router result.
+ * Used to determine whether search is needed on the app side, without giving tools to the LLM.
  */
 export type SearchDecision = {
   searchLevel: "none" | "wiki" | "web";
   reason: string;
-  /** ユーザーへ一言断りとして表示する短い文。検索不要時は null。 */
+  /** A short sentence displayed to the user as a heads-up. Null when no search is needed. */
   userNotice: string | null;
-  /** 1〜3の検索クエリ。ユーザー言語に合わせる。 */
+  /** 1–3 search queries. Matched to the user's language. */
   queries: string[];
 };
 
@@ -66,17 +66,17 @@ const MEMORY_RECALL_PATTERN =
   /((何|なに).{0,6}(話|はなし))|((前|以前|さっき|昨日|きのう|前回|過去).{0,6}(話|はなし|会話|対話))|((覚|おぼ)えて)|(what (did|were) we (talk|discuss|chat))|(what we (talk|discuss))|((earlier|yesterday|before|just now|last time|previously|the other day|recently|last week|last night|earlier today).{0,10}(talk|conversation|discuss|chat))|(our (last|previous|recent|earlier) (talk|conversation|discuss|chat))|(remember (what|when|that|we|the|our))|(do you remember)|(previous (conversation|chat|discuss))/i;
 
 /**
- * 未知概念・固有名詞への問い合わせパターン。
- * 「Xって何」「Xとは」「what is X」「tell me about X」「Xって良い/どう」等。
- * MEMORY_RECALL_PATTERN が優先される（記憶呼び出し質問は検索しない）。
+ * Pattern for queries about unknown concepts or named entities.
+ * Matches "Xって何", "Xとは", "what is X", "tell me about X", "Xって良い/どう", etc.
+ * MEMORY_RECALL_PATTERN takes precedence (memory recall questions do not search).
  */
 const UNKNOWN_TERM_PATTERN =
   /((何|なに)は.{0,4}ですか)|(とは)|(って(何|なに|誰|だれ|何者|どんな|どういう|どうやって|なぜ|なんで|本当[に]?|ほんと[に]?|良い|いい|どう|どうですか|性格|人柄|人物|生涯|経歴|生い立ち|特徴|エピソード|実在))|(what (is|are|was|were) [A-Z])|(who (is|was|were) [A-Z])|(tell me about )|(was .{0,30} (really|actually|truly))|(did .{0,30} really (exist|live|do|happen))/i
 
 /**
- * 明らかに検索不要なパターン: コード質問、翻訳、意見、アドバイス。
- * 「解説」は検索した方が安心なケースがあるため含めない。
- * EXPLICIT_SEARCH / VOLATILE_INFO / UNKNOWN_TERM のいずれにもマッチしない場合のみ適用。
+ * Patterns that clearly do not need search: code questions, translations, opinions, advice.
+ * "解説" (explanation) is excluded because searching may be safer in some cases.
+ * Only applies when none of EXPLICIT_SEARCH / VOLATILE_INFO / UNKNOWN_TERM match.
  */
 const NO_SEARCH_PATTERN =
   /(コード|code|プログラム|program|翻訳|translate|翻して|どう思う|どう考える|意見|opinion|アドバイス|advice|アイデア|idea|ブレインストーム|brainstorm)/i;
@@ -95,12 +95,12 @@ function buildHeuristicDecision(userMessage: string, locale: Locale): SearchDeci
   const normalized = userMessage.replace(/\s+/g, " ").trim();
   if (!normalized) return null;
 
-  // 記憶呼び出し質問（「何話した」「前に話した」「覚えてる」等）は検索しない。
-  // EXPLICIT_SEARCH_PATTERN の「最近」「今日」等にマッチしても強制検索しない。
+  // Memory recall questions ("何話した", "前に話した", "覚えてる", etc.) do not search.
+  // Even if EXPLICIT_SEARCH_PATTERN matches "最近", "今日", etc., do not force search.
   if (MEMORY_RECALL_PATTERN.test(normalized)) return null;
 
-  // 未知概念・固有名詞への問い合わせ（「Xって何」「Xとは」「what is X」等）は検索。
-  // 記憶呼び出し質問は上で除外済み。
+  // Queries about unknown concepts or named entities ("Xって何", "Xとは", "what is X", etc.) search.
+  // Memory recall questions are already excluded above.
   if (UNKNOWN_TERM_PATTERN.test(normalized)) {
     // Best-effort English variant: if the message is CJK but contains an ASCII
     // entity substring (e.g. "Bunって何？" -> "Bun"), use it as a 2nd query so
@@ -121,8 +121,8 @@ function buildHeuristicDecision(userMessage: string, locale: Locale): SearchDeci
     };
   }
 
-  // 明らかに検索不要な入力（コード/翻訳/意見/アドバイス等）は LLM 判定をスキップし、
-  // 即座に searchLevel:"none" を返す。検索が必要な入力は従来通り LLM 判定へ。
+  // Obviously non-search inputs (code/translation/opinion/advice, etc.) skip LLM judgment and
+  // immediately return searchLevel:"none". Inputs that need search go to LLM judgment as before.
   if (!EXPLICIT_SEARCH_PATTERN.test(normalized) && !VOLATILE_INFO_PATTERN.test(normalized)) {
     if (NO_SEARCH_PATTERN.test(normalized)) {
       return {
@@ -167,13 +167,13 @@ function normalizeDecisionNotice(decision: SearchDecision, userMessage: string, 
 }
 
 /**
- * LLM の生レスポンスから SearchDecision をパース。
- * 不正な場合は null を返し、呼び出し元でリトライ/フォールバックを判断する。
+ * Parses SearchDecision from the LLM's raw response.
+ * Returns null on invalid input; the caller decides retry/fallback.
  */
 function parseDecision(raw: string | null | undefined): SearchDecision | null {
   if (!raw || !raw.trim()) return null;
-  // GLM-5.2 は response_format 無しで JSON を markdown コードフェンス
-  // (```json ... ```) で包むことがあるため、フェンスを除去してからパース。
+  // GLM-5.2 may wrap JSON in markdown code fences
+  // (```json ... ```) without response_format, so remove fences before parsing.
   const stripped = raw
     .trim()
     .replace(/^```(?:json)?\s*\n?/i, "")
@@ -199,7 +199,7 @@ function parseDecision(raw: string | null | undefined): SearchDecision | null {
   }
 }
 
-/** decideSearch で LLM に送る messages を構築。 */
+/** Builds the messages to send to the LLM in decideSearch. */
 function buildMessages(
   userMessage: string,
   history: { role: string; content: string }[],
@@ -215,20 +215,20 @@ function buildMessages(
 }
 
 /**
- * ユーザー発言から検索要否を判定する。
- * LLM にツールを持たせず、JSON のみ返させる（プロンプトで "Return only JSON" を強調）。
+ * Determines whether search is needed based on the user's message.
+ * Does not give tools to the LLM; only returns JSON (prompt emphasizes "Return only JSON").
  *
- * GLM-5.2 は `response_format: { type: "json_object" }` のサポートが不安定
- * （空内容やタイムアウトが発生する）ため、response_format を使わず通常の
- * completion で JSON を取得し、markdown コードフェンスを除去してパースする。
+ * GLM-5.2 has unstable support for `response_format: { type: "json_object" }`
+ * (empty content or timeouts occur), so response_format is not used; instead,
+ * JSON is obtained via a regular completion and parsed after removing markdown code fences.
  *
- * LLM エラー・JSON パース失敗時は searchLevel: "none" でフォールバック（通常チャット）。
+ * On LLM error or JSON parse failure, falls back to searchLevel: "none" (normal chat).
  *
- * @param userMessage 最新のユーザー発言
- * @param model LLM モデル id
- * @param locale ユーザーのロケール（通知文言の i18n 化に使用）
- * @param history 過去メッセージ（role は "user" | "assistant"）
- * @param client テスト注入用。未指定時は createLLM()
+ * @param userMessage Latest user message
+ * @param model LLM model id
+ * @param locale User's locale (used for i18n of notification text)
+ * @param history Past messages (role is "user" | "assistant")
+ * @param client For test injection. If unspecified, createLLM() is used.
  */
 export async function decideSearch(
   userMessage: string,
@@ -238,10 +238,10 @@ export async function decideSearch(
   client?: OpenAI,
 ): Promise<SearchDecision> {
   const heuristicDecision = buildHeuristicDecision(userMessage, locale);
-  // ヒューリスティックで「検索不要」または「Wikipedia参照」が確定した場合は LLM 呼び出しをスキップ。
-  // コード質問・翻訳・意見・アドバイス等（none）は即座に通常チャットへ。
-  // 未知概念・固有名詞（wiki）は Wikipedia 参照が軽量・確定的なため LLM ルーターを経由しない。
-  // 明示的検索要求・最新情報要求（web）はクエリ精錬のため LLM ルーターへ進む。
+  // If the heuristic determines "no search" or "Wikipedia lookup", skip the LLM call.
+  // Code questions, translations, opinions, advice, etc. (none) go straight to normal chat.
+  // Unknown concepts or named entities (wiki) go directly since Wikipedia lookup is lightweight and deterministic.
+  // Explicit search requests or current-info requests (web) proceed to the LLM router for query refinement.
   if (heuristicDecision && (heuristicDecision.searchLevel === "none" || heuristicDecision.searchLevel === "wiki")) {
     return heuristicDecision;
   }
@@ -251,12 +251,12 @@ export async function decideSearch(
     const completion = await llm.chat.completions.create({
       model,
       messages: buildMessages(userMessage, history),
-      // response_format は使わない: GLM-5.2 で不安定（空内容/タイムアウト）。
-      // プロンプトで "Return only JSON" を強調し、フェンス除去でパースする。
-      // 検索判定は単純なJSON出力タスクなので思考トークンを無効化し、
-      // Qwen3.6 の medium 思考モードによるレイテンシ増加を防ぐ。
-      // canDisable モデルは enable_thinking: false で完全OFF、それ以外は
-      // reasoning_effort: "none" で思考を抑制（buildDisableReasoningParams が自動選択）。
+      // Do not use response_format: unstable on GLM-5.2 (empty content/timeout).
+      // Emphasize "Return only JSON" in the prompt and parse after removing fences.
+      // Search decision is a simple JSON output task, so disable thinking tokens to prevent
+      // latency increase from Qwen3.6's medium thinking mode.
+      // canDisable models fully turn off thinking via enable_thinking: false; others suppress
+      // thinking via reasoning_effort: "none" (buildDisableReasoningParams auto-selects).
       ...disableParams,
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
     const parsed = parseDecision(completion.choices[0]?.message?.content);
@@ -265,7 +265,7 @@ export async function decideSearch(
       return normalizeDecisionNotice(parsed, userMessage, locale);
     }
 
-    // パース失敗時でも、明示的に最新/検索/評価を求める入力は検索へ倒す。
+    // Even on parse failure, inputs explicitly requesting latest/search/review are routed to search.
     return heuristicDecision ?? {
       searchLevel: "none",
       reason: "router failed",
@@ -273,7 +273,7 @@ export async function decideSearch(
       queries: [],
     };
   } catch {
-    // LLM エラー時でも、明示的に最新/検索/評価を求める入力は検索へ倒す。
+    // Even on LLM error, inputs explicitly requesting latest/search/review are routed to search.
     return heuristicDecision ?? {
       searchLevel: "none",
       reason: "router failed",

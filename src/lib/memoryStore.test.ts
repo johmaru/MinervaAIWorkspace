@@ -5,12 +5,12 @@ import { db } from "@/db";
 import { memories, threads, folders, users } from "@/db/schema";
 import { eq, ne, desc } from "drizzle-orm";
 
-// embedText をモック: 実 embedder サービスに依存せず、決定論的ベクトルを返す。
-// 内容のハッシュを元に1024次元の擬似ベクトルを生成し、同じ内容は同じベクトルになる。
+// Mock embedText: return deterministic vectors without depending on the real embedder service.
+// Generates a 1024-dimensional pseudo-vector from the content hash, so identical content yields identical vectors.
 vi.mock("@/lib/embed", () => ({
   embedText: vi.fn().mockImplementation(async (text: string) => {
-    // bag-of-characters: 各文字コード位置を1にする。同じ文字を含む内容は
-    // 類似ベクトルになる（コサイン類似度が高くなる）。
+    // bag-of-characters: set each character's code position to 1. Content with the same characters
+    // produces similar vectors (high cosine similarity).
     const vec = new Array(1024).fill(0);
     for (const ch of text) {
       const code = ch.charCodeAt(0) % 1024;
@@ -26,8 +26,8 @@ vi.mock("@/lib/embed", () => ({
 import { embedText, hashContent } from "@/lib/embed";
 import { findRelevantMemories, buildMemoryContext, fetchRecentThreadTitles } from "@/lib/memoryStore";
 
-// findRelevantMemories の統合テスト。実 DB に記憶を INSERT し、
-// アプリ側 cosine 検索 → similarity + recency top-5 が返ることを検証。
+// Integration test for findRelevantMemories. Inserts memories into the real DB and
+// verifies that client-side cosine search returns similarity + recency top-5.
 
 const createdThreadIds: string[] = [];
 const createdFolderIds: string[] = [];
@@ -41,7 +41,7 @@ async function insertMemory(
   content: string,
   kind: "fact" | "working" = "fact",
 ): Promise<string> {
-  // モック embedText でベクトルを生成し、hashContent で contentHash を生成
+  // Generate vector via mock embedText and contentHash via hashContent
   const embedding = await embedText(content);
   const contentHash = hashContent(content);
   const [memory] = await db
@@ -62,7 +62,7 @@ async function insertMemory(
 }
 
 beforeAll(async () => {
-  // テストユーザー作成（userId 絞り込みテスト用）
+  // Create test user (for userId isolation tests)
   const [testUser] = await db.insert(users).values({
     nickname: "memoryStore-test",
     email: "memstore-test@umanschat.test",
@@ -70,11 +70,11 @@ beforeAll(async () => {
   testUserId = testUser.id;
   createdUserIds.push(testUser.id);
 
-  // スレッド A（フォルダなし = global scope）
+  // Thread A (no folder = global scope)
   const [threadA] = await db.insert(threads).values({ title: "memoryStore test A", userId: testUser.id }).returning();
   createdThreadIds.push(threadA.id);
 
-  // フォルダ + スレッド B（folder scope）
+  // Folder + Thread B (folder scope)
   const [folder] = await db.insert(folders).values({ name: "test folder", memoryScope: "folder", userId: testUser.id }).returning();
   createdFolderIds.push(folder.id);
   const [threadB] = await db
@@ -83,7 +83,7 @@ beforeAll(async () => {
     .returning();
   createdThreadIds.push(threadB.id);
 
-  // スレッド C（別フォルダ = folder scope）
+  // Thread C (different folder = folder scope)
   const [folder2] = await db.insert(folders).values({ name: "other folder", memoryScope: "folder", userId: testUser.id }).returning();
   createdFolderIds.push(folder2.id);
   const [threadC] = await db
@@ -110,18 +110,18 @@ afterAll(async () => {
 });
 
 describe("findRelevantMemories", () => {
-  it("関連クエリで記憶がヒットする（similarity > 0.3）", async () => {
+  it("relevant query hits memories (similarity > 0.3)", async () => {
     const threadId = createdThreadIds[0];
     await insertMemory(threadId, null, "ユーザーは FPGA と低レイヤー開発を得意としている");
     const results = await findRelevantMemories("FPGA 低レイヤー 開発", null, testUserId);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((r) => r.similarity > 0.3)).toBe(true);
-    // FPGA 記憶が結果に含まれる
+    // FPGA memory is included in results
     expect(results.some((r) => r.content.includes("FPGA"))).toBe(true);
   }, 60_000);
 
-  it("suppressed_at が設定された記憶は検索されない", async () => {
+  it("memories with suppressed_at set are not searched", async () => {
     const threadId = createdThreadIds[0];
     const memId = await insertMemory(threadId, null, "一時的な作業メモ： suppressed test");
     await db.update(memories).set({ suppressedAt: new Date() }).where(eq(memories.id, memId));
@@ -131,25 +131,25 @@ describe("findRelevantMemories", () => {
     expect(hit).toBeUndefined();
   }, 60_000);
 
-  it("scope=folder 指定時、他フォルダの記憶は検索されない", async () => {
+  it("with scope=folder, memories from other folders are not searched", async () => {
     const folderBId = createdFolderIds[0]; // folder scope
     const threadBId = createdThreadIds[1];
 
-    // フォルダB（scope=folder）に記憶を挿入
+    // Insert memory into folder B (scope=folder)
     await insertMemory(threadBId, folderBId, "フォルダB固有の記憶： Rust で組み込み開発");
 
     const resultsB = await findRelevantMemories("Rust 組み込み開発", folderBId, testUserId);
     expect(resultsB.some((r) => r.content.includes("フォルダB固有"))).toBe(true);
 
-    // フォルダCのスレッドから検索 → フォルダBの記憶はヒットしない
+    // Search from folder C's thread → folder B's memory should not hit
     const folderCId = createdFolderIds[1];
     const resultsC = await findRelevantMemories("Rust 組み込み開発", folderCId, testUserId);
     expect(resultsC.some((r) => r.content.includes("フォルダB固有"))).toBe(false);
   }, 60_000);
 
-  it("similarity + recency で top-5 が返る", async () => {
+  it("returns top-5 by similarity + recency", async () => {
     const threadId = createdThreadIds[0];
-    // 複数の記憶を挿入
+    // Insert multiple memories
     await insertMemory(threadId, null, "ユーザーは Python が好き", "fact");
     await insertMemory(threadId, null, "ユーザーは TypeScript も使う", "fact");
     await insertMemory(threadId, null, "現在のタスク： API設計中", "working");
@@ -157,12 +157,12 @@ describe("findRelevantMemories", () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect(results.length).toBeLessThanOrEqual(5);
-    // 類似記憶が結果に含まれる
+    // Similar memories are included in results
     expect(results.some((r) => r.content.includes("Python") || r.content.includes("TypeScript"))).toBe(true);
   }, 60_000);
 });
 
-describe("findRelevantMemories — userId 分離", () => {
+describe("findRelevantMemories — userId isolation", () => {
   const otherUserIds: string[] = [];
   const otherThreadIds: string[] = [];
   const otherMemoryIds: string[] = [];
@@ -179,15 +179,15 @@ describe("findRelevantMemories — userId 分離", () => {
     }
   });
 
-  it("他ユーザーの記憶は検索結果に含まれない", async () => {
-    // 別ユーザーを作成
+  it("other users' memories are not included in search results", async () => {
+    // Create another user
     const [otherUser] = await db.insert(users).values({
       nickname: "other-user",
       email: "other-user@umanschat.test",
     }).returning();
     otherUserIds.push(otherUser.id);
 
-    // 別ユーザーのスレッド + 記憶を作成（testUserId と同じ内容で類似度が高くなる）
+    // Create another user's thread + memory (same content as testUserId's for high similarity)
     const [otherThread] = await db.insert(threads).values({
       title: "other user thread",
       userId: otherUser.id,
@@ -207,7 +207,7 @@ describe("findRelevantMemories — userId 分離", () => {
     }).returning();
     otherMemoryIds.push(otherMem.id);
 
-    // testUserId で検索 → 他ユーザーの記憶は含まれない
+    // Search with testUserId → other user's memory should not be included
     const results = await findRelevantMemories("FPGA 低レイヤー 開発", null, testUserId);
     const leaked = results.find((r) => r.content.includes("他ユーザーの秘密の記憶"));
     expect(leaked).toBeUndefined();
@@ -236,9 +236,9 @@ describe("fetchRecentThreadTitles", () => {
     }
   });
 
-  it("現在スレッドと New chat を除外し updatedAt 降順で返す", async () => {
+  it("excludes current thread and 'New chat', returns by updatedAt descending", async () => {
     const uid = userIds[0];
-    // updatedAt を意図的にずらすため順に挿入し、後に手動で上書きする
+    // Insert in order to deliberately offset updatedAt, then manually overwrite later
     const now = Date.now();
     const [t1] = await db.insert(threads).values({
       userId: uid,
@@ -257,16 +257,16 @@ describe("fetchRecentThreadTitles", () => {
     }).returning();
     titleThreadIds.push(t1.id, t2.id, t3.id);
 
-    // t3 を「現在のスレッド」として渡す → t3 は除外、t2 は "New chat" で除外、t1 のみ残る
+    // Pass t3 as the "current thread" → t3 is excluded, t2 is excluded as "New chat", only t1 remains
     const titles = await fetchRecentThreadTitles(uid, t3.id);
     expect(titles).toEqual(["一番古いスレッド"]);
   }, 60_000);
 
-  it("該当スレッドが無い場合は空配列を返す", async () => {
+  it("returns empty array when no matching threads", async () => {
     const uid = userIds[0];
-    // 存在しないスレッド ID を「現在」として渡す → 全スレッド候補だが
-    // 他のテストで作った分が混ざるのを避けるため別ユーザーで検証したいが、
-    // ここは単純に存在しない userId で空配列になることを確認する。
+    // Pass a nonexistent thread ID as "current" → all threads are candidates, but
+    // to avoid mixing in threads created by other tests, we verify with a different user.
+    // Here we simply confirm that a nonexistent userId returns an empty array.
     const titles = await fetchRecentThreadTitles("nonexistent-user-id", "nonexistent-thread-id");
     expect(titles).toEqual([]);
   }, 60_000);
@@ -301,9 +301,9 @@ describe("buildMemoryContext with titles", () => {
     }
   });
 
-  it("タイトルが無く記憶も無い場合は null を返す", async () => {
+  it("returns null when there are no titles and no memories", async () => {
     const uid = userIds[0];
-    // 専用フォルダを作り、そのスレッドは1つだけ（他にスレッド無し）
+    // Create a dedicated folder with only one thread (no other threads)
     const [folder] = await db.insert(folders).values({
       name: "ctx-null-folder",
       memoryScope: "folder",
@@ -323,13 +323,13 @@ describe("buildMemoryContext with titles", () => {
       userId: uid,
       currentThreadId: thread.id,
     });
-    // タイトル候補無し（New chat 除外）+ 記憶無し → null
+    // No title candidates (New chat excluded) + no memories → null
     expect(result).toBeNull();
   }, 60_000);
 
-  it("記憶がヒットしなくてもタイトル一覧を注入する", async () => {
+  it("injects title list even when no memories hit", async () => {
     const uid = userIds[0];
-    // 専用フォルダで記憶スコープを分離し、グローバル記憶にヒットしないようにする
+    // Isolate memory scope with a dedicated folder to avoid hitting global memories
     const [folder] = await db.insert(folders).values({
       name: "ctx-title-only-folder",
       memoryScope: "folder",
@@ -348,8 +348,8 @@ describe("buildMemoryContext with titles", () => {
     }).returning();
     ctxThreadIds.push(t1.id, t2.id);
 
-    // t2 を「現在のスレッド」とする。folder スコープ内に記憶は無いが
-    // タイトル候補として t1 が残るはず。
+    // Treat t2 as the "current thread". There are no memories in the folder scope,
+    // but t1 should remain as a title candidate.
     const result = await buildMemoryContext({
       content: "全く関係ない質問 xyz123",
       thread: { folderId: folder.id },
@@ -361,7 +361,7 @@ describe("buildMemoryContext with titles", () => {
     expect(result!.content).toContain("FPGA の話");
   }, 60_000);
 
-  it("タイトルと記憶の両方がある場合は両セクションを含む", async () => {
+  it("when both titles and memories exist, includes both sections", async () => {
     const uid = userIds[0];
     const [folder] = await db.insert(folders).values({
       name: "ctx-both-folder",
@@ -381,7 +381,7 @@ describe("buildMemoryContext with titles", () => {
     }).returning();
     ctxThreadIds.push(t1.id, t2.id);
 
-    // t2 のフォルダに記フォルダに記憶を挿入 → folder スコープでヒットするはず
+    // Insert memory into t2's folder → should hit with folder scope
     await insertMemory(t2.id, folder.id, "ユーザーは FPGA 開発をしている", "fact");
 
     const result = await buildMemoryContext({
