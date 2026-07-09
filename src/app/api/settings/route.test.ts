@@ -1,15 +1,15 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// POST ハンドラのキャッシュ無効化を検証するため、依存をモック化。
-// vi.hoisted で宣言した変数を vi.mock factory 内で使う（hoisting safe）。
+// To verify cache invalidation of the POST handler, dependencies are mocked.
+// Variables declared via vi.hoisted are used inside vi.mock factories (hoisting-safe).
 const { readFileSyncMock, writeFileSyncMock, existsSyncMock } = vi.hoisted(() => ({
   readFileSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
   existsSyncMock: vi.fn(() => true),
 }));
 const { dbUpdateMock } = vi.hoisted(() => {
-  // update() ごとに新しい chain を返す（テスト間のモック状態汚染を防ぐ）
+  // Return a new chain for each update() call (prevents mock state pollution between tests)
   const update = vi.fn(() => {
     const where = vi.fn().mockResolvedValue(undefined);
     const set = vi.fn(() => ({ where }));
@@ -75,7 +75,7 @@ import { POST, GET, EMBED_MODEL_BASE, getEmbedModelOptions } from "@/app/api/set
 import { getSessionUser } from "@/lib/auth-guards";
 
 describe("EMBED_MODEL_OPTIONS", () => {
-  it("各項目が model/dim/provider/labelKey を持つ", () => {
+  it("each item has model/dim/provider/labelKey", () => {
     for (const opt of EMBED_MODEL_BASE) {
       expect(opt).toHaveProperty("model");
       expect(opt).toHaveProperty("dim");
@@ -84,7 +84,7 @@ describe("EMBED_MODEL_OPTIONS", () => {
     }
   });
 
-  it("getEmbedModelOptions が翻訳された label を持つ", () => {
+  it("getEmbedModelOptions returns translated label", () => {
     const opts = getEmbedModelOptions("ja");
     for (const opt of opts) {
       expect(opt).toHaveProperty("label");
@@ -92,7 +92,7 @@ describe("EMBED_MODEL_OPTIONS", () => {
     }
   });
 
-  it("LFM2.5-Embedding-350M が http プロバイダ・1024 次元で含まれる", () => {
+  it("LFM2.5-Embedding-350M is included with http provider and 1024 dimensions", () => {
     const lfm = EMBED_MODEL_BASE.find(
       (o) => o.model === "LiquidAI/LFM2.5-Embedding-350M",
     );
@@ -101,7 +101,7 @@ describe("EMBED_MODEL_OPTIONS", () => {
     expect(lfm!.dim).toBe(1024);
   });
 
-  it("既存 Xenova モデルは全て local プロバイダ", () => {
+  it("existing Xenova models are all local provider", () => {
     const xenova = EMBED_MODEL_BASE.filter((o) =>
       o.model.startsWith("Xenova/"),
     );
@@ -113,11 +113,11 @@ describe("EMBED_MODEL_OPTIONS", () => {
 });
 
 /**
- * 埋め込み次元は SQLite では環境変数 EMBED_DIM から取得される。
- * pgvector の vector_dims() / format_type / pg_attribute は不要。
+ * Embedding dimension is obtained from the EMBED_DIM environment variable in SQLite.
+ * pgvector's vector_dims() / format_type / pg_attribute are not needed.
  */
 describe("embedding dimension from env", () => {
-  it("EMBED_DIM 未設定時はデフォルト 1024", () => {
+  it("defaults to 1024 when EMBED_DIM is not set", () => {
     const orig = process.env.EMBED_DIM;
     delete process.env.EMBED_DIM;
     const dim = Number(process.env.EMBED_DIM) || 1024;
@@ -125,7 +125,7 @@ describe("embedding dimension from env", () => {
     if (orig !== undefined) process.env.EMBED_DIM = orig;
   });
 
-  it("EMBED_DIM 設定時はその値が使われる", () => {
+  it("uses the set value when EMBED_DIM is set", () => {
     const orig = process.env.EMBED_DIM;
     process.env.EMBED_DIM = "384";
     const dim = Number(process.env.EMBED_DIM) || 1024;
@@ -135,7 +135,7 @@ describe("embedding dimension from env", () => {
   });
 });
 
-describe("GET /api/settings — シークレットマスキング", () => {
+describe("GET /api/settings — secret masking", () => {
   const origApiKey = process.env.LLM_API_KEY;
   const origNotionSecret = process.env.NOTION_CLIENT_SECRET;
 
@@ -147,7 +147,7 @@ describe("GET /api/settings — シークレットマスキング", () => {
     else process.env.NOTION_CLIENT_SECRET = origNotionSecret;
   });
 
-  it("LLM_API_KEY が設定済みでも平文を返さず hasLlmApiKey=true を返す", async () => {
+  it("does not return plaintext even when LLM_API_KEY is set; returns hasLlmApiKey=true", async () => {
     process.env.LLM_API_KEY = "sk-super-secret-key";
     const req = new Request("http://localhost/api/settings", { method: "GET" });
     const res = await GET(req);
@@ -157,7 +157,7 @@ describe("GET /api/settings — シークレットマスキング", () => {
     expect(data.hasLlmApiKey).toBe(true);
   });
 
-  it("LLM_API_KEY 未設定時は hasLlmApiKey=false", async () => {
+  it("returns hasLlmApiKey=false when LLM_API_KEY is not set", async () => {
     delete process.env.LLM_API_KEY;
     const req = new Request("http://localhost/api/settings", { method: "GET" });
     const res = await GET(req);
@@ -167,7 +167,7 @@ describe("GET /api/settings — シークレットマスキング", () => {
     expect(data.hasLlmApiKey).toBe(false);
   });
 
-  it("NOTION_CLIENT_SECRET が設定済みでも平文を返さず hasNotionClientSecret=true を返す", async () => {
+  it("does not return plaintext even when NOTION_CLIENT_SECRET is set; returns hasNotionClientSecret=true", async () => {
     process.env.NOTION_CLIENT_SECRET = "secret_abc123";
     const req = new Request("http://localhost/api/settings", { method: "GET" });
     const res = await GET(req);
@@ -178,13 +178,13 @@ describe("GET /api/settings — シークレットマスキング", () => {
   });
 });
 
-describe("POST /api/settings — Embedding 設定変更時のキャッシュ無効化", () => {
+describe("POST /api/settings — cache invalidation on embedding config change", () => {
   const origEmbedModel = process.env.EMBED_MODEL;
   const origEmbedDim = process.env.EMBED_DIM;
   const origEmbedProvider = process.env.EMBED_PROVIDER;
 
   beforeEach(() => {
-    // scraper /config 呼出の fetch をモック（未呼び出し想定）
+    // Mock fetch for scraper /config call (expected to be uncalled)
     fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -214,7 +214,7 @@ describe("POST /api/settings — Embedding 設定変更時のキャッシュ無�
     return POST(req);
   }
 
-  it("embedModel 変更時に resetEmbedPipeline が呼ばれる", async () => {
+  it("calls resetEmbedPipeline when embedModel changes", async () => {
     readFileSyncMock.mockReturnValue("EMBED_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
@@ -223,18 +223,18 @@ describe("POST /api/settings — Embedding 設定変更時のキャッシュ無�
     expect(resetEmbedPipelineMock).toHaveBeenCalledTimes(1);
   });
 
-  it("embedDim 変更時に resetEmbedPipeline が呼ばれる", async () => {
+  it("calls resetEmbedPipeline when embedDim changes", async () => {
     process.env.EMBED_DIM = "1024";
     readFileSyncMock.mockReturnValue("EMBED_DIM=1024\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
-    // applyMigration: 次元変更(1024→384)なので既存 embedding 削除を要求
+    // applyMigration: dimension change (1024→384) requires deleting existing embeddings
     const res = await postSettings({ embedDim: 384, applyMigration: true });
     expect(res.status).toBe(200);
     expect(resetEmbedPipelineMock).toHaveBeenCalledTimes(1);
   });
 
-  it("embedProvider 変更時に resetEmbedPipeline が呼ばれる", async () => {
+  it("calls resetEmbedPipeline when embedProvider changes", async () => {
     readFileSyncMock.mockReturnValue("EMBED_PROVIDER=http\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
@@ -243,7 +243,7 @@ describe("POST /api/settings — Embedding 設定変更時のキャッシュ無�
     expect(resetEmbedPipelineMock).toHaveBeenCalledTimes(1);
   });
 
-  it("Embedding 設定以外の変更時は resetEmbedPipeline は呼ばれない", async () => {
+  it("does not call resetEmbedPipeline when non-embedding settings change", async () => {
     readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
@@ -253,7 +253,7 @@ describe("POST /api/settings — Embedding 設定変更時のキャッシュ無�
   });
 });
 
-describe("POST /api/settings — scraper /config 動的更新", () => {
+describe("POST /api/settings — scraper /config dynamic update", () => {
   const origScrapeProxy = process.env.SCRAPE_PROXY;
   const origScrapeTimeout = process.env.SCRAPE_TIMEOUT;
   const origScraperUrl = process.env.SCRAPER_URL;
@@ -287,7 +287,7 @@ describe("POST /api/settings — scraper /config 動的更新", () => {
     return POST(req);
   }
 
-  it("SCRAPE_PROXY 変更時に scraper /config へ fetch が呼ばれる", async () => {
+  it("calls fetch to scraper /config when SCRAPE_PROXY changes", async () => {
     process.env.SCRAPER_URL = "http://scraper:8000";
     readFileSyncMock.mockReturnValue("SCRAPE_PROXY=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
@@ -305,7 +305,7 @@ describe("POST /api/settings — scraper /config 動的更新", () => {
     expect(body.scrape_proxy).toBe("socks5://tor:9050");
   });
 
-  it("scraper 関連以外の変更時は /config fetch は呼ばれない", async () => {
+  it("does not call /config fetch when non-scraper settings change", async () => {
     process.env.SCRAPER_URL = "http://scraper:8000";
     readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
@@ -316,7 +316,7 @@ describe("POST /api/settings — scraper /config 動的更新", () => {
   });
 });
 
-describe("POST /api/settings — パーソナライズ設定の保存", () => {
+describe("POST /api/settings — personalization settings save", () => {
   beforeEach(() => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -341,7 +341,7 @@ describe("POST /api/settings — パーソナライズ設定の保存", () => {
     return POST(req);
   }
 
-  it("personalStyle を保存すると users テーブルへ update が呼ばれる", async () => {
+  it("saving personalStyle calls update on the users table", async () => {
     readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
@@ -352,7 +352,7 @@ describe("POST /api/settings — パーソナライズ設定の保存", () => {
     expect(setArg).toMatchObject({ personalStyle: "polite" });
   });
 
-  it("personalStyle: null で機能を無効化できる", async () => {
+  it("personalStyle: null disables the feature", async () => {
     readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
@@ -362,13 +362,13 @@ describe("POST /api/settings — パーソナライズ設定の保存", () => {
     expect(setArg).toMatchObject({ personalStyle: null });
   });
 
-  it("無効な personalStyle は 400 を返す", async () => {
+  it("invalid personalStyle returns 400", async () => {
     const res = await postSettings({ personalStyle: "unknown" });
     expect(res.status).toBe(400);
     expect(dbUpdateMock).not.toHaveBeenCalled();
   });
 
-  it("スライダー値は 0-2 にクランプされる", async () => {
+  it("slider values are clamped to 0-2", async () => {
     readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
@@ -388,5 +388,96 @@ describe("POST /api/settings — パーソナライズ設定の保存", () => {
       personalStructure: 1,
       personalEmoji: 1,
     });
+  });
+});
+
+describe("POST /api/settings — partial security / GSI updates", () => {
+  const origRegLocked = process.env.REGISTRATION_LOCKED;
+  const origAllowedIps = process.env.ALLOWED_REGISTRATION_IPS;
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(getSessionUser).mockResolvedValue({ id: "user-1", email: "t@t" } as never);
+  });
+
+  afterEach(() => {
+    readFileSyncMock.mockReset();
+    writeFileSyncMock.mockReset();
+    existsSyncMock.mockClear();
+    fetchMock.mockReset();
+    vi.unstubAllGlobals();
+    dbUpdateMock.mockClear();
+    if (origRegLocked === undefined) delete process.env.REGISTRATION_LOCKED;
+    else process.env.REGISTRATION_LOCKED = origRegLocked;
+    if (origAllowedIps === undefined) delete process.env.ALLOWED_REGISTRATION_IPS;
+    else process.env.ALLOWED_REGISTRATION_IPS = origAllowedIps;
+  });
+
+  async function postSettings(body: Record<string, unknown>) {
+    const req = new Request("http://localhost/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return POST(req);
+  }
+
+  it("writes REGISTRATION_LOCKED=\"true\" to .env and mirrors process.env", async () => {
+    delete process.env.REGISTRATION_LOCKED;
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ registrationLocked: true });
+    expect(res.status).toBe(200);
+    const written = writeFileSyncMock.mock.calls[0][1] as string;
+    expect(written).toContain('REGISTRATION_LOCKED="true"');
+    expect(process.env.REGISTRATION_LOCKED).toBe("true");
+  });
+
+  it("writes REGISTRATION_LOCKED=\"false\" when registrationLocked is false", async () => {
+    process.env.REGISTRATION_LOCKED = "true";
+    readFileSyncMock.mockReturnValue('REGISTRATION_LOCKED="true"\n');
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ registrationLocked: false });
+    expect(res.status).toBe(200);
+    const written = writeFileSyncMock.mock.calls[0][1] as string;
+    expect(written).toContain('REGISTRATION_LOCKED="false"');
+    expect(process.env.REGISTRATION_LOCKED).toBe("false");
+  });
+
+  it("writes allowedRegistrationIps to .env and mirrors process.env", async () => {
+    delete process.env.ALLOWED_REGISTRATION_IPS;
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ allowedRegistrationIps: "10.0.0.0/8" });
+    expect(res.status).toBe(200);
+    const written = writeFileSyncMock.mock.calls[0][1] as string;
+    expect(written).toContain('ALLOWED_REGISTRATION_IPS="10.0.0.0/8"');
+    expect(process.env.ALLOWED_REGISTRATION_IPS).toBe("10.0.0.0/8");
+  });
+
+  it("saves activeInstructionId to DB via users.update", async () => {
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ activeInstructionId: "instr-1" });
+    expect(res.status).toBe(200);
+    expect(dbUpdateMock).toHaveBeenCalledTimes(1);
+    const setArg = dbUpdateMock.mock.results[0].value.set.mock.calls[0][0];
+    expect(setArg).toMatchObject({ activeInstructionId: "instr-1" });
+  });
+
+  it("saves activeInstructionId: null when value is null", async () => {
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ activeInstructionId: null });
+    expect(res.status).toBe(200);
+    expect(dbUpdateMock).toHaveBeenCalledTimes(1);
+    const setArg = dbUpdateMock.mock.results[0].value.set.mock.calls[0][0];
+    expect(setArg).toMatchObject({ activeInstructionId: null });
   });
 });

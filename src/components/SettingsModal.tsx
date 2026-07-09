@@ -262,31 +262,56 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   }, []);
 
   const selectedOption = settings?.embedModelOptions.find((o) => o.model === form.embedModel);
-  const needsMigration =
+  const embedDirty =
     settings !== null &&
+    (form.embedModel !== settings.embedModel ||
+     (selectedOption?.dim ?? form.embedDim) !== settings.embedDim ||
+     (selectedOption?.provider ?? form.embedProvider) !== settings.embedProvider);
+  const needsMigration =
+    embedDirty &&
     selectedOption !== undefined &&
+    settings !== null &&
     settings.dbVectorDim > 0 &&
-    (selectedOption.dim !== settings.dbVectorDim ||
-     (settings.dbPageEmbeddingsDim > 0 && selectedOption.dim !== settings.dbPageEmbeddingsDim));
+    selectedOption.dim !== settings.dbVectorDim;
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setMessage(null);
     try {
+      const body: Record<string, unknown> = {
+        ...form,
+        // Secret fields are not sent when empty (existing values are preserved).
+        // GET returns llmApiKey/notionClientSecret as empty strings,
+        // so only send when the user enters a new value.
+        llmApiKey: form.llmApiKey || undefined,
+        notionClientSecret: form.notionClientSecret || undefined,
+      };
+      // Embed fields are only sent when the user changed them (embedDirty).
+      // Sending embedModel/embedDim/embedProvider when unchanged would be harmless
+      // for persistence, but strips applyMigration noise and avoids triggering
+      // resetEmbedPipeline on the server for a no-op.
+      if (embedDirty) {
+        body.embedDim = selectedOption?.dim ?? form.embedDim;
+        body.embedProvider = selectedOption?.provider ?? form.embedProvider;
+        if (needsMigration && migrationConfirmed) body.applyMigration = true;
+      } else {
+        delete body.embedModel;
+        delete body.embedDim;
+        delete body.embedProvider;
+        delete body.applyMigration;
+      }
+      // If embed changed + migration needed but not confirmed, strip embed
+      // fields so the server saves the other settings without touching embed.
+      if (embedDirty && needsMigration && !migrationConfirmed) {
+        delete body.embedModel;
+        delete body.embedDim;
+        delete body.embedProvider;
+        delete body.applyMigration;
+      }
       const res = await clientFetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          // Secret fields are not sent when empty (existing values are preserved).
-          // GET returns llmApiKey/notionClientSecret as empty strings,
-          // so only send when the user enters a new value.
-          llmApiKey: form.llmApiKey || undefined,
-          notionClientSecret: form.notionClientSecret || undefined,
-          embedDim: selectedOption?.dim ?? form.embedDim,
-          embedProvider: selectedOption?.provider ?? form.embedProvider,
-          applyMigration: needsMigration && migrationConfirmed,
-        }),
+        body: JSON.stringify(body),
       });
       const data = (await res.json()) as {
         success?: boolean;
@@ -308,10 +333,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         return;
       }
       if (data.migrationApplied) {
-        setMessage({
-          type: "success",
-          text: t("settings.migrationComplete"),
-        });
+        setMessage({ type: "success", text: t("settings.migrationComplete") });
+      } else if (embedDirty && needsMigration && !migrationConfirmed) {
+        // Embed change deferred — other settings were saved, but embed is untouched.
+        setMessage({ type: "success", text: t("settings.savedWithoutEmbed") });
       } else {
         setMessage({ type: "success", text: t("settings.saved") });
       }
@@ -322,7 +347,29 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [form, selectedOption, needsMigration, migrationConfirmed, fetchSettings, t]);
+  }, [form, selectedOption, embedDirty, needsMigration, migrationConfirmed, fetchSettings, t]);
+  // Partial settings persistence — sends only the changed key(s) immediately
+  // (security lock, GSI default selection, allowed IPs on blur).
+  // Does NOT re-fetch settings (would clobber the in-progress form).
+  // On failure, shows an error; the caller is responsible for rolling back form state.
+  const persistPartial = useCallback(async (body: Partial<SettingsResponse>): Promise<boolean> => {
+    try {
+      const res = await clientFetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage({ type: "error", text: data.error || t("settings.saveFailed") });
+        return false;
+      }
+      return true;
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
+      return false;
+    }
+  }, [t]);
 
   const handleTorToggle = useCallback(async () => {
     setTorBusy(true);
@@ -494,13 +541,16 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         const res = await clientFetch(`/api/global-instructions/${id}`, { method: "DELETE" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         // Clear selection if the deleted row was active
-        if (form.activeInstructionId === id) update("activeInstructionId", null);
+        if (form.activeInstructionId === id) {
+          update("activeInstructionId", null);
+          void persistPartial({ activeInstructionId: null });
+        }
         await fetchInstructions();
       } catch (err) {
         setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
       }
     },
-    [form.activeInstructionId, update, fetchInstructions, t],
+    [form.activeInstructionId, update, persistPartial, fetchInstructions, t],
   );
   const tabs = [
     { icon: "🤖", label: t("settings.tabAiModels") },
@@ -686,7 +736,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                         type="radio"
                         name="active-instruction"
                         checked={form.activeInstructionId === instr.id}
-                        onChange={() => update("activeInstructionId", instr.id)}
+                      onChange={() => {
+                        update("activeInstructionId", instr.id);
+                        void persistPartial({ activeInstructionId: instr.id });
+                      }}
                       />
                       <span>{instr.name}</span>
                     </label>
@@ -698,7 +751,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             )}
             {/* Clear selection */}
             {form.activeInstructionId && (
-              <button type="button" onClick={() => update("activeInstructionId", null)} className="mt-1 rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
+              <button type="button" onClick={() => { update("activeInstructionId", null); void persistPartial({ activeInstructionId: null }); }} className="mt-1 rounded-lg px-1 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
                 {t("settings.gsiClearSelection")}
               </button>
             )}
@@ -1147,7 +1200,13 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <input
                   type="checkbox"
                   checked={form.registrationLocked ?? false}
-                  onChange={(e) => update("registrationLocked", e.target.checked)}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    update("registrationLocked", next);
+                    void persistPartial({ registrationLocked: next }).then((ok) => {
+                      if (!ok) update("registrationLocked", !next);
+                    });
+                  }}
                   className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
                 />
                 <span>
@@ -1166,6 +1225,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   onChange={(e) => update("allowedRegistrationIps", e.target.value)}
                   placeholder={t("settings.allowedIpsPlaceholder")}
                   className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                  onBlur={() => {
+                    void persistPartial({ allowedRegistrationIps: form.allowedRegistrationIps ?? "" });
+                  }}
                 />
               </div>
             </div>
@@ -1305,7 +1367,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           <MotionButton
             type="button"
             onClick={handleSave}
-            disabled={saving || (needsMigration && !migrationConfirmed)}
+            disabled={saving}
             className="rounded-xl bg-foreground px-4 py-2 text-sm text-background transition-all duration-200 hover:opacity-90 disabled:opacity-50"
           >
             {saving ? t("common.saving") : t("common.save")}
