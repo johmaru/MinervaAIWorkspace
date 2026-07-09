@@ -127,7 +127,11 @@ bun run pack:exe
 #    (or run: node dist/UmansChat/umanschat.cjs)
 ```
 
-On first launch the launcher creates `data/umanschat.db`, applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
+> **In-place rebuild preserves state:** re-running `bun run pack:exe` into an existing `dist/UmansChat/` stashes and restores your `.env` and `data/` (SQLite DB) so security settings, API keys, and the database survive a rebuild — matching the in-app auto-update behavior. A fresh extract into a new empty folder correctly starts unlocked for first admin creation.
+
+> **Data location:** `.env` and `data/` live in `%USERPROFILE%\.umans_chat_unofficial\`, not in the exe folder. Deleting or replacing the exe folder preserves your settings, API keys, and database. On upgrade from a prior version, the launcher auto-migrates legacy data from the exe folder.
+
+On first launch the launcher creates `data/umanschat.db` (in the user data folder), applies migrations, starts the server on `:3001`, and opens your browser. You'll be prompted to create the first admin account.
 
 > **First run requires internet.** Local ONNX embeddings download the model (`Xenova/all-MiniLM-L6-v2`, shipped in `.env.example` for `EMBED_PROVIDER=local`) from Hugging Face on first use. After the initial download, chat works offline. Web search and page scraping degrade to empty results without the Docker services — chat itself is unaffected. For the HTTP Python embedder (`EMBED_PROVIDER=http`), the default model is `LiquidAI/LFM2.5-Embedding-350M` (1024-dim) and runs server-side — no client download.
 
@@ -140,7 +144,7 @@ The standalone exe checks for updates on startup and in **Settings → System**.
 3. The launcher detects the marker within 5 seconds, stops the server, swaps files (preserving `data/` and `.env`), and restarts the new exe
 4. The browser auto-reloads when the new server comes up
 
-`data/` (SQLite DB) and `.env` (API keys, settings) are preserved across updates. The old `umanschat.exe` is renamed to `.old` and cleaned up on next launch.
+`data/` and `.env` live in `%USERPROFILE%\.umans_chat_unofficial\` and are never touched during updates. The old `umanschat.exe` is renamed to `.old` and cleaned up on next launch.
 
 > **Prerequisite**: The GitHub repository must be public for the Releases API and asset downloads to work without authentication.
 > **Docker** users update via `docker compose pull && docker compose up -d` — auto-update is exe-only.
@@ -189,7 +193,7 @@ To expose the app over public HTTPS without port forwarding or a public IP, use 
 1. Create a named tunnel at [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel (type: Cloudflared).
 2. Add a public hostname and route it to `Service=http://app:3000`.
 3. Copy the tunnel token from the Cloudflare dashboard.
-4. Open UmansChat → Settings → Connections tab → Cloudflare Tunnel section.
+4. Open UmansChat → Settings → Access & Security tab → Cloudflare Tunnel section.
 5. Paste the tunnel token into the **Tunnel Token** field.
 6. Set **AUTH_URL** to your public hostname (e.g. `https://umanschat.example.com`). Must start with `https://`.
 7. Click **起動** (Start). The tunnel starts immediately — no app restart required.

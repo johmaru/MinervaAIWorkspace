@@ -129,9 +129,13 @@ bun run pack:exe
 #    dist/UmansChat/ に umanschat.exe と必要ファイル一式が出力されます
 ```
 
+> **同一フォルダ再ビルド時の状態保持**: 既存の `dist/UmansChat/` に対して `bun run pack:exe` を再実行すると、`.env` と `data/`（SQLite DB）を退避・復元し、セキュリティ設定・API キー・データベースが再ビルド後も保持されます（アプリ内自動更新と同じ挙動）。新規フォルダへの展開は正しく初期状態（ロック解除）で起動し、最初の管理者作成が可能です。
+
+> **データの場所:** `.env` と `data/` は exe フォルダではなく `%USERPROFILE%\.umans_chat_unofficial\` に保存されます。exe フォルダを削除・入れ替えても設定・APIキー・データベースは保持されます。旧バージョンからのアップグレード時、ランチャーが exe フォルダから自動でデータを移行します。
+
 `dist/UmansChat/` フォルダをユーザーの Windows マシンにそのまま配布できます。`umanschat.exe` をダブルクリックすると：
 
-1. 同梱の SQLite データベース（`data/umanschat.db`）を初回起動時に作成し、マイグレーションを適用
+1. ユーザーデータフォルダ（`%USERPROFILE%\.umans_chat_unofficial\data\`）に SQLite データベース（`umanschat.db`）を初回起動時に作成し、マイグレーションを適用
 2. サーバーを起動し、ブラウザで `http://localhost:3001` を自動で開く
 3. 初回は管理者アカウントの作成を求められます
 
@@ -149,7 +153,7 @@ bun run pack:exe
 3. ランチャーが 5 秒以内にマーカーを検出し、サーバーを停止、ファイルを差し替え（`data/` と `.env` を保持）、新しい exe を起動します
 4. 新しいサーバーが起動するとブラウザが自動リロードされます
 
-`data/`（SQLite DB）と `.env`（API キー・設定）は更新後も保持されます。古い `umanschat.exe` は `.old` にリネームされ、次回起動時に削除されます。
+`data/` と `.env` は `%USERPROFILE%\.umans_chat_unofficial\` にあり、更新時には一切触れられません。古い `umanschat.exe` は `.old` にリネームされ、次回起動時に削除されます。
 
 > **前提条件**: GitHub Releases API とアセットダウンロードを認証なしで利用するには、リポジトリを公開設定にする必要があります。
 > **Docker** ユーザーは `docker compose pull && docker compose up -d` で更新します — 自動更新は exe 版のみの機能です。
@@ -199,7 +203,7 @@ docker compose up -d
 1. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel で名前付きトンネルを作成（タイプ: Cloudflared）。
 2. パブリックホスト名を追加し、`Service=http://app:3000` にルーティング。
 3. Cloudflare ダッシュボードからトンネルトークンをコピー。
-4. UmansChat → 設定 → コネクションタブ → Cloudflare Tunnel セクションを開く。
+4. UmansChat → 設定 → 公開・セキュリティタブ → Cloudflare Tunnel セクションを開く。
 5. **Tunnel Token** 欄にトークンを貼り付け。
 6. **AUTH_URL** に公開ホスト名を設定（例: `https://umanschat.example.com`）。`https://` で始まる必要があります。
 7. **起動** ボタンをクリック。トンネルが即座に起動します — アプリの再起動は不要です。
