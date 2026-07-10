@@ -314,13 +314,28 @@ export const messages = sqliteTable(
  *
  * After an assistant response completes, the conversation is summarized and classified via LLM, then stored with an embedding.
  * On the next send, client-side cosine search (similarity > 0.3) → top-30 by similarity →
- * top-5 by recency score (importance × 0.6 + exp(-ageDays/14) × 0.4) → injected into system context (RAG).
+ * top-5 by recency score → injected into system context (RAG).
  *
+ * Lifecycle:
  * - kind: "fact" = immutable user info/environment/settings. "working" = current task/temporary context.
- * - suppressedAt: soft delete. Invalidates old memories on replace/merge.
+ * - suppressedAt: user-initiated soft delete (DELETE /api/memories/[id]).
+ * - validFrom / validUntil: time-validity range. When a memory is replaced (outdated/wrong),
+ *   validUntil = now() is set instead of suppressedAt — the old memory remains as history
+ *   but is excluded from active search. Replaced memories are NOT physically deleted.
+ * - expiresAt: automatic expiration. working memories get expiresAt = now + 7 days at INSERT time.
+ *   fact memories have expiresAt = null (never auto-expire).
+ * - injectionCount / lastInjectedAt / lastReferencedAt: feedback loop tracking.
+ *   injectionCount incremented each time the memory is injected into context.
+ *   lastInjectedAt = timestamp of most recent injection.
+ *   lastReferencedAt = timestamp of most recent injection that was followed by a user message
+ *   with cosine > 0.5 (user continued the topic). importance is adjusted ±0.05/0.02 per cycle.
  * - folderId: When folders.memoryScope is "folder", search is limited to the same folder.
  *   "global" searches across all threads (default).
  * - embedding: JSON array (text column, mode: json). Cosine computed in vectorSearch.ts.
+ *
+ * Active memory = suppressedAt IS NULL AND (validUntil IS NULL OR validUntil > now)
+ *   AND (expiresAt IS NULL OR expiresAt > now).
+ * Use activeMemoryConditions() from memoryUtils.ts to build WHERE clauses.
  */
 export const memories = sqliteTable(
   "memories",
@@ -338,6 +353,12 @@ export const memories = sqliteTable(
     model: text("model").notNull(),
     importance: real("importance").notNull().default(0.5),
     suppressedAt: ts("suppressed_at"),
+    validFrom: tsNow("valid_from"),
+    validUntil: ts("valid_until"),
+    expiresAt: ts("expires_at"),
+    injectionCount: integer("injection_count").notNull().default(0),
+    lastInjectedAt: ts("last_injected_at"),
+    lastReferencedAt: ts("last_referenced_at"),
     createdAt: tsNow("created_at"),
     updatedAt: tsNow("updated_at"),
   },
@@ -346,6 +367,32 @@ export const memories = sqliteTable(
     folderIdx: index("memories_folder_idx").on(t.folderId),
     kindIdx: index("memories_kind_idx").on(t.kind),
     suppressedIdx: index("memories_suppressed_idx").on(t.suppressedAt),
+    expiresIdx: index("memories_expires_idx").on(t.expiresAt),
+  }),
+);
+
+/**
+ * memory_injections — junction table tracking which memories were injected for each user message.
+ * Used by the feedback loop: on the next send, the previous message's injected memories
+ * are compared (cosine similarity) against the new user input. If similarity > 0.5,
+ * the memory is "referenced" (importance boosted, lastReferencedAt updated).
+ * One row per (messageId, memoryId) pair. Deleted with the message (cascade).
+ */
+export const memoryInjections = sqliteTable(
+  "memory_injections",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    memoryId: text("memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    injectedAt: tsNow("injected_at"),
+  },
+  (t) => ({
+    messageIdx: index("memory_injections_message_idx").on(t.messageId),
+    memoryIdx: index("memory_injections_memory_idx").on(t.memoryId),
   }),
 );
 

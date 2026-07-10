@@ -12,6 +12,9 @@ type MemoryEntry = {
   kind: "fact" | "working";
   content: string;
   importance: number;
+  injectionCount: number;
+  lastInjectedAt: string | null;
+  lastReferencedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

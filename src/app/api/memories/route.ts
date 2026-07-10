@@ -1,8 +1,9 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { memories, threads } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 import { embedText, hashContent } from "@/lib/embed";
+import { activeMemoryConditions } from "@/lib/memoryUtils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,12 +25,15 @@ export async function GET() {
       kind: memories.kind,
       content: memories.content,
       importance: memories.importance,
+      injectionCount: memories.injectionCount,
+      lastInjectedAt: memories.lastInjectedAt,
+      lastReferencedAt: memories.lastReferencedAt,
       createdAt: memories.createdAt,
       updatedAt: memories.updatedAt,
     })
     .from(memories)
     .innerJoin(threads, eq(memories.threadId, threads.id))
-    .where(and(eq(threads.userId, user.id), isNull(memories.suppressedAt)))
+    .where(and(eq(threads.userId, user.id), ...activeMemoryConditions()))
     .orderBy(desc(memories.updatedAt));
   return Response.json(rows);
 }
@@ -86,6 +90,8 @@ export async function POST(req: Request) {
       contentHash,
       model: "manual",
       importance,
+      validFrom: new Date(),
+      expiresAt: kind === "working" ? new Date(Date.now() + 7 * 86_400_000) : null,
     })
     .returning({
       id: memories.id,

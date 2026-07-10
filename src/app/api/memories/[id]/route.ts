@@ -82,7 +82,13 @@ export async function PATCH(
     values.embedding = vector;
     values.contentHash = hashContent(c);
   }
-  if (body.kind === "fact" || body.kind === "working") values.kind = body.kind;
+  if (body.kind === "fact" || body.kind === "working") {
+    values.kind = body.kind;
+    // When kind changes, update expiresAt: working → 7 days from now, fact → null (never expires)
+    values.expiresAt = body.kind === "working"
+      ? new Date(Date.now() + 7 * 86_400_000)
+      : null;
+  }
   if (typeof body.importance === "number") {
     values.importance = Math.max(0, Math.min(1, body.importance));
   }

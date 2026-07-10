@@ -133,6 +133,7 @@ describe("POST /api/search — memory search", () => {
           contentHash: hashContent(content),
           embedding: vector,
           model: "test-model",
+          validFrom: new Date(),
         })
         .returning();
       createdMemoryIds.push(mem.id);

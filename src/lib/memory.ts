@@ -1,8 +1,10 @@
 import type OpenAI from "openai";
-import { and, asc, eq, isNull, inArray, desc } from "drizzle-orm";
+import { and, asc, eq, inArray, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { memories, threads, folders } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
+import { activeMemoryConditions } from "@/lib/memoryUtils";
+import { cosineSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
 
 /**
@@ -13,7 +15,7 @@ import { logger } from "@/lib/logger";
  * 2. findRelevantMemories (memoryStore.ts): on next send, searches via cosine similarity → similarity + recency top-5.
  * 3. chat route injects into system context.
  *
- * On replace/merge, old memories are soft-deleted via suppressedAt (not physically deleted).
+ * On replace/merge/contradiction, old memories are invalidated via validUntil (kept as history, excluded from active search). suppressedAt is only used for user-initiated DELETE.
  */
 
 export type MemoryKind = "fact" | "working";
@@ -131,7 +133,7 @@ async function findExistingMemory(
     const [row] = await db
       .select({ id: memories.id })
       .from(memories)
-      .where(and(eq(memories.id, targetId), isNull(memories.suppressedAt)))
+      .where(and(eq(memories.id, targetId), ...activeMemoryConditions()))
       .limit(1);
     if (row) return row;
   }
@@ -143,7 +145,7 @@ async function findExistingMemory(
       and(
         eq(memories.threadId, threadId),
         eq(memories.content, targetContent),
-        isNull(memories.suppressedAt),
+        ...activeMemoryConditions(),
       ),
     )
     .orderBy(asc(memories.createdAt))
@@ -180,6 +182,73 @@ async function mergeContents(
 }
 
 /**
+ * Checks whether a new memory contradicts an existing memory via a single LLM call.
+ * Returns true if the two memories contradict each other (same subject, conflicting info).
+ * Returns false if they are complementary or unrelated.
+ */
+async function checkContradiction(
+  existingContent: string,
+  newContent: string,
+  llm: OpenAI,
+  model: string,
+): Promise<boolean> {
+  try {
+    const completion = await llm.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a contradiction detector. Determine whether the two statements contradict each other (same subject but conflicting information). Reply ONLY with 'yes' or 'no'.",
+        },
+        {
+          role: "user",
+          content: `Statement A: ${existingContent}\nStatement B: ${newContent}\nDo these contradict each other?`,
+        },
+      ],
+    });
+    const answer = completion.choices[0]?.message?.content?.trim().toLowerCase();
+    return answer === "yes";
+  } catch {
+    // On LLM failure, don't block insertion — assume no contradiction
+    return false;
+  }
+}
+
+/**
+ * Checks whether a working memory should be promoted to fact via a single LLM call.
+ * Returns true if the working memory represents a confirmed, stable fact.
+ */
+async function checkPromotion(
+  memoryContent: string,
+  injectionCount: number,
+  llm: OpenAI,
+  model: string,
+): Promise<boolean> {
+  try {
+    const completion = await llm.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a memory classifier. Determine whether a 'working' memory (temporary context) has become a confirmed, stable fact that is unlikely to change. Consider: is this a permanent attribute, a completed decision, or a stable preference? Reply ONLY with 'yes' or 'no'.",
+        },
+        {
+          role: "user",
+          content: `Memory (working): ${memoryContent}\nThis memory has been referenced by the user ${injectionCount} times.\nHas this become a confirmed fact?`,
+        },
+      ],
+    });
+    const answer = completion.choices[0]?.message?.content?.trim().toLowerCase();
+    return answer === "yes";
+  } catch {
+    // On LLM failure, don't promote — leave as working
+    return false;
+  }
+}
+
+/**
  * Extracts memories from recent turns and stores them in the memories table.
  *
  * - LLM does not return JSON → skip (logger.error only)
@@ -191,6 +260,8 @@ async function mergeContents(
  * @param recentTurns Recent conversation (user + assistant pairs)
  * @param llm LLM client (injectable for tests)
  * @param model LLM model id
+ * @param userId Owner user ID (overrides thread's userId)
+ * @param sourceMessageIds IDs of the messages this extraction is based on (stored for traceability)
  */
 export async function generateMemories(
   threadId: string,
@@ -198,6 +269,7 @@ export async function generateMemories(
   llm: OpenAI,
   model: string,
   userId?: string,
+  sourceMessageIds?: string[],
 ): Promise<void> {
   // Early return if no user/assistant pair
   const hasUser = recentTurns.some((t) => t.role === "user");
@@ -212,25 +284,18 @@ export async function generateMemories(
   const folderId = thread?.folderId ?? null;
   const effectiveUserId = userId ?? thread?.userId;
 
-  // Get existing active memories (to present to the LLM)
-  // Scope: same folder or cross-thread, depending on folder.memoryScope
-  let existing: { id: string; content: string }[];
+  // ── Resolve memory scope (shared by promotion + existing fetch) ──
+  // folder memoryScope="folder" → same folderId only
+  // folder memoryScope="global" (or no folder) → all threads owned by the user
+  let scopeCondition: SQL;
   if (folderId) {
-    // Get the folder's memoryScope
     const [folder] = await db
       .select({ memoryScope: folders.memoryScope })
       .from(folders)
       .where(eq(folders.id, folderId));
     if (folder?.memoryScope === "folder") {
-      // Get memories within the same folder
-      existing = await db
-        .select({ id: memories.id, content: memories.content })
-        .from(memories)
-        .where(and(eq(memories.folderId, folderId), isNull(memories.suppressedAt)))
-        .orderBy(desc(memories.updatedAt))
-        .limit(20);
+      scopeCondition = eq(memories.folderId, folderId);
     } else {
-      // global: cross-thread for the same user
       const threadIds = effectiveUserId
         ? (await db
             .select({ id: threads.id })
@@ -238,26 +303,71 @@ export async function generateMemories(
             .where(eq(threads.userId, effectiveUserId)))
             .map((t) => t.id)
         : [threadId];
-      existing = await db
-        .select({ id: memories.id, content: memories.content })
-        .from(memories)
-        .where(
-          and(
-            inArray(memories.threadId, threadIds),
-            isNull(memories.suppressedAt),
-          ),
-        )
-        .orderBy(desc(memories.updatedAt))
-        .limit(20);
+      scopeCondition = inArray(memories.threadId, threadIds);
     }
   } else {
-    // No folder: same thread only (conventional behavior)
-    existing = await db
-      .select({ id: memories.id, content: memories.content })
-      .from(memories)
-      .where(and(eq(memories.threadId, threadId), isNull(memories.suppressedAt)))
-      .orderBy(asc(memories.createdAt));
+    scopeCondition = eq(memories.threadId, threadId);
   }
+
+  // ── Working → Fact promotion ──
+  // Find working memories with injectionCount >= 3 AND injectionCount % 3 === 0 (throttle:
+  // re-check only every 3 injections to avoid repeated LLM calls on every turn).
+  // Also require lastReferencedAt within the last 7 days (still actively used).
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+  const promotionCandidates = await db
+    .select({
+      id: memories.id,
+      content: memories.content,
+      injectionCount: memories.injectionCount,
+    })
+    .from(memories)
+    .where(
+      and(
+        scopeCondition,
+        eq(memories.kind, "working"),
+        ...activeMemoryConditions(),
+        sql`${memories.injectionCount} >= 3`,
+        sql`${memories.injectionCount} % 3 = 0`,
+        sql`${memories.lastReferencedAt} > ${sevenDaysAgo.getTime()}`,
+      ),
+    )
+    .limit(5);
+
+  for (const candidate of promotionCandidates) {
+    try {
+      const shouldPromote = await checkPromotion(
+        candidate.content,
+        candidate.injectionCount,
+        llm,
+        model,
+      );
+      if (shouldPromote) {
+        await db
+          .update(memories)
+          .set({ kind: "fact", expiresAt: null, updatedAt: new Date() })
+          .where(eq(memories.id, candidate.id));
+        logger.info("memory", "promoted working memory to fact", {
+          memoryId: candidate.id,
+          content: candidate.content,
+          injectionCount: candidate.injectionCount,
+        });
+      }
+    } catch (err) {
+      logger.error("memory", "promotion check failed", {
+        memoryId: candidate.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  // ── End promotion ──
+
+  // Get existing active memories (to present to the LLM), using the same scope
+  const existing = await db
+    .select({ id: memories.id, content: memories.content })
+    .from(memories)
+    .where(and(scopeCondition, ...activeMemoryConditions()))
+    .orderBy(desc(memories.updatedAt))
+    .limit(20);
 
   // Extract memories via LLM
   let extracted: ExtractedMemory[] | null;
@@ -275,15 +385,18 @@ export async function generateMemories(
   if (!extracted || extracted.length === 0) return;
 
   const embedModel = process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2";
+  const now = new Date();
 
   for (const mem of extracted) {
     try {
       if (mem.action === "replace" && (mem.targetId || mem.targetContent)) {
         const target = await findExistingMemory(threadId, mem.targetContent, mem.targetId);
         if (target) {
+          // Set validUntil (not suppressedAt) — the old memory is invalidated, not user-deleted.
+          // It remains as history but is excluded from active search.
           await db
             .update(memories)
-            .set({ suppressedAt: new Date(), updatedAt: new Date() })
+            .set({ validUntil: now, updatedAt: now })
             .where(eq(memories.id, target.id));
         }
         // Even if target not found, save as a new memory (fallback)
@@ -302,7 +415,7 @@ export async function generateMemories(
               embedding: vector,
               contentHash: hashContent(mergedContent),
               importance: mem.importance ?? 0.5,
-              updatedAt: new Date(),
+              updatedAt: now,
             })
             .where(eq(memories.id, target.id));
           continue; // merge complete, no new INSERT
@@ -315,7 +428,7 @@ export async function generateMemories(
       if (vector.length === 0) continue; // embed failed → skip
 
       const contentHash = hashContent(mem.content);
-      // Avoid duplicates via contentHash (skip if exists)
+      // Avoid duplicates via contentHash (skip if exists among active memories)
       const [dup] = await db
         .select({ id: memories.id })
         .from(memories)
@@ -323,21 +436,67 @@ export async function generateMemories(
           and(
             eq(memories.threadId, threadId),
             eq(memories.contentHash, contentHash),
-            isNull(memories.suppressedAt),
+            ...activeMemoryConditions(),
           ),
         )
         .limit(1);
       if (dup) continue;
+
+      // ── Contradiction detection ──
+      // Query active memories with embeddings in the same scope, compute cosine
+      // against the new memory's vector, and check candidates with sim > 0.75 via LLM.
+      // If a contradiction is found, the old memory is invalidated (validUntil = now).
+      const contradictCandidates = await db
+        .select({
+          id: memories.id,
+          content: memories.content,
+          embedding: memories.embedding,
+        })
+        .from(memories)
+        .where(and(scopeCondition, ...activeMemoryConditions()))
+        .limit(50);
+
+      for (const candidate of contradictCandidates) {
+        const sim = cosineSimilarity(vector, candidate.embedding);
+        if (sim <= 0.75) continue;
+        const isContradiction = await checkContradiction(
+          candidate.content,
+          mem.content,
+          llm,
+          model,
+        );
+        if (isContradiction) {
+          // Invalidate the old memory — keep as history, exclude from active search
+          await db
+            .update(memories)
+            .set({ validUntil: now, updatedAt: now })
+            .where(eq(memories.id, candidate.id));
+          logger.info("memory", "contradiction detected, invalidating old memory", {
+            oldMemoryId: candidate.id,
+            oldContent: candidate.content,
+            newContent: mem.content,
+            similarity: Number(sim.toFixed(3)),
+          });
+        }
+      }
+
+      // working memories auto-expire after 7 days; fact memories never auto-expire
+      const expiresAt = mem.kind === "working"
+        ? new Date(now.getTime() + 7 * 86_400_000)
+        : null;
 
       await db.insert(memories).values({
         threadId,
         folderId,
         kind: mem.kind,
         content: mem.content,
+        sourceMessageIds: sourceMessageIds ?? null,
         embedding: vector,
         contentHash,
         model: embedModel,
         importance: mem.importance ?? 0.5,
+        validFrom: now,
+        expiresAt,
       });
     } catch (err) {
       logger.error("memory", "failed to save memory", { content: mem.content, error: err instanceof Error ? err.message : String(err) });

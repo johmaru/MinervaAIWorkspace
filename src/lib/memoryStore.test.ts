@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { db } from "@/db";
-import { memories, threads, folders, users } from "@/db/schema";
+import { memories, threads, folders, users, messages, memoryInjections } from "@/db/schema";
 import { eq, ne, desc } from "drizzle-orm";
 
 // Mock embedText: return deterministic vectors without depending on the real embedder service.
@@ -24,7 +24,7 @@ vi.mock("@/lib/embed", () => ({
 }));
 
 import { embedText, hashContent } from "@/lib/embed";
-import { findRelevantMemories, buildMemoryContext, fetchRecentThreadTitles } from "@/lib/memoryStore";
+import { findRelevantMemories, buildMemoryContext, fetchRecentThreadTitles, formatRelativeTime } from "@/lib/memoryStore";
 
 // Integration test for findRelevantMemories. Inserts memories into the real DB and
 // verifies that client-side cosine search returns similarity + recency top-5.
@@ -55,6 +55,8 @@ async function insertMemory(
       contentHash,
       embedding,
       model: "test-model",
+      validFrom: new Date(),
+      expiresAt: kind === "working" ? new Date(Date.now() + 7 * 86_400_000) : null,
     })
     .returning();
   createdMemoryIds.push(memory.id);
@@ -204,6 +206,7 @@ describe("findRelevantMemories — userId isolation", () => {
       contentHash,
       embedding,
       model: "test-model",
+      validFrom: new Date(),
     }).returning();
     otherMemoryIds.push(otherMem.id);
 
@@ -319,9 +322,10 @@ describe("buildMemoryContext with titles", () => {
 
     const result = await buildMemoryContext({
       content: "何か質問",
-      thread: { folderId: folder.id },
+      thread: { folderId: folder.id, id: thread.id },
       userId: uid,
       currentThreadId: thread.id,
+      userMessageId: "",
     });
     // No title candidates (New chat excluded) + no memories → null
     expect(result).toBeNull();
@@ -349,12 +353,12 @@ describe("buildMemoryContext with titles", () => {
     ctxThreadIds.push(t1.id, t2.id);
 
     // Treat t2 as the "current thread". There are no memories in the folder scope,
-    // but t1 should remain as a title candidate.
     const result = await buildMemoryContext({
       content: "全く関係ない質問 xyz123",
-      thread: { folderId: folder.id },
+      thread: { folderId: folder.id, id: t2.id },
       userId: uid,
       currentThreadId: t2.id,
+      userMessageId: "",
     });
     expect(result).not.toBeNull();
     expect(result!.content).toContain("Recent conversation topics");
@@ -383,17 +387,222 @@ describe("buildMemoryContext with titles", () => {
 
     // Insert memory into t2's folder → should hit with folder scope
     await insertMemory(t2.id, folder.id, "ユーザーは FPGA 開発をしている", "fact");
-
     const result = await buildMemoryContext({
       content: "FPGA 開発",
-      thread: { folderId: folder.id },
+      thread: { folderId: folder.id, id: t2.id },
       userId: uid,
       currentThreadId: t2.id,
+      userMessageId: "",
     });
     expect(result).not.toBeNull();
     expect(result!.content).toContain("Recent conversation topics");
     expect(result!.content).toContain("過去の設計議論");
     expect(result!.content).toContain("Past memories from previous conversations");
     expect(result!.content).toContain("FPGA 開発をしている");
+    // Memory line includes relative time, e.g. "(just now)" or "(3 days ago)"
+    expect(result!.content).toMatch(/\(.*(?:ago|just now)\)/);
+  }, 60_000);
+});
+
+describe("formatRelativeTime", () => {
+  const now = new Date("2026-07-10T12:00:00Z");
+
+  it("returns 'just now' for < 60 seconds", () => {
+    expect(formatRelativeTime(new Date(now.getTime() - 0), now)).toBe("just now");
+    expect(formatRelativeTime(new Date(now.getTime() - 59_000), now)).toBe("just now");
+  });
+
+  it("returns minutes for < 60 minutes", () => {
+    expect(formatRelativeTime(new Date(now.getTime() - 60_000), now)).toBe("1 minute ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 120_000), now)).toBe("2 minutes ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 59 * 60_000), now)).toBe("59 minutes ago");
+  });
+
+  it("returns hours for < 24 hours", () => {
+    expect(formatRelativeTime(new Date(now.getTime() - 3_600_000), now)).toBe("1 hour ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 7_200_000), now)).toBe("2 hours ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 23 * 3_600_000), now)).toBe("23 hours ago");
+  });
+
+  it("returns days, including singular '1 day ago'", () => {
+    expect(formatRelativeTime(new Date(now.getTime() - 86_400_000), now)).toBe("1 day ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 2 * 86_400_000), now)).toBe("2 days ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 6 * 86_400_000), now)).toBe("6 days ago");
+  });
+
+  it("returns weeks, including singular '1 week ago'", () => {
+    expect(formatRelativeTime(new Date(now.getTime() - 7 * 86_400_000), now)).toBe("1 week ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 14 * 86_400_000), now)).toBe("2 weeks ago");
+  });
+
+  it("returns months, including singular '1 month ago'", () => {
+    expect(formatRelativeTime(new Date(now.getTime() - 30 * 86_400_000), now)).toBe("1 month ago");
+    expect(formatRelativeTime(new Date(now.getTime() - 90 * 86_400_000), now)).toBe("3 months ago");
+  });
+
+  it("future date returns 'just now' (negative diff)", () => {
+    expect(formatRelativeTime(new Date(now.getTime() + 10_000), now)).toBe("just now");
+  });
+});
+
+describe("buildMemoryContext feedback loop", () => {
+  const fbUserIds: string[] = [];
+  const fbThreadIds: string[] = [];
+  const fbMemoryIds: string[] = [];
+  const fbMessageIds: string[] = [];
+
+  beforeAll(async () => {
+    const [user] = await db.insert(users).values({
+      nickname: "feedback-test-user",
+      email: "feedback-test@example.com",
+    }).returning();
+    fbUserIds.push(user.id);
+    testUserId = user.id;
+  });
+
+  afterAll(async () => {
+    for (const id of fbMessageIds) {
+      await db.delete(memoryInjections).where(eq(memoryInjections.messageId, id));
+    }
+    for (const id of fbMemoryIds) {
+      await db.delete(memories).where(eq(memories.id, id));
+    }
+    for (const id of fbThreadIds) {
+      await db.delete(messages).where(eq(messages.threadId, id));
+      await db.delete(threads).where(eq(threads.id, id));
+    }
+    for (const id of fbUserIds) {
+      await db.delete(users).where(eq(users.id, id));
+    }
+  });
+
+  it("boosts importance when user continues the same topic across turns", async () => {
+    const uid = fbUserIds[0];
+    const [thread] = await db.insert(threads).values({
+      userId: uid,
+      title: "feedback loop test",
+    }).returning();
+    fbThreadIds.push(thread.id);
+
+    // Insert a memory about FPGA
+    const memId = await insertMemory(thread.id, null, "ユーザーは FPGA 開発をしている", "fact");
+    fbMemoryIds.push(memId);
+
+    // Simulate turn 1: user1 message (triggers memory injection)
+    const [user1] = await db.insert(messages).values({
+      threadId: thread.id,
+      role: "user",
+      content: "FPGA について教えて",
+    }).returning();
+    fbMessageIds.push(user1.id);
+
+    // Build context for turn 1 — this records injections on user1
+    await buildMemoryContext({
+      content: "FPGA について教えて",
+      thread: { folderId: null, id: thread.id },
+      userId: uid,
+      currentThreadId: thread.id,
+      userMessageId: user1.id,
+    });
+
+    // Simulate assistant response
+    const [assistant1] = await db.insert(messages).values({
+      threadId: thread.id,
+      parentId: user1.id,
+      role: "assistant",
+      content: "FPGAについて説明します...",
+    }).returning();
+    fbMessageIds.push(assistant1.id);
+
+    // Capture importance before feedback
+    const [before] = await db.select({ importance: memories.importance })
+      .from(memories).where(eq(memories.id, memId));
+
+    // Simulate turn 2: user2 continues the FPGA topic
+    const [user2] = await db.insert(messages).values({
+      threadId: thread.id,
+      parentId: assistant1.id,
+      role: "user",
+      content: "FPGA の低レイヤー開発についてもっと教えて",
+    }).returning();
+    fbMessageIds.push(user2.id);
+
+    // Build context for turn 2 — this runs the feedback loop
+    await buildMemoryContext({
+      content: "FPGA の低レイヤー開発についてもっと教えて",
+      thread: { folderId: null, id: thread.id },
+      userId: uid,
+      currentThreadId: thread.id,
+      userMessageId: user2.id,
+    });
+
+    // Importance should have been boosted (sim > 0.5 because content shares characters)
+    const [after] = await db.select({ importance: memories.importance, lastReferencedAt: memories.lastReferencedAt })
+      .from(memories).where(eq(memories.id, memId));
+
+    expect(after!.importance).toBeGreaterThan(before!.importance);
+    expect(after!.lastReferencedAt).not.toBeNull();
+  }, 60_000);
+
+  it("decays importance when user moves to a different topic", async () => {
+    const uid = fbUserIds[0];
+    const [thread] = await db.insert(threads).values({
+      userId: uid,
+      title: "feedback decay test",
+    }).returning();
+    fbThreadIds.push(thread.id);
+
+    // Insert a memory about Rust
+    const memId = await insertMemory(thread.id, null, "ユーザーは Rust で組み込み開発をしている", "fact");
+    fbMemoryIds.push(memId);
+
+    // Turn 1: user asks about Rust (triggers injection)
+    const [user1] = await db.insert(messages).values({
+      threadId: thread.id,
+      role: "user",
+      content: "Rust について教えて",
+    }).returning();
+    fbMessageIds.push(user1.id);
+
+    await buildMemoryContext({
+      content: "Rust について教えて",
+      thread: { folderId: null, id: thread.id },
+      userId: uid,
+      currentThreadId: thread.id,
+      userMessageId: user1.id,
+    });
+
+    const [assistant1] = await db.insert(messages).values({
+      threadId: thread.id,
+      parentId: user1.id,
+      role: "assistant",
+      content: "Rustについて説明します...",
+    }).returning();
+    fbMessageIds.push(assistant1.id);
+
+    const [before] = await db.select({ importance: memories.importance })
+      .from(memories).where(eq(memories.id, memId));
+
+    // Turn 2: user asks about something completely different (no shared characters with Rust content)
+    const [user2] = await db.insert(messages).values({
+      threadId: thread.id,
+      parentId: assistant1.id,
+      role: "user",
+      content: "xyzqwerty undefined nonsense 12345",
+    }).returning();
+    fbMessageIds.push(user2.id);
+
+    await buildMemoryContext({
+      content: "xyzqwerty undefined nonsense 12345",
+      thread: { folderId: null, id: thread.id },
+      userId: uid,
+      currentThreadId: thread.id,
+      userMessageId: user2.id,
+    });
+
+    const [after] = await db.select({ importance: memories.importance })
+      .from(memories).where(eq(memories.id, memId));
+
+    expect(after!.importance).toBeLessThan(before!.importance);
   }, 60_000);
 });

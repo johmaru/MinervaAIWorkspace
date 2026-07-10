@@ -186,7 +186,7 @@ export async function POST(req: Request) {
   const streamDone = new Promise<void>((resolve) => {
     resolveStream = resolve;
   });
-  const streamResult: { assistantContent: string } = { assistantContent: "" };
+  const streamResult: { assistantContent: string; assistantMessageId?: string } = { assistantContent: "" };
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -233,6 +233,7 @@ export async function POST(req: Request) {
                   thread,
                   userId: user.id,
                   currentThreadId: thread.id,
+                  userMessageId: prepared.userMessage.id,
                 }).catch((err) => {
                   logger.error("chat", "buildMemoryContext failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
@@ -449,6 +450,7 @@ export async function POST(req: Request) {
               : { model: finalModel, elapsedMs },
           })
           .returning();
+        streamResult.assistantMessageId = assistantMsg.id;
 
         await db
           .update(threads)
@@ -469,6 +471,7 @@ export async function POST(req: Request) {
               metadata: dualTrace ? { dualTrace } : null,
             })
             .returning();
+          streamResult.assistantMessageId = partial.id;
           await db
             .update(threads)
             .set({ currentLeafId: partial.id, updatedAt: new Date() })
@@ -522,6 +525,7 @@ export async function POST(req: Request) {
         llm,
         finalModel,
         user.id,
+        [prepared.userMessage.id, streamResult.assistantMessageId].filter(Boolean) as string[],
       );
     } catch (err) {
       logger.error("memory", "generation failed", { error: err instanceof Error ? err.message : String(err) });
