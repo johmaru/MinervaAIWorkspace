@@ -26,6 +26,7 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **Folder organization** for threads
 - **Dark / light / system theme**
 - **EN / JA i18n toggle** (English is the default)
+- **Translation page** — standalone `/translate` page (sidebar 🌐 button) with source/target language selection, history, and optional context field. Context-aware mode: paste conversation snippets to get tone/terminology-appropriate translations; collapses to standard translation when context is empty.
 - **OpenAI-compatible LLM backend** — UmansAI, OpenAI, vLLM, Ollama, etc.
 - **Auto title generation** from the first user message
 - **Date/time + execution environment** — current date/time (timezone-aware) and detected OS/arch are prepended to every prompt so the model gives environment-appropriate answers
@@ -36,6 +37,7 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
 - **Connections (Notion)** — connect your Notion account via OAuth; the LLM calls `notion_search`, `notion_get_page`, and `notion_get_blocks` tools during chat to find and read Notion content; enabled per-thread via the ＋ menu
 - **Account authentication** — Auth.js v5 with Credentials (email/password) and optional Google OAuth; first Docker launch requires account creation, then login; each user's data is isolated
+- **Auth hardening** — IP CIDR whitelist for registration (`ALLOWED_REGISTRATION_IPS`), registration lock (`REGISTRATION_LOCKED`), and dual local/public access without redirect-flipping (AUTH_URL is neutralized; redirects follow the incoming request host). Session auto-detects invalid cookies after DB migration and clears them.
 - **Personalization** — per-user style presets (standard/polite/casual/concise/detailed/academic/creative/technical) + warmth/energy/structure/emoji trait sliders (0-2). Adjusts LLM tone system-wide. Disabled by default; configure in Settings → Personalization.
 - **Skills system** — reusable procedural skills with semantic RAG matching. 6 kinds (workflow/bugfix/project_rule/tool_usage/coding_pattern/debugging). Auto-extracted draft candidates from conversations (up to 3/turn with confidence + reason); approve, edit-and-approve, or reject in the Skill Manager (sidebar 🛠️ button). Manual CRUD also supported. Skills track usage (success/failure counts, last-used).
 - **Time-range filter** — composer dropdown (None/day/week/month/year) that narrows memory, web-knowledge, skill RAG retrieval, and web search results to the selected period.
@@ -43,6 +45,7 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **Reasoning display** — when a model emits thinking tokens, they appear in a collapsible "Thinking" block above the answer; inline `<thinking>` tags are also extracted and rendered.
 - **Rich Markdown** — KaTeX math rendering (`$...$` inline, `$$...$$` block), syntax-highlighted code blocks with copy-to-clipboard, GFM tables/strikethrough/task lists.
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
+- **Exe rebuild data preservation** — re-running `bun run pack:exe` into an existing `dist/UmansChat/` stashes and restores `.env` and `data/` so settings, API keys, and the database survive a rebuild.
 
 ## Architecture
 
@@ -286,9 +289,11 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LOG_FILE_MAX_SIZE`     | Max log file size in bytes before rotation (keeps one `.log.1` backup) | `5242880` (5MB)                                 |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
+| `REGISTRATION_LOCKED`     | Lock all new account creation (`true`/`false`)                     | `false`                                              |
+| `ALLOWED_REGISTRATION_IPS`| Comma-separated IPs/CIDRs allowed to register (empty = allow any; fail-closed when IP unknown) | — |
 | `NOTION_CLIENT_ID`       | Notion OAuth client ID (for Connections feature; see [Notion Connection Setup](#notion-connection-setup)) | — |
 | `NOTION_CLIENT_SECRET`   | Notion OAuth client secret                                          | —                                                    |
-| `AUTH_URL`               | Public URL of the app (must match the Notion OAuth redirect URI)   | `http://localhost:3001`                              |
+| `AUTH_URL`               | Public base URL for Settings UI, tunnel status, and OAuth console alignment. Redirects follow the incoming request Host, so local and public access work without flipping this value. | `http://localhost:3001` |
 
 ## Notion Connection Setup
 
@@ -342,6 +347,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Skill Manager** — click 🛠️ in the sidebar. **Active Skills** tab: edit name/content/kind/trigger/tags, archive. **Draft Candidates** tab: review LLM-proposed skills (with confidence score + reason), approve as-is, edit-then-approve, or reject. **Archived** tab: restore archived skills. Skills are matched by cosine similarity to the conversation and injected as context.
 - **Time-range filter** — use the dropdown in the composer (next to ⚡) to limit memory/knowledge/skill retrieval and web search to a recent time window. "None" searches all history.
 - **Folder settings** — right-click a folder → Settings (or create a new folder). Set a folder-level instruction (system prompt for all threads in the folder) and memory scope (global = all threads, folder = only threads in this folder).
+- **Translation** — click the 🌐 Languages icon in the sidebar to open `/translate`. Select source (auto-detect supported) and target languages, enter text, and translate. Optionally expand the "Context" accordion and paste conversation snippets for context-aware translation (tone, terminology, references). Translation history is shown below.
 
 ## Database Migrations
 

@@ -192,7 +192,7 @@ async def search(req: SearchRequest):
                 try:
                     results = await _fetch_page(client, retry_params)
                 except Exception:
-            pass  # On retry failure, leave results empty
+                    pass  # On retry failure, leave results empty
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results={len(results)}", flush=True)
     except Exception as e:
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results=0 (error)", flush=True)

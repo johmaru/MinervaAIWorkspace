@@ -162,6 +162,8 @@ const ja = {
     historyEmpty: "履歴はありません",
     error: "翻訳に失敗しました",
     autoDetect: "自動検出",
+    contextLabel: "文脈",
+    contextPlaceholder: "最近の会話文などを貼り付けると、文脈に合った翻訳になります",
   },
   settings: {
     title: "アプリ設定",
@@ -698,6 +700,8 @@ const en: typeof ja = {
     historyEmpty: "No history",
     error: "Translation failed",
     autoDetect: "Auto detect",
+    contextLabel: "Context",
+    contextPlaceholder: "Paste recent conversation to get context-aware translation",
   },
   settings: {
     title: "Settings",

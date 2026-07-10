@@ -3,8 +3,8 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { Languages, ArrowLeft, Copy, Check, Loader2 } from "lucide-react";
-import { MotionButton, fadeSlideUp } from "@/components/ui/motion";
+import { Languages, ArrowLeft, Copy, Check, Loader2, MessageSquare } from "lucide-react";
+import { MotionButton, fadeSlideUp, Accordion } from "@/components/ui/motion";
 import { clientFetch } from "@/lib/clientFetch";
 import { useI18n } from "@/components/I18nProvider";
 
@@ -46,6 +46,7 @@ type TranslationEntry = {
 export function TranslateClient() {
   const { t, locale } = useI18n();
   const [sourceText, setSourceText] = useState("");
+  const [contextText, setContextText] = useState("");
   const [sourceLang, setSourceLang] = useState("auto");
   const [targetLang, setTargetLang] = useState(locale === "en" ? "en" : "ja");
   const [translation, setTranslation] = useState("");
@@ -70,6 +71,7 @@ export function TranslateClient() {
           text: sourceText,
           targetLang: targetLangObj?.enName ?? targetLang,
           sourceLang: sourceLang === "auto" ? undefined : sourceLangObj?.enName,
+          context: contextText.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -92,7 +94,7 @@ export function TranslateClient() {
       console.error("[translate] failed:", err);
       setStatus("error");
     }
-  }, [sourceText, status, targetLang, sourceLang, targetLangObj, sourceLangObj]);
+  }, [sourceText, status, targetLang, sourceLang, targetLangObj, sourceLangObj, contextText]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -164,6 +166,24 @@ export function TranslateClient() {
               ))}
             </select>
           </div>
+          <Accordion
+            defaultOpen={false}
+            className="rounded-2xl bg-muted/40 px-3 py-2 ring-1 ring-border"
+            summaryClassName="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            summary={
+              <span className="flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5" />
+                {t("translate.contextLabel")}
+              </span>
+            }
+          >
+            <textarea
+              value={contextText}
+              onChange={(e) => setContextText(e.target.value)}
+              placeholder={t("translate.contextPlaceholder")}
+              className="mt-2 min-h-[100px] w-full resize-none rounded-xl bg-background p-3 text-sm text-foreground ring-1 ring-border placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </Accordion>
           <textarea
             value={sourceText}
             onChange={(e) => setSourceText(e.target.value)}

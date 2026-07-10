@@ -9,6 +9,7 @@ type Body = {
   text: string;
   targetLang: string; // English display name, e.g. "Japanese", "English"
   sourceLang?: string; // English display name; omitted = auto-detect
+  context?: string; // Optional situational context for tone/terminology
 };
 
 /**
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
   }
 
   const { text, targetLang, sourceLang } = body;
+  const context = body.context?.trim() ?? "";
 
   if (!text || !text.trim()) {
     return Response.json({ error: "text is required" }, { status: 400 });
@@ -43,7 +45,13 @@ export async function POST(req: Request) {
   const sourceClause = sourceLang
     ? `from ${sourceLang} `
     : "";
-  const systemPrompt = `You are a professional translator. Translate the following text ${sourceClause}into ${targetLang}. If the source language is the same as the target, still provide the text as-is. Return only the translated text, no explanations.`;
+  const contextClause = context
+    ? " Use the provided context to ensure the translation fits the situation (tone, terminology, references)."
+    : "";
+  const systemPrompt = `You are a professional translator. Translate the following text ${sourceClause}into ${targetLang}. If the source language is the same as the target, still provide the text as-is. Return only the translated text, no explanations.${contextClause}`;
+  const userContent = context
+    ? `--- Context ---\n${context}\n\n--- Text to translate ---\n${text}`
+    : text;
 
   try {
     const disableParams = await buildDisableReasoningParams(model);
@@ -52,7 +60,7 @@ export async function POST(req: Request) {
       model,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: text },
+        { role: "user", content: userContent },
       ],
       stream: false,
       temperature: 0.3,
