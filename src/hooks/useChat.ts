@@ -138,8 +138,8 @@ export function useChat(threadId: string | null) {
         parentId: msg.parentId,
         attachments: attachmentsByMsgIdRef.current.get(msg.id),
         statusLabel: msg.statusLabel,
-        model: msg.metadata?.model,
-        elapsedMs: msg.metadata?.elapsedMs,
+        model: msg.model ?? msg.metadata?.model,
+        elapsedMs: msg.elapsedMs ?? msg.metadata?.elapsedMs,
         metadata: msg.metadata,
       });
       currentId = msg.parentId;
