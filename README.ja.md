@@ -4,6 +4,12 @@
 
 [English](./README.md)
 
+## プロジェクトの状態
+
+**UmansChat はプレリリース版です。** バージョン間で破壊的変更が発生する可能性があります — データベーススキーマ、設定変数、API が予告なく変更されることがあります。更新前に `data/` ディレクトリと `.env` をバックアップしてください。
+
+**Docker が推奨デプロイ方法です。** Docker Compose 構成が全サービス（アプリ、embedder、scraper、SearXNG、Tor）を統合し、`docker compose pull && docker compose up -d` で簡単に更新できます。Docker を使わないスタンドアロン Windows exe も提供されています。
+
 ## コントリビューター向けドキュメント
 
 コントリビューター向けの包括的なドキュメントは [`docs/`](./docs/) フォルダにあります。アーキテクチャ、データベーススキーマ、チャットストリーミング、記憶/スキルシステム、ツール呼び出し、フロントエンドコンポーネント、デプロイメント、テストなどを網羅しています。全インデックスは [`docs/README.md`](./docs/README.md) を参照してください。
@@ -82,7 +88,7 @@ flowchart LR
 | `tor`      | `dperson/torproxy:latest`| 匿名スクレイピング用 Tor SOCKS プロキシ          | `9050`（公開） |
 
 - **Node.js / Bun** — Bun が主なランタイム兼パッケージマネージャ（ローカル開発・ビルド用）
-- **Docker**（Docker Compose 含む） — 任意。スクレイパー、embedder、検索、Tor などのオプションサービスを利用する場合に必要。スタンドアロン Windows exe とローカル開発の SQLite パスは追加インストール不要
+- **Docker**（Docker Compose 含む） — セルフホストデプロイに推奨。スタンドアロン Windows exe とローカル開発の SQLite パスも利用可能で、追加インストールは不要です。
 - **OpenAI 互換 LLM の API キー** — UmansAI、OpenAI、vLLM、Ollama など
 
 ## クイックスタート（Docker）

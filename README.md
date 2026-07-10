@@ -4,6 +4,12 @@ A self-hosted, open-source AI workspace for high-resource OpenAI-compatible prov
 
 [日本語 / Japanese](./README.ja.md)
 
+## Project Status
+
+**UmansChat is pre-release software.** Breaking changes may occur between versions — database schemas, configuration variables, and APIs can change without notice. Back up your `data/` directory and `.env` before updating.
+
+**Docker is the recommended deployment method.** The Docker Compose setup orchestrates all services (app, embedder, scraper, SearXNG, Tor) and updates are straightforward with `docker compose pull && docker compose up -d`. The standalone Windows exe is also available for no-Docker deployments.
+
 ## Contributor Documentation
 
 Comprehensive documentation for contributors is available in the [`docs/`](./docs/) folder. It covers architecture, database schema, chat streaming, memory/skills systems, tool calling, frontend components, deployment, testing, and more. See [`docs/README.md`](./docs/README.md) for the full index.
@@ -84,7 +90,7 @@ flowchart LR
 ## Requirements
 
 - **Node.js / Bun** — Bun is the primary runtime and package manager
-- **Docker** (with Docker Compose) — optional; only needed for the scraper, embedder, SearXNG search, and Tor services. The standalone exe and local-dev SQLite path need nothing extra.
+- **Docker** (with Docker Compose) — recommended for self-hosted deployment. The standalone Windows exe and local-dev SQLite path are also available for no-Docker setups.
 - An **OpenAI-compatible LLM API key** (UmansAI, OpenAI, vLLM, Ollama, etc.)
 
 ## Quick Start (Docker)
