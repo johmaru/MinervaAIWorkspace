@@ -5,6 +5,7 @@ import { embedText } from "@/lib/embed";
 import { cosineSimilarity } from "@/lib/vectorSearch";
 import { activeMemoryConditions } from "@/lib/memoryUtils";
 import type { MemoryKind } from "@/lib/memory";
+import { findProfileTraits } from "@/lib/traitStore";
 
 /**
  * Memory search — on next send, searches for relevant memories via client-side
@@ -321,10 +322,10 @@ export async function buildMemoryContext({
       // Feedback loop failure should not block memory injection
     }
   }
-
-  const [found, recentTitles] = await Promise.all([
+  const [found, recentTitles, profileTraits] = await Promise.all([
     findRelevantMemories(content, thread.folderId, userId),
     fetchRecentThreadTitles(userId, currentThreadId),
+    findProfileTraits(userId),
   ]);
 
   // Record injections for the feedback loop's next cycle
@@ -337,6 +338,10 @@ export async function buildMemoryContext({
   }
 
   const sections: string[] = [];
+  if (profileTraits.length > 0) {
+    const traitLines = profileTraits.map((t) => `- [${t.category}] ${t.content}`).join("\n");
+    sections.push(`User traits — stable attributes about the user. Apply these in every conversation:\n${traitLines}`);
+  }
   if (recentTitles.length > 0) {
     const titleList = recentTitles.map((t) => `- ${t}`).join("\n");
     sections.push(`Recent conversation topics (most recent first). Use these to infer which past conversations may be relevant to the user's current question:\n${titleList}`);

@@ -46,6 +46,8 @@ export const users = sqliteTable("users", {
   personalEnergy: integer("personal_energy").notNull().default(1),
   personalStructure: integer("personal_structure").notNull().default(1),
   personalEmoji: integer("personal_emoji").notNull().default(1),
+  // Primary language for translate characteristics (language code like "ja", "en"). null = use UI locale.
+  translatePrimaryLang: text("translate_primary_lang"),
   // Columns written by DrizzleAdapter on OAuth createUser (for Google login)
   name: text("name"),
   emailVerified: ts("email_verified"),
@@ -466,5 +468,48 @@ export const pageEmbeddings = sqliteTable(
   },
   (t) => ({
     pageIdx: index("page_embeddings_page_idx").on(t.pageId),
+  }),
+);
+
+/**
+ * user_traits — persistent user profile traits (always injected, not similarity-searched).
+ *
+ * Extracted from conversations alongside memories (shared LLM call, kind="profile").
+ * Stored with embeddings for dedup (cosine > 0.85) and contradiction candidate selection
+ * (cosine > 0.75 → checkContradiction). Unlike memories, these are:
+ * - User-scoped (direct userId FK, not thread-scoped)
+ * - Always injected (up to 30, ordered by confidence DESC, updatedAt DESC)
+ * - Survive thread deletion (sourceThreadId ON DELETE SET NULL)
+ *
+ * Active trait = suppressedAt IS NULL.
+ */
+export const userTraits = sqliteTable(
+  "user_traits",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    category: text("category", {
+      enum: ["demographic", "interest", "speech_pattern", "preference"],
+    }).notNull(),
+    content: text("content").notNull(),
+    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    contentHash: text("content_hash").notNull(),
+    model: text("model").notNull(),
+    confidence: real("confidence").notNull().default(0.5),
+    evidenceCount: integer("evidence_count").notNull().default(1),
+    suppressedAt: ts("suppressed_at"),
+    sourceThreadId: text("source_thread_id").references(() => threads.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageIds: text("source_message_ids", { mode: "json" }).$type<string[]>(),
+    createdAt: tsNow("created_at"),
+    updatedAt: tsNow("updated_at"),
+  },
+  (t) => ({
+    userIdx: index("user_traits_user_idx").on(t.userId),
+    categoryIdx: index("user_traits_category_idx").on(t.category),
+    suppressedIdx: index("user_traits_suppressed_idx").on(t.suppressedAt),
   }),
 );

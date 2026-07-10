@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
-import { and, asc, eq, inArray, desc, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, desc, sql, isNull, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { memories, threads, folders } from "@/db/schema";
+import { memories, threads, folders, userTraits } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
 import { activeMemoryConditions } from "@/lib/memoryUtils";
 import { cosineSimilarity } from "@/lib/vectorSearch";
@@ -18,7 +18,9 @@ import { logger } from "@/lib/logger";
  * On replace/merge/contradiction, old memories are invalidated via validUntil (kept as history, excluded from active search). suppressedAt is only used for user-initiated DELETE.
  */
 
-export type MemoryKind = "fact" | "working";
+export type MemoryKind = "fact" | "working" | "profile";
+
+export type TraitCategory = "demographic" | "interest" | "speech_pattern" | "preference";
 
 export type ExtractedMemory = {
   kind: MemoryKind;
@@ -29,13 +31,19 @@ export type ExtractedMemory = {
   targetContent?: string;
   /** On replace/merge: the existing memory's ID (for direct specification. targetId takes precedence) */
   targetId?: string;
+  /** For profile kind only: trait category */
+  category?: TraitCategory;
 };
 
 const SYSTEM_PROMPT = `You are a memory extractor. Analyze the conversation and extract durable memories.
 
 Classify each memory as:
-- "fact": user info, environment, preferences, identity, goals, topics discussed, subjects explored, decisions made
+- "fact": topics discussed, decisions made, environment info, subjects explored
 - "working": current task, temporary context, recent decisions, ongoing discussion topic
+- "profile": stable user attributes — age, gender, occupation, interests, languages,
+  speech patterns, communication preferences, recurring self-descriptions.
+  These are things that are true about the user across all conversations, not just this one.
+  For profile memories, also set "category": "demographic" | "interest" | "speech_pattern" | "preference".
 
 For each memory, decide an action:
 - "new": no similar existing memory exists
@@ -49,12 +57,8 @@ Write each memory's content as a concise, search-friendly sentence. Capture the 
 Skip pure greetings and acknowledgments (e.g. 'hello', 'thanks', 'got it'), BUT always save what was discussed or decided. If the conversation only contains greetings with no substance, return an empty array. Otherwise, extract at least one memory about what was discussed.
 
 Return ONLY valid JSON (no markdown fences):
-[{"kind": "fact"|"working", "content": "...", "importance": 0.0-1.0, "action": "new"|"replace"|"merge", "targetId": "... (existing memory ID, for replace/merge)", "targetContent": "... (fallback: exact content string, for replace/merge)"}]`;
+[{"kind": "fact"|"working"|"profile", "content": "...", "importance": 0.0-1.0, "action": "new"|"replace"|"merge", "category": "demographic|interest|speech_pattern|preference (only for profile kind)", "targetId": "... (existing memory ID, for replace/merge)", "targetContent": "... (fallback: exact content string, for replace/merge)"}]`;
 
-/**
- * Builds the messages to send to the LLM in generateMemories.
- * Presents recent turns + the list of existing active memories.
- */
 function buildExtractionMessages(
   recentTurns: { role: string; content: string }[],
   existingMemories: { id: string; content: string }[],
@@ -100,19 +104,30 @@ function parseExtraction(raw: string | null | undefined): ExtractedMemory[] | nu
         const kind = (m as ExtractedMemory).kind;
         const action = (m as ExtractedMemory).action;
         const content = (m as ExtractedMemory).content;
-        if (kind !== "fact" && kind !== "working") return false;
+        if (kind !== "fact" && kind !== "working" && kind !== "profile") return false;
         if (action !== "new" && action !== "replace" && action !== "merge") return false;
         if (typeof content !== "string" || !content.trim()) return false;
         return true;
       })
-      .map((m) => ({
-        kind: m.kind,
-        content: m.content.trim(),
-        importance: typeof m.importance === "number" ? m.importance : 0.5,
-        action: m.action,
-        targetContent: m.targetContent,
-        targetId: typeof m.targetId === "string" ? m.targetId : undefined,
-      }));
+      .map((m) => {
+        let category: TraitCategory | undefined;
+        if (m.kind === "profile" && "category" in m) {
+          const rawCat = (m as Record<string, unknown>).category;
+          if (typeof rawCat === "string") {
+            const valid: TraitCategory[] = ["demographic", "interest", "speech_pattern", "preference"];
+            category = valid.includes(rawCat as TraitCategory) ? (rawCat as TraitCategory) : "preference";
+          }
+        }
+        return {
+          kind: m.kind,
+          content: m.content.trim(),
+          importance: typeof m.importance === "number" ? m.importance : 0.5,
+          action: m.action,
+          targetContent: m.targetContent,
+          targetId: typeof m.targetId === "string" ? m.targetId : undefined,
+          category,
+        };
+      });
   } catch {
     return null;
   }
@@ -245,6 +260,130 @@ async function checkPromotion(
   } catch {
     // On LLM failure, don't promote — leave as working
     return false;
+  }
+}
+
+/**
+ * Processes extracted profile traits and stores them in the user_traits table.
+ *
+ * Unlike memories, traits are user-scoped (not thread-scoped) and always injected.
+ * Dedup: contentHash (exact) + cosine > 0.85 (semantic).
+ * Contradiction: cosine > 0.75 → checkContradiction (same pattern as memories).
+ */
+async function processProfileTraits(
+  userId: string,
+  traits: ExtractedMemory[],
+  threadId: string,
+  sourceMessageIds: string[] | undefined,
+  llm: OpenAI,
+  model: string,
+): Promise<void> {
+  const embedModel = process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2";
+  const now = new Date();
+
+  for (const trait of traits) {
+    if (!trait.category) continue;
+    try {
+      const vector = await embedText(trait.content, "document");
+      if (vector.length === 0) continue;
+
+      const contentHash = hashContent(trait.content);
+
+      // Fetch active traits in same category for this user
+      const existingTraits = await db
+        .select({
+          id: userTraits.id,
+          content: userTraits.content,
+          embedding: userTraits.embedding,
+          confidence: userTraits.confidence,
+          evidenceCount: userTraits.evidenceCount,
+          contentHash: userTraits.contentHash,
+        })
+        .from(userTraits)
+        .where(
+          and(
+            eq(userTraits.userId, userId),
+            eq(userTraits.category, trait.category),
+            isNull(userTraits.suppressedAt),
+          ),
+        );
+
+      // 1. Exact dedup via contentHash
+      const exactDup = existingTraits.find((t) => t.contentHash === contentHash);
+      if (exactDup) continue;
+
+      // 2. Semantic dedup via cosine > 0.85
+      let matched = false;
+      for (const existing of existingTraits) {
+        const sim = cosineSimilarity(vector, existing.embedding);
+        if (sim > 0.85) {
+          // Same trait — increment confidence
+          const newConfidence = Math.min(1.0, existing.confidence + 0.15);
+          const newEvidenceCount = existing.evidenceCount + 1;
+          // Update content if new one is richer
+          const updateContent = trait.content.length > existing.content.length;
+          const newContent = updateContent ? trait.content : existing.content;
+          const newEmbedding = updateContent ? vector : existing.embedding;
+          const newHash = updateContent ? contentHash : existing.contentHash;
+          await db
+            .update(userTraits)
+            .set({
+              confidence: newConfidence,
+              evidenceCount: newEvidenceCount,
+              content: newContent,
+              embedding: newEmbedding,
+              contentHash: newHash,
+              updatedAt: now,
+            })
+            .where(eq(userTraits.id, existing.id));
+          matched = true;
+          break;
+        }
+      }
+      if (matched) continue;
+
+      // 3. Contradiction detection: cosine > 0.75 but ≤ 0.85
+      for (const existing of existingTraits) {
+        const sim = cosineSimilarity(vector, existing.embedding);
+        if (sim <= 0.75 || sim > 0.85) continue;
+        const isContradiction = await checkContradiction(
+          existing.content,
+          trait.content,
+          llm,
+          model,
+        );
+        if (isContradiction) {
+          await db
+            .update(userTraits)
+            .set({ suppressedAt: now, updatedAt: now })
+            .where(eq(userTraits.id, existing.id));
+          logger.info("memory", "trait contradiction detected, suppressing old trait", {
+            oldTraitId: existing.id,
+            oldContent: existing.content,
+            newContent: trait.content,
+            similarity: Number(sim.toFixed(3)),
+          });
+          // Insert the new trait (don't continue — fall through to insert)
+          break;
+        }
+      }
+
+      // 4. Insert new trait
+      await db.insert(userTraits).values({
+        userId,
+        category: trait.category,
+        content: trait.content,
+        embedding: vector,
+        contentHash,
+        model: embedModel,
+        confidence: trait.importance ?? 0.5,
+        evidenceCount: 1,
+        sourceThreadId: threadId,
+        sourceMessageIds: sourceMessageIds ?? null,
+      });
+    } catch (err) {
+      logger.error("memory", "failed to save profile trait", { content: trait.content, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 }
 
@@ -384,10 +523,28 @@ export async function generateMemories(
 
   if (!extracted || extracted.length === 0) return;
 
+  // Route profile traits to user_traits table (separate from memories)
+  const profileTraits = extracted.filter((m) => m.kind === "profile");
+  if (profileTraits.length > 0 && effectiveUserId) {
+    try {
+      await processProfileTraits(
+        effectiveUserId,
+        profileTraits,
+        threadId,
+        sourceMessageIds,
+        llm,
+        model,
+      );
+    } catch (err) {
+      logger.error("memory", "profile trait processing failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   const embedModel = process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2";
   const now = new Date();
 
-  for (const mem of extracted) {
+  const memoryItems = extracted.filter((m): m is ExtractedMemory & { kind: "fact" | "working" } => m.kind !== "profile");
+  for (const mem of memoryItems) {
     try {
       if (mem.action === "replace" && (mem.targetId || mem.targetContent)) {
         const target = await findExistingMemory(threadId, mem.targetContent, mem.targetId);

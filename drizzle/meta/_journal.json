@@ -57,6 +57,13 @@
       "when": 1783659298766,
       "tag": "0007_wise_abomination",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783695618547,
+      "tag": "0009_user_traits",
+      "breakpoints": true
     }
   ]
 }
