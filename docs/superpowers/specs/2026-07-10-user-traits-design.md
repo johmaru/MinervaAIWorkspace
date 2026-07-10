@@ -48,6 +48,9 @@ CREATE TABLE user_traits (
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   category        TEXT NOT NULL,  -- "demographic" | "interest" | "speech_pattern" | "preference"
   content         TEXT NOT NULL,
+  embedding       TEXT NOT NULL,   -- JSON array (same format as memories.embedding)
+  content_hash    TEXT NOT NULL,   -- SHA-256, same dedup pattern as memories
+  model           TEXT NOT NULL,  -- embed model name (same as memories.model)
   confidence      REAL NOT NULL DEFAULT 0.5,
   evidence_count  INTEGER NOT NULL DEFAULT 1,
   suppressed_at   TIMESTAMP,      -- soft-delete (user or contradiction)
@@ -66,7 +69,7 @@ CREATE TABLE user_traits (
 - **`confidence` (0.0–1.0)** — starts at 0.5 for a single observation, increases with repeated evidence. Affects injection ordering.
 - **`evidenceCount`** — how many times this trait was observed. Drives confidence updates.
 - **`suppressedAt`** — soft-delete for user-initiated deletion or contradiction invalidation. Same pattern as `memories.suppressedAt`.
-- **No embedding** — profile traits are always injected (up to a cap), not similarity-searched. Embeddings would add cost without value.
+- **`embedding` + `contentHash`** — reuses the proven pattern from `memories`. Embeddings are **not** used for retrieval (traits are always injected, not similarity-searched). They are used for: (1) **Dedup** — `contentHash` catches exact duplicates; `cosineSimilarity > 0.85` catches semantic duplicates ("ラテン語が好き" vs "ラテン語を好む") that `contentHash` misses. (2) **Contradiction candidate selection** — `cosineSimilarity > 0.75` against same-category active traits selects candidates for `checkContradiction()`, identical to the `memories` pattern (memory.ts:449-461). Without embeddings, every new trait would require LLM contradiction checks against all active traits — up to 30 LLM calls per trait per turn.
 
 ### Extraction — shared LLM call, no extra cost
 
@@ -93,7 +96,7 @@ Classify each memory as:
 
 For each extracted profile trait:
 
-1. **Dedup by category + semantic similarity.** Query active `user_traits` for the same `userId` and `category`. For each existing trait, compute string similarity (simple: normalized edit distance or substring match — no embedding needed for tens of items). If a close match exists (similarity > 0.7), treat as the same trait.
+1. **Dedup by contentHash + cosine similarity.** Compute `contentHash` (SHA-256) of the new trait content. Query active `user_traits` for the same `userId` and `category`. First check exact duplicate via `contentHash` match (skip if found). Then compute `cosineSimilarity` against each existing trait's embedding in the same category. If similarity > 0.85, treat as the same trait (semantic duplicate — e.g. "ラテン語が好き" vs "ラテン語を好む").
 
 2. **Increment confidence.** If a match is found:
    - `evidenceCount += 1`
@@ -101,7 +104,7 @@ For each extracted profile trait:
    - `updatedAt = now`
    - If the new content is richer (longer, more specific), update `content`.
 
-3. **Contradiction detection.** If a new trait in the same `category` has low string similarity (< 0.3) but shares key entities (e.g. "20歳" vs "25歳" — both contain a number), call `checkContradiction()` (existing function in `memory.ts:189-216`). If contradiction:
+3. **Contradiction detection.** If a new trait in the same `category` has cosine similarity > 0.75 but ≤ 0.85 against an existing trait (semantically close but not a duplicate — e.g. "20歳" vs "25歳"), call `checkContradiction()` (existing function in `memory.ts:189-216`). This mirrors the `memories` pattern (memory.ts:449-461): embeddings select candidates, LLM confirms contradiction. If contradiction:
    - Soft-delete the old trait (`suppressedAt = now`)
    - Insert the new trait
 
@@ -190,6 +193,9 @@ CREATE TABLE `user_traits` (
   `user_id` text NOT NULL REFERENCES `users`(`id`) ON DELETE CASCADE,
   `category` text NOT NULL,
   `content` text NOT NULL,
+  `embedding` text NOT NULL,
+  `content_hash` text NOT NULL,
+  `model` text NOT NULL,
   `confidence` real NOT NULL DEFAULT 0.5,
   `evidence_count` integer NOT NULL DEFAULT 1,
   `suppressed_at` integer,
@@ -216,10 +222,9 @@ CREATE INDEX `user_traits_suppressed_idx` ON `user_traits` (`suppressed_at`);
 | `src/app/api/user-traits/[id]/route.ts` | New: PATCH + DELETE |
 | `src/components/MemoryViewerModal.tsx` | Add profile filter, category selector, profile badge color |
 | `src/lib/i18n/dictionaries.ts` | Add `profile` labels (ja + en) |
-
 ## Non-goals
 
-- **No embedding for traits.** Always-injected, no similarity search.
+- **No similarity search for retrieval.** Traits are always injected (up to 30), not filtered by query similarity. Embeddings are used only for dedup and contradiction candidate selection.
 - **No LLM reranking of traits.** Confidence + recency sort is sufficient.
 - **No migration of existing `fact` memories to `user_traits`.** Existing memories stay where they are; only new extractions get routed.
 - **No per-category confidence thresholds.** All active traits within the 30-row limit are injected.
