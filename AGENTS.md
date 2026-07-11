@@ -1,3 +1,13 @@
+<!-- BEGIN:work-completion-skill -->
+# Work Completion Checklist — MANDATORY
+
+**Before yielding any task, read `skill://work-completion-checklist`.**
+It covers: post-implementation review, test verification, git commit/push,
+README sync, the no-uncommitted-files rule (every file must be committed
+or added to `.gitignore`), and the end-of-task checklist. This is the
+highest-priority end-of-work gate — skipping it is not optional.
+<!-- END:work-completion-skill -->
+
 <!-- BEGIN:ai-tool-adapters -->
 # AI Tool Adapters
 
@@ -113,25 +123,7 @@ Prefer focused changes over sweeping rewrites.
 Preserve existing product behaviour unless the task explicitly asks to change it.
 Reuse existing components, utilities, naming, spacing, and data flow where possible.
 Do not introduce one-off patterns unless there is a clear reason.
-Review after editing
-After implementation, review the diff from these perspectives:
-Architecture: Did this make the overall design simpler or more tangled?
-Next.js correctness: Are App Router, Server/Client Component boundaries, route handlers, redirects, params/searchParams, caching, and async APIs used correctly for this installed Next.js version?
-UI/UX consistency: Does the result match the existing product style, spacing, states, and interaction patterns?
-Future extensibility: Will likely next features be easier or harder after this change?
-AGENTS.md rules: Did this task reveal a repeated pitfall or project rule that should be added here?
-Report clearly
-When finishing, include:
-What changed.
-How it was verified.
-- Test results: what `bun run test` reported (pass/fail count), and which new test files were added.
-Any risks or follow-up tasks.
-Whether AGENTS.md or README files were updated, and why.
-
-If issues are found during review, separate them into:
-
-Fix now: correctness, build, runtime, data loss, accessibility, or obvious UX breakage.
-Follow up later: polish, optional refactors, or larger design improvements.
+Review after editing and Report clearly — see `skill://work-completion-checklist` sections 1 (Review after editing) and 2 (Report clearly).
 
 ## Chat Interaction Details
 
@@ -146,12 +138,7 @@ Follow up later: polish, optional refactors, or larger design improvements.
 
 ## Git Workflow
 
-- Commit and `git push` to `develop` after completing each implementation.
-  One implementation = one commit is the rule.
-- If asked to amend a past commit, rewrite the previous commit with
-  `git commit --amend` and re-push with `git push --force-with-lease`.
-  (If collaborators exist, confirm consent for history rewriting first.)
-- Commit messages must be in English, briefly describing the changes and verification results.
+See `skill://work-completion-checklist` section 5 (Git Workflow).
 
 ## Testing
 
@@ -174,10 +161,7 @@ Follow up later: polish, optional refactors, or larger design improvements.
 - **DB tests:** use the real SQLite via `@/db`; create rows and tear them down in
   `afterAll`. Do not mock the database.
 
-- **Before claiming work is done:** run `bun run test` and confirm zero failures.
-  If a test needs an external API (LLM, embedder) that is unavailable, gate it
-  behind a helper like the existing `itReal()` pattern or skip with a clear reason.
-  Never delete or weaken an assertion to make a test pass.
+- **Before claiming work is done:** see `skill://work-completion-checklist` section 3 (Testing — Before claiming work is done).
 
 
 ## GitHub Repository
@@ -193,9 +177,7 @@ After editing, check for duplication, contradiction, or overly specific rules th
 If the instruction is ambiguous, ask whether it should be stored as a project rule before editing AGENTS.md.
 
 ## Skill Creation After Implementation
-When you get stuck or make a mistake during development, after all implementation is complete, create a dedicated skill or edit an existing skill to record it.
-Skills are placed in the local `.agents/skills` directory (`C:\Users\Johma_sub\UmansChat-Unofficial\.agents\skills`).
-This reduces diagnosis time when encountering the same problem again.
+See `skill://work-completion-checklist` section 7 (Skill Creation After Implementation).
 
 ### Developer Skills vs Runtime Skills
 - **Developer Skills** (`.agents/skills/`): Markdown files read by Codex/OMP/dev agents during development. Contain debugging pitfalls, project conventions, and workflow recipes. Updated manually by the developer after hitting a problem.
@@ -290,10 +272,8 @@ Token changes and AUTH_URL switching take effect immediately without restarting 
 - The SHA256 hash of the cloudflared binary is hardcoded with locally verified values (`CLOUDFLARED_HASHES`). Must be updated on version upgrades
 
 ## Documentation Sync
-Update README.md (EN) and README.ja.md (JA) when a change affects documented user-facing behaviour, setup, configuration, environment variables, architecture, usage, deployment, or major features.
-Do not update README files for purely internal refactors, small visual polish, typo fixes, or implementation details that users do not need to know.
-Keep both README files aligned. The English and Japanese versions should not drift in meaning.
-When README updates are needed, include them in the same commit as the related implementation unless explicitly asked to split them.
+
+See `skill://work-completion-checklist` section 6 (Documentation Sync). For the detailed README update procedure (what to check, where to look, dual-file parity rule), see `skill://readme-update-guide`.
 
 # Homepage Design Direction
 
