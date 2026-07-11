@@ -38,6 +38,7 @@ type SettingsResponse = {
   scrapeProxy: string;
   // Database / runtime environment
   databaseUrl: string;
+  hasDatabaseUrl: boolean;
   hostOs: string;
   tz: string;
   // Notion OAuth
@@ -63,6 +64,10 @@ type SettingsResponse = {
   logLevel: string;
   logFileEnabled: string;
   logFilePath: string;
+  // Translate default mode
+  translateDefaultMulti: boolean;
+  // Primary language for translate characteristics (null = follow UI locale)
+  translatePrimaryLang: string | null;
 };
 
 type TorConnection = {
@@ -281,10 +286,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       const body: Record<string, unknown> = {
         ...form,
         // Secret fields are not sent when empty (existing values are preserved).
-        // GET returns llmApiKey/notionClientSecret as empty strings,
-        // so only send when the user enters a new value.
         llmApiKey: form.llmApiKey || undefined,
         notionClientSecret: form.notionClientSecret || undefined,
+        // databaseUrl may contain credentials; only send when user enters a new value
+        databaseUrl: form.databaseUrl || undefined,
       };
       // Embed fields are only sent when the user changed them (embedDirty).
       // Sending embedModel/embedDim/embedProvider when unchanged would be harmless
@@ -668,6 +673,50 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 {t("settings.thinkingEffortDesc")}
               </p>
             </div>
+            <div className="sm:col-span-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.translateDefaultMulti ?? false}
+                  onChange={(e) => {
+                    update("translateDefaultMulti", e.target.checked);
+                    void persistPartial({ translateDefaultMulti: e.target.checked });
+                  }}
+                />
+                <span className="text-xs font-medium text-foreground">{t("settings.translateDefaultMulti")}</span>
+                <span className="text-[10px] text-muted-foreground">{t("settings.translateDefaultMultiDesc")}</span>
+              </label>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.translatePrimaryLang")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.translatePrimaryLangDesc")}</span>
+              </label>
+              <select
+                value={form.translatePrimaryLang ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value || null;
+                  update("translatePrimaryLang", val);
+                  void persistPartial({ translatePrimaryLang: val });
+                }}
+                className="mt-1 w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="">{t("settings.translatePrimaryLangAuto")}</option>
+                <option value="ja">日本語</option>
+                <option value="en">English</option>
+                <option value="zh">中文（简体）</option>
+                <option value="ko">한국어</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+                <option value="de">Deutsch</option>
+                <option value="pt">Português</option>
+                <option value="ru">Русский</option>
+                <option value="ar">العربية</option>
+                <option value="it">Italiano</option>
+                <option value="vi">Tiếng Việt</option>
+                <option value="th">ไทย</option>
+              </select>
+            </div>
           </div>
 
           <div className="mt-3 space-y-3">
@@ -996,6 +1045,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 type="text"
                 value={form.databaseUrl ?? ""}
                 onChange={(e) => update("databaseUrl", e.target.value)}
+                placeholder={settings?.hasDatabaseUrl ? t("settings.placeholderUpdate") : ""}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>

@@ -101,6 +101,7 @@ export async function GET(req: Request) {
       personalEnergy: users.personalEnergy,
       personalStructure: users.personalStructure,
       personalEmoji: users.personalEmoji,
+      translatePrimaryLang: users.translatePrimaryLang,
     })
     .from(users)
     .where(eq(users.id, user.id));
@@ -132,8 +133,10 @@ export async function GET(req: Request) {
     // Tor proxy
     torProxy: process.env.TOR_PROXY || "",
     scrapeProxy: process.env.SCRAPE_PROXY || "",
-    // Database / runtime environment
-    databaseUrl: process.env.DATABASE_URL || "",
+    // Database / runtime environment — do not return connection string in
+    // plaintext (may contain credentials); return only whether it is set.
+    databaseUrl: "",
+    hasDatabaseUrl: !!process.env.DATABASE_URL,
     hostOs: process.env.HOST_OS || "",
     tz: process.env.TZ || "",
     // Notion OAuth
@@ -155,7 +158,9 @@ export async function GET(req: Request) {
     personalWarmth: userRow?.personalWarmth ?? 1,
     personalEnergy: userRow?.personalEnergy ?? 1,
     personalStructure: userRow?.personalStructure ?? 1,
+    translatePrimaryLang: userRow?.translatePrimaryLang ?? null,
     personalEmoji: userRow?.personalEmoji ?? 1,
+    translateDefaultMulti: process.env.TRANSLATE_DEFAULT_MULTI === "true",
     // Logging
     logLevel: process.env.LOG_LEVEL || "info",
     logFileEnabled: process.env.LOG_FILE_ENABLED || (existsSync("/var/run/docker.sock") ? "false" : "true"),
@@ -173,6 +178,7 @@ type SettingsBody = {
   personalStyle?: string | null;
   personalWarmth?: number;
   personalEnergy?: number;
+  translatePrimaryLang?: string | null;
   personalStructure?: number;
   personalEmoji?: number;
   llmModel?: string;
@@ -205,6 +211,8 @@ type SettingsBody = {
   // Security
   registrationLocked?: boolean;
   allowedRegistrationIps?: string;
+  // Translate default mode
+  translateDefaultMulti?: boolean;
   // Logging
   logLevel?: string;
   logFileEnabled?: string;
@@ -319,7 +327,8 @@ export async function POST(req: Request) {
     body.personalWarmth !== undefined ||
     body.personalEnergy !== undefined ||
     body.personalStructure !== undefined ||
-    body.personalEmoji !== undefined
+    body.personalEmoji !== undefined ||
+    body.translatePrimaryLang !== undefined
   ) {
     await db
       .update(users)
@@ -329,6 +338,7 @@ export async function POST(req: Request) {
         ...(clampedEnergy !== undefined ? { personalEnergy: clampedEnergy } : {}),
         ...(clampedStructure !== undefined ? { personalStructure: clampedStructure } : {}),
         ...(clampedEmoji !== undefined ? { personalEmoji: clampedEmoji } : {}),
+        ...(body.translatePrimaryLang !== undefined ? { translatePrimaryLang: body.translatePrimaryLang || null } : {}),
       })
       .where(eq(users.id, user.id));
   }
@@ -375,6 +385,7 @@ export async function POST(req: Request) {
     // Security
     if (body.registrationLocked !== undefined) updates.REGISTRATION_LOCKED = body.registrationLocked ? "true" : "false";
     if (body.allowedRegistrationIps !== undefined) updates.ALLOWED_REGISTRATION_IPS = body.allowedRegistrationIps;
+    if (body.translateDefaultMulti !== undefined) updates.TRANSLATE_DEFAULT_MULTI = body.translateDefaultMulti ? "true" : "false";
     // Logging
     if (body.logLevel !== undefined) updates.LOG_LEVEL = body.logLevel;
     if (body.logFileEnabled !== undefined) updates.LOG_FILE_ENABLED = body.logFileEnabled;

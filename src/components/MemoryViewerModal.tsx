@@ -131,7 +131,11 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     }
   }, [t]);
 
-  // Fetch memory list + latest threads when modal opens
+  // Fetch memory list + latest threads when modal opens, and re-fetch when
+  // switching between memories (/api/memories) and user-traits (/api/user-traits)
+  // endpoints. For all/fact/working filter changes, client-side filtering
+  // (the `filtered` variable below) handles it without an unnecessary API call
+  // that would flash the loading state and clear already-loaded data.
   useEffect(() => {
     if (!open) return;
     setPendingDeleteId(null);
@@ -147,14 +151,10 @@ export function MemoryViewerModal({ open, onClose }: Props) {
         setAddThreadId(null);
         setAddThreadTitle("");
       });
+    // Re-fetch only when the endpoint type changes (profile ↔ non-profile),
+    // not on every filter value change. `filter` is read at call time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  // Refetch when filter changes
-  useEffect(() => {
-    if (!open) return;
-    void fetchMemories(filter);
-  }, [filter, open, fetchMemories]);
+  }, [open, isProfileMode]);
 
   const filtered = memories.filter(
     (m) =>

@@ -31,6 +31,14 @@ describe("llm client", () => {
     expect(client.apiKey).toBe("sk-test");
   });
 
+  it("createLLM sets timeout and maxRetries", () => {
+    process.env.LLM_BASE_URL = "https://example.test/v1";
+    process.env.LLM_API_KEY = "sk-test";
+    const client = createLLM();
+    expect(client.timeout).toBe(120_000);
+    expect(client.maxRetries).toBe(1);
+  });
+
   it("falls back to 'missing' when apiKey is unset", () => {
     process.env.LLM_BASE_URL = "https://example.test/v1";
     delete process.env.LLM_API_KEY;
