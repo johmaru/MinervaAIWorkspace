@@ -49,11 +49,14 @@ type TestThread = {
   title: string;
   systemPrompt: string | null;
   model: string;
-  responseMode: "single" | "dual";
+  responseMode: "single" | "dual" | "hyper" | "council";
   dualModelA: string | null;
   dualModelB: string | null;
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
+  hyperRounds: number;
+  councilSize: number;
+  councilTimeLimit: number;
   mcpServerIds: string[];
   connectionIds: string[];
   globalInstructionId: string | null;
@@ -69,6 +72,9 @@ const baseThread: TestThread = {
   dualModelB: null,
   dualStrategy: "cross_review" as const,
   dualDebateRounds: 2,
+  hyperRounds: 3,
+  councilSize: 3,
+  councilTimeLimit: 60,
   mcpServerIds: [],
   connectionIds: [],
   globalInstructionId: null,

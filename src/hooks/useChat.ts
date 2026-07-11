@@ -17,6 +17,23 @@ export type DualTrace = {
   reviewB?: string;
   debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
 };
+export type HyperTrace = {
+  rounds: {
+    perspective: string;
+    draft: string;
+    critique: string;
+    revised: string;
+  }[];
+  finalModel: string;
+};
+export type CouncilTrace = {
+  panels: { id: string; persona: string; model: string }[];
+  initialAnswers: { panelId: string; content: string }[];
+  discussionTurns: { panelId: string; round: number; content: string }[];
+  finalModel: string;
+  roundsCompleted: number;
+  timeLimitReached: boolean;
+};
 export type MessageAttachment = {
   id: string;
   messageId: string | null;
@@ -36,6 +53,8 @@ export type ChatMessage = {
   elapsedMs?: number;
   metadata?: {
     dualTrace?: DualTrace;
+    hyperTrace?: HyperTrace;
+    councilTrace?: CouncilTrace;
     model?: string;
     elapsedMs?: number;
   } | null;
@@ -47,15 +66,19 @@ type Thread = {
   systemPrompt: string | null;
   model: string;
   currentLeafId: string | null;
-  responseMode: "single" | "dual";
+  responseMode: "single" | "dual" | "hyper" | "council";
   dualModelA: string | null;
   dualModelB: string | null;
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
+  hyperRounds: number;
+  councilSize: number;
+  councilTimeLimit: number;
   mcpServerIds: string[];
   connectionIds: string[];
   globalInstructionId: string | null;
 };
+
 
 type RawMessage = {
   id: string;
@@ -68,6 +91,8 @@ type RawMessage = {
   elapsedMs?: number;
   metadata?: {
     dualTrace?: DualTrace;
+    hyperTrace?: HyperTrace;
+    councilTrace?: CouncilTrace;
     model?: string;
     elapsedMs?: number;
   } | null;
@@ -91,6 +116,13 @@ type SseData = {
   phase?: string;
   label?: string;
   dualTrace?: DualTrace;
+  hyperTrace?: HyperTrace;
+  councilTrace?: CouncilTrace;
+  councilPanels?: { id: string; persona: string; model: string }[];
+  councilFinalModel?: string;
+  councilPanelId?: string;
+  councilContent?: string;
+  councilRound?: number;
   model?: string;
   elapsedMs?: number;
 };
@@ -330,6 +362,79 @@ export function useChat(threadId: string | null) {
               });
               setMessages(buildChain(assistantId));
             }
+          } else if (event.event === "hyper_trace" && event.data?.hyperTrace) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: { ...(existing.metadata ?? {}), hyperTrace: event.data.hyperTrace },
+              });
+              setMessages(buildChain(assistantId));
+            }
+          } else if (event.event === "council_trace" && event.data?.councilTrace) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: { ...(existing.metadata ?? {}), councilTrace: event.data.councilTrace },
+              });
+              setMessages(buildChain(assistantId));
+            }
+          } else if (event.event === "council_panels" && event.data?.councilPanels) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: {
+                  ...(existing.metadata ?? {}),
+                  councilTrace: {
+                    panels: event.data.councilPanels,
+                    initialAnswers: [],
+                    discussionTurns: [],
+                    finalModel: event.data.councilFinalModel ?? "",
+                    roundsCompleted: 0,
+                    timeLimitReached: false,
+                  },
+                },
+              });
+              setMessages(buildChain(assistantId));
+            }
+          } else if (event.event === "council_initial" && event.data?.councilPanelId) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing?.metadata?.councilTrace) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: {
+                  ...existing.metadata,
+                  councilTrace: {
+                    ...existing.metadata.councilTrace,
+                    initialAnswers: [
+                      ...existing.metadata.councilTrace.initialAnswers,
+                      { panelId: event.data.councilPanelId, content: event.data.councilContent ?? "" },
+                    ],
+                  },
+                },
+              });
+              setMessages(buildChain(assistantId));
+            }
+          } else if (event.event === "council_turn" && event.data?.councilPanelId) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing?.metadata?.councilTrace) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: {
+                  ...existing.metadata,
+                  councilTrace: {
+                    ...existing.metadata.councilTrace,
+                    discussionTurns: [
+                      ...existing.metadata.councilTrace.discussionTurns,
+                      { panelId: event.data.councilPanelId, round: event.data.councilRound ?? 1, content: event.data.councilContent ?? "" },
+                    ],
+                  },
+                },
+              });
+              setMessages(buildChain(assistantId));
+            }
           } else if (event.event === "delta" && event.data?.delta) {
             const existing = byIdRef.current.get(assistantId);
             if (existing) {
@@ -522,10 +627,13 @@ export function useChat(threadId: string | null) {
     async (patch: {
       systemPrompt?: string | null;
       model?: string;
-      responseMode?: "single" | "dual";
+      responseMode?: "single" | "dual" | "hyper" | "council";
       dualModelA?: string | null;
       dualModelB?: string | null;
       dualDebateRounds?: number;
+      hyperRounds?: number;
+      councilSize?: number;
+      councilTimeLimit?: number;
       mcpServerIds?: string[];
       connectionIds?: string[];
       globalInstructionId?: string | null;
@@ -550,12 +658,14 @@ export function useChat(threadId: string | null) {
   const uploadAttachment = useCallback(
     async (file: File) => {
       try {
+        if (!threadId) throw new Error(t("chat.uploadError"));
         const dataUrl = await fileToDataUrl(file);
         const res = await clientFetch("/api/upload", {
           method: "POST",
           body: (() => {
             const formData = new FormData();
             formData.append("file", file);
+            formData.append("threadId", threadId);
             return formData;
           })(),
         });
@@ -573,7 +683,7 @@ export function useChat(threadId: string | null) {
         setError(err instanceof Error ? err.message : t("chat.uploadError"));
       }
     },
-    [t],
+    [threadId, t],
   );
 
   const removeAttachment = useCallback((id: string) => {

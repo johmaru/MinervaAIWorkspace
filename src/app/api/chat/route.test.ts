@@ -270,7 +270,7 @@ describe("POST /api/chat — Web search sources event", () => {
       searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
-      queries: ["python programming language"],
+      queries: [{ query: "python programming language", time_range: null }],
     });
 
     vi.mocked(searchWeb).mockResolvedValueOnce({
@@ -352,7 +352,7 @@ describe("POST /api/chat — calls decideSearch with WEB_SEARCH_MODEL", () => {
       searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
-      queries: ["test query"],
+      queries: [{ query: "test query", time_range: null }],
     });
     vi.mocked(searchWeb).mockResolvedValueOnce({
       query: "test query",
@@ -426,7 +426,7 @@ describe("POST /api/chat — rapid mode", () => {
       searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
-      queries: ["python programming language"],
+      queries: [{ query: "python programming language", time_range: null }],
     });
     // Set up memory-present return to verify it's not called in rapid mode
     vi.mocked(buildMemoryContext).mockResolvedValueOnce({
@@ -485,7 +485,7 @@ describe("POST /api/chat — time_range passthrough", () => {
       searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
-      queries: ["latest news today"],
+      queries: [{ query: "latest news today", time_range: null }],
     });
     vi.mocked(searchWeb).mockResolvedValueOnce({
       query: "latest news today",
@@ -508,10 +508,12 @@ describe("POST /api/chat — time_range passthrough", () => {
     await sseChunks(res);
 
     // Verify searchWeb's 3rd argument (timeRange) matches body.timeRange
+    // and 4th argument (language) is derived from locale (default "ja" → "ja-JP")
     expect(vi.mocked(searchWeb)).toHaveBeenCalled();
     const callArgs = vi.mocked(searchWeb).mock.calls[0];
     expect(callArgs[0]).toBe("latest news today");
     expect(callArgs[2]).toBe("week");
+    expect(callArgs[3]).toBe("ja-JP");
   }, 120_000);
 });
 
@@ -523,7 +525,7 @@ describe("POST /api/chat — status notification when search returns 0 results",
       searchLevel: "web",
       reason: "latest info",
       userNotice: "最新情報を確認するね。",
-      queries: ["latest news today"],
+      queries: [{ query: "latest news today", time_range: null }],
     });
     vi.mocked(searchWeb).mockResolvedValueOnce({
       query: "latest news today",
@@ -561,7 +563,7 @@ describe("POST /api/chat — exclude pre-search message during tool use", () => 
     searchLevel: "web",
     reason: "latest info",
     userNotice: "最新情報を確認するね。",
-    queries: ["GPT-5.6 benchmark"],
+    queries: [{ query: "GPT-5.6 benchmark", time_range: null }],
   };
   const searchHit = {
     query: "GPT-5.6 benchmark",
@@ -687,7 +689,7 @@ describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
       searchLevel: "wiki",
       reason: "named entity lookup",
       userNotice: "Wikipediaで調べます。",
-      queries: ["マグナ・カルタ"],
+      queries: [{ query: "マグナ・カルタ", time_range: null }],
     });
     vi.mocked(searchWikipedia).mockResolvedValueOnce({
       title: "マグナ・カルタ",
@@ -723,7 +725,7 @@ describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
       searchLevel: "wiki",
       reason: "named entity lookup",
       userNotice: "Wikipediaで調べます。",
-      queries: ["存在しない架空の概念XYZ"],
+      queries: [{ query: "存在しない架空の概念XYZ", time_range: null }],
     });
     vi.mocked(searchWikipedia).mockResolvedValueOnce(null);
 
@@ -746,6 +748,8 @@ describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
 });
 
 describe("POST /api/chat — English locale status labels", () => {
+  beforeAll(() => useFakeLlm.set(true));
+  afterAll(() => useFakeLlm.set(false));
   // Regression: hardcoded Japanese status labels must be localized via t(locale, ...).
   // Exercises buildUrlContext with locale=en and asserts the newly-i18n'd
   // statusUrlFetch label is English ("Fetching URL content…").
@@ -769,5 +773,104 @@ describe("POST /api/chat — English locale status labels", () => {
       (e) => e.data.label === "Fetching URL content…",
     );
     expect(fetchStatus).toBeDefined();
-  }, 120_000);
+  }, 10_000);
+});
+
+describe("POST /api/chat — Hyper Thinking mode", () => {
+  beforeAll(() => useFakeLlm.set(true));
+  afterAll(() => useFakeLlm.set(false));
+  beforeEach(() => {
+    vi.mocked(fakeLlm.chat.completions.create).mockClear();
+  });
+
+  it("sends hyper_trace event with correct rounds structure", async () => {
+    // Create a thread with responseMode="hyper" and hyperRounds=3
+    const [row] = await db
+      .insert(threads)
+      .values({
+        title: "hyper mode test",
+        userId: "test-user-id",
+        responseMode: "hyper",
+        hyperRounds: 3,
+      })
+      .returning();
+    createdIds.push(row.id);
+    const id = row.id;
+
+    const res = await POST(chatReq(id, "量子コンピュータの基本原理を説明して"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // hyper_trace event is sent
+    const hyperTraceEvents = events.filter((e) => e.event === "hyper_trace");
+    expect(hyperTraceEvents).toHaveLength(1);
+    const trace = hyperTraceEvents[0].data.hyperTrace as {
+      rounds: { perspective: string; draft: string; critique: string; revised: string }[];
+      finalModel: string;
+    };
+    expect(trace.rounds).toHaveLength(3);
+    expect(typeof trace.finalModel).toBe("string");
+    // Each round has all four fields
+    for (const round of trace.rounds) {
+      expect(typeof round.perspective).toBe("string");
+      expect(round.perspective.length).toBeGreaterThan(0);
+      expect(typeof round.draft).toBe("string");
+      expect(typeof round.critique).toBe("string");
+      expect(typeof round.revised).toBe("string");
+    }
+
+    // delta events are sent (final streaming)
+    const deltas = events.filter((e) => e.event === "delta" && typeof e.data.delta === "string");
+    expect(deltas.length).toBeGreaterThan(0);
+
+    // done event is sent
+    const done = events.filter((e) => e.event === "done");
+    expect(done).toHaveLength(1);
+    expect(events.some((e) => e.event === "error")).toBe(false);
+
+    // LLM call count: at least 2*rounds+1 non-streaming (1 draft + 3*(critique+revised) = 7)
+    // plus exactly 1 streaming call for the final answer.
+    const createCalls = vi.mocked(fakeLlm.chat.completions.create).mock.calls;
+    const nonStreaming = createCalls.filter((args) => !args[0]?.stream).length;
+    const streaming = createCalls.filter((args) => args[0]?.stream).length;
+    expect(nonStreaming).toBeGreaterThanOrEqual(7);
+    expect(streaming).toBe(1);
+  }, 30_000);
+
+  it("hyperRounds=1 produces 1 round", async () => {
+    const [row] = await db
+      .insert(threads)
+      .values({
+        title: "hyper mode 1-round test",
+        userId: "test-user-id",
+        responseMode: "hyper",
+        hyperRounds: 1,
+      })
+      .returning();
+    createdIds.push(row.id);
+    const id = row.id;
+
+    const res = await POST(chatReq(id, "Hello"));
+    expect(res.status).toBe(200);
+
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    const hyperTraceEvents = events.filter((e) => e.event === "hyper_trace");
+    expect(hyperTraceEvents).toHaveLength(1);
+    const trace = hyperTraceEvents[0].data.hyperTrace as {
+      rounds: unknown[];
+      finalModel: string;
+    };
+    expect(trace.rounds).toHaveLength(1);
+
+    // 1 (draft) + 1*(critique+revised) = 3 non-streaming + 1 streaming
+    const createCalls = vi.mocked(fakeLlm.chat.completions.create).mock.calls;
+    const nonStreaming = createCalls.filter((args) => !args[0]?.stream).length;
+    const streaming = createCalls.filter((args) => args[0]?.stream).length;
+    expect(nonStreaming).toBeGreaterThanOrEqual(3);
+    expect(streaming).toBe(1);
+  }, 30_000);
 });

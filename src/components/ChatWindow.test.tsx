@@ -19,11 +19,14 @@ type UseChatReturn = {
     systemPrompt: string | null;
     model: string;
     currentLeafId: string | null;
-    responseMode: "single" | "dual";
+    responseMode: "single" | "dual" | "hyper" | "council";
     dualModelA: string | null;
     dualModelB: string | null;
     dualStrategy: "cross_review" | "debate";
     dualDebateRounds: number;
+    hyperRounds: number;
+    councilSize: number;
+    councilTimeLimit: number;
     globalInstructionId: string | null;
   } | null;
   isStreaming: boolean;
@@ -36,12 +39,15 @@ type UseChatReturn = {
   updateThread: (patch: {
     systemPrompt?: string | null;
     model?: string;
-    responseMode?: "single" | "dual";
+    responseMode?: "single" | "dual" | "hyper" | "council";
     dualModelA?: string | null;
     dualModelB?: string | null;
     dualStrategy?: "cross_review" | "debate";
     dualDebateRounds?: number;
     globalInstructionId?: string | null;
+    hyperRounds?: number;
+    councilSize?: number;
+    councilTimeLimit?: number;
   }) => Promise<void>;
   regenerate: (userMessageId: string) => Promise<void>;
   editMessage: (userMessageId: string, newContent: string) => Promise<void>;
@@ -71,6 +77,9 @@ function mockThread(overrides: Partial<NonNullable<UseChatReturn["thread"]>> = {
     globalInstructionId: null,
     dualStrategy: "cross_review",
     dualDebateRounds: 2,
+    hyperRounds: 3,
+    councilSize: 3,
+    councilTimeLimit: 60,
     ...overrides,
   };
 }

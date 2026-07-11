@@ -233,11 +233,15 @@ export const threads = sqliteTable("threads", {
   title: text("title").notNull().default("New chat"),
   systemPrompt: text("system_prompt"),
   model: text("model").notNull().default("umans-glm-5.2"),
-  responseMode: text("response_mode", { enum: ["single", "dual"] }).notNull().default("single"),
+  responseMode: text("response_mode", { enum: ["single", "dual", "hyper", "council"] }).notNull().default("single"),
   dualModelA: text("dual_model_a"),
   dualModelB: text("dual_model_b"),
   dualStrategy: text("dual_strategy", { enum: ["cross_review", "debate"] }).notNull().default("cross_review"),
   dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
+  hyperRounds: integer("hyper_rounds").notNull().default(3),
+  // council mode
+  councilSize: integer("council_size").notNull().default(3),        // 2〜6
+  councilTimeLimit: integer("council_time_limit").notNull().default(60), // 秒、30〜300
   mcpServerIds: text("mcp_server_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   folderId: text("folder_id").references(() => folders.id, { onDelete: "set null" }),
   connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
@@ -299,6 +303,23 @@ export const messages = sqliteTable(
         reviewA?: string;
         reviewB?: string;
         debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
+      };
+      hyperTrace?: {
+        rounds: {
+          perspective: string;
+          draft: string;
+          critique: string;
+          revised: string;
+        }[];
+        finalModel: string;
+      };
+      councilTrace?: {
+        panels: { id: string; persona: string; model: string }[];
+        initialAnswers: { panelId: string; content: string }[];
+        discussionTurns: { panelId: string; round: number; content: string }[];
+        finalModel: string;
+        roundsCompleted: number;
+        timeLimitReached: boolean;
       };
       model?: string;
       elapsedMs?: number;

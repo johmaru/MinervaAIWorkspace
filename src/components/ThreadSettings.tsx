@@ -10,11 +10,14 @@ type Thread = {
   title: string;
   systemPrompt: string | null;
   model: string;
-  responseMode: "single" | "dual";
+  responseMode: "single" | "dual" | "hyper" | "council";
   dualModelA: string | null;
   dualModelB: string | null;
   dualStrategy: "cross_review" | "debate";
   dualDebateRounds: number;
+  hyperRounds: number;
+  councilSize: number;
+  councilTimeLimit: number;
   mcpServerIds: string[];
   connectionIds: string[];
   globalInstructionId: string | null;
@@ -25,12 +28,15 @@ type Props = {
   onUpdate: (patch: {
     systemPrompt?: string | null;
     model?: string;
-    responseMode?: "single" | "dual";
+    responseMode?: "single" | "dual" | "hyper" | "council";
     dualModelA?: string | null;
     dualModelB?: string | null;
     dualStrategy?: "cross_review" | "debate";
     globalInstructionId?: string | null;
     dualDebateRounds?: number;
+    hyperRounds?: number;
+    councilSize?: number;
+    councilTimeLimit?: number;
   }) => Promise<void>;
 };
 
@@ -47,11 +53,14 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
   const [systemPrompt, setSystemPrompt] = useState(thread.systemPrompt ?? "");
   const [model, setModel] = useState(thread.model);
-  const [responseMode, setResponseMode] = useState<"single" | "dual">(thread.responseMode);
+  const [responseMode, setResponseMode] = useState<"single" | "dual" | "hyper" | "council">(thread.responseMode);
   const [dualModelA, setDualModelA] = useState(thread.dualModelA ?? thread.model);
   const [dualModelB, setDualModelB] = useState(thread.dualModelB ?? thread.model);
   const [dualStrategy, setDualStrategy] = useState<"cross_review" | "debate">(thread.dualStrategy);
   const [dualDebateRounds, setDualDebateRounds] = useState(thread.dualDebateRounds);
+  const [hyperRounds, setHyperRounds] = useState(thread.hyperRounds);
+  const [councilSize, setCouncilSize] = useState(thread.councilSize);
+  const [councilTimeLimit, setCouncilTimeLimit] = useState(thread.councilTimeLimit);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [instructions, setInstructions] = useState<{ id: string; name: string }[]>([]);
@@ -109,9 +118,12 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     setDualModelB(thread.dualModelB ?? thread.model);
     setDualStrategy(thread.dualStrategy);
     setDualDebateRounds(thread.dualDebateRounds);
+    setHyperRounds(thread.hyperRounds);
+    setCouncilSize(thread.councilSize);
+    setCouncilTimeLimit(thread.councilTimeLimit);
     setGlobalInstructionId(thread.globalInstructionId ?? null);
     setSaved(false);
-  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds, thread.globalInstructionId]);
+  }, [thread.id, thread.systemPrompt, thread.model, thread.responseMode, thread.dualModelA, thread.dualModelB, thread.dualStrategy, thread.dualDebateRounds, thread.hyperRounds, thread.councilSize, thread.councilTimeLimit, thread.globalInstructionId]);
 
   const handleSave = useCallback(async () => {
     const resolvedDualModelA = dualModelA || model;
@@ -130,6 +142,9 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
         dualModelB: responseMode === "dual" ? resolvedDualModelB : null,
         dualStrategy,
         dualDebateRounds,
+        hyperRounds,
+        councilSize,
+        councilTimeLimit,
         globalInstructionId,
       });
       setSaved(true);
@@ -137,7 +152,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, globalInstructionId, onUpdate]);
+  }, [systemPrompt, model, responseMode, dualModelA, dualModelB, thread.dualModelB, thread.model, models, dualStrategy, dualDebateRounds, councilSize, councilTimeLimit, globalInstructionId, onUpdate]);
 
   const dirty =
     systemPrompt !== (thread.systemPrompt ?? "") ||
@@ -146,6 +161,9 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
     dualModelA !== (thread.dualModelA ?? thread.model) ||
     dualModelB !== (thread.dualModelB ?? thread.model) ||
     dualDebateRounds !== thread.dualDebateRounds ||
+    hyperRounds !== thread.hyperRounds ||
+    councilSize !== thread.councilSize ||
+    councilTimeLimit !== thread.councilTimeLimit ||
     globalInstructionId !== (thread.globalInstructionId ?? null);
 
   return (
@@ -208,7 +226,7 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
             <select
               value={responseMode}
               onChange={(e) => {
-                const next = e.target.value === "dual" ? "dual" : "single";
+                const next = e.target.value === "dual" ? "dual" : e.target.value === "hyper" ? "hyper" : e.target.value === "council" ? "council" : "single";
                 setResponseMode(next);
                 // When switching to dual mode, auto-select a different model for dualModelB if it's the same as dualModelA.
                 if (next === "dual" && dualModelB === dualModelA) {
@@ -220,6 +238,8 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
             >
               <option value="single">{t("threadSettings.responseModeSingle")}</option>
               <option value="dual">{t("threadSettings.responseModeDual")}</option>
+              <option value="hyper">{t("threadSettings.responseModeHyper")}</option>
+              <option value="council">{t("threadSettings.responseModeCouncil")}</option>
             </select>
           </label>
 
@@ -275,6 +295,54 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
                   />
                 </label>
               )}
+            </div>
+          )}
+
+          {responseMode === "hyper" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                {t("threadSettings.hyperRounds")}
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={hyperRounds}
+                onChange={(e) => setHyperRounds(Math.min(5, Math.max(1, Number(e.target.value) || 1)))}
+                className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </label>
+          )}
+
+          {responseMode === "council" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("threadSettings.councilSize")}
+                </span>
+                <input
+                  type="number"
+                  min={2}
+                  max={6}
+                  value={councilSize}
+                  onChange={(e) => setCouncilSize(Math.min(6, Math.max(2, Number(e.target.value) || 2)))}
+                  className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("threadSettings.councilTimeLimit")}
+                </span>
+                <input
+                  type="number"
+                  min={30}
+                  max={21600}
+                  step={30}
+                  value={councilTimeLimit}
+                  onChange={(e) => setCouncilTimeLimit(Math.min(21600, Math.max(30, Number(e.target.value) || 30)))}
+                  className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </label>
             </div>
           )}
 
