@@ -46,6 +46,8 @@ export const users = sqliteTable("users", {
   personalEnergy: integer("personal_energy").notNull().default(1),
   personalStructure: integer("personal_structure").notNull().default(1),
   personalEmoji: integer("personal_emoji").notNull().default(1),
+  // Primary language for translate characteristics (language code like "ja", "en"). null = use UI locale.
+  translatePrimaryLang: text("translate_primary_lang"),
   // Columns written by DrizzleAdapter on OAuth createUser (for Google login)
   name: text("name"),
   emailVerified: ts("email_verified"),
@@ -231,11 +233,15 @@ export const threads = sqliteTable("threads", {
   title: text("title").notNull().default("New chat"),
   systemPrompt: text("system_prompt"),
   model: text("model").notNull().default("umans-glm-5.2"),
-  responseMode: text("response_mode", { enum: ["single", "dual"] }).notNull().default("single"),
+  responseMode: text("response_mode", { enum: ["single", "dual", "hyper", "council"] }).notNull().default("single"),
   dualModelA: text("dual_model_a"),
   dualModelB: text("dual_model_b"),
   dualStrategy: text("dual_strategy", { enum: ["cross_review", "debate"] }).notNull().default("cross_review"),
   dualDebateRounds: integer("dual_debate_rounds").notNull().default(2),
+  hyperRounds: integer("hyper_rounds").notNull().default(3),
+  // council mode
+  councilSize: integer("council_size").notNull().default(3),        // 2〜6
+  councilTimeLimit: integer("council_time_limit").notNull().default(60), // 秒、30〜300
   mcpServerIds: text("mcp_server_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   folderId: text("folder_id").references(() => folders.id, { onDelete: "set null" }),
   connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
@@ -298,6 +304,23 @@ export const messages = sqliteTable(
         reviewB?: string;
         debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
       };
+      hyperTrace?: {
+        rounds: {
+          perspective: string;
+          draft: string;
+          critique: string;
+          revised: string;
+        }[];
+        finalModel: string;
+      };
+      councilTrace?: {
+        panels: { id: string; persona: string; model: string }[];
+        initialAnswers: { panelId: string; content: string }[];
+        discussionTurns: { panelId: string; round: number; content: string }[];
+        finalModel: string;
+        roundsCompleted: number;
+        timeLimitReached: boolean;
+      };
       model?: string;
       elapsedMs?: number;
     }>(),
@@ -314,13 +337,28 @@ export const messages = sqliteTable(
  *
  * After an assistant response completes, the conversation is summarized and classified via LLM, then stored with an embedding.
  * On the next send, client-side cosine search (similarity > 0.3) → top-30 by similarity →
- * top-5 by recency score (importance × 0.6 + exp(-ageDays/14) × 0.4) → injected into system context (RAG).
+ * top-5 by recency score → injected into system context (RAG).
  *
+ * Lifecycle:
  * - kind: "fact" = immutable user info/environment/settings. "working" = current task/temporary context.
- * - suppressedAt: soft delete. Invalidates old memories on replace/merge.
+ * - suppressedAt: user-initiated soft delete (DELETE /api/memories/[id]).
+ * - validFrom / validUntil: time-validity range. When a memory is replaced (outdated/wrong),
+ *   validUntil = now() is set instead of suppressedAt — the old memory remains as history
+ *   but is excluded from active search. Replaced memories are NOT physically deleted.
+ * - expiresAt: automatic expiration. working memories get expiresAt = now + 7 days at INSERT time.
+ *   fact memories have expiresAt = null (never auto-expire).
+ * - injectionCount / lastInjectedAt / lastReferencedAt: feedback loop tracking.
+ *   injectionCount incremented each time the memory is injected into context.
+ *   lastInjectedAt = timestamp of most recent injection.
+ *   lastReferencedAt = timestamp of most recent injection that was followed by a user message
+ *   with cosine > 0.5 (user continued the topic). importance is adjusted ±0.05/0.02 per cycle.
  * - folderId: When folders.memoryScope is "folder", search is limited to the same folder.
  *   "global" searches across all threads (default).
  * - embedding: JSON array (text column, mode: json). Cosine computed in vectorSearch.ts.
+ *
+ * Active memory = suppressedAt IS NULL AND (validUntil IS NULL OR validUntil > now)
+ *   AND (expiresAt IS NULL OR expiresAt > now).
+ * Use activeMemoryConditions() from memoryUtils.ts to build WHERE clauses.
  */
 export const memories = sqliteTable(
   "memories",
@@ -338,6 +376,12 @@ export const memories = sqliteTable(
     model: text("model").notNull(),
     importance: real("importance").notNull().default(0.5),
     suppressedAt: ts("suppressed_at"),
+    validFrom: tsNow("valid_from"),
+    validUntil: ts("valid_until"),
+    expiresAt: ts("expires_at"),
+    injectionCount: integer("injection_count").notNull().default(0),
+    lastInjectedAt: ts("last_injected_at"),
+    lastReferencedAt: ts("last_referenced_at"),
     createdAt: tsNow("created_at"),
     updatedAt: tsNow("updated_at"),
   },
@@ -346,6 +390,32 @@ export const memories = sqliteTable(
     folderIdx: index("memories_folder_idx").on(t.folderId),
     kindIdx: index("memories_kind_idx").on(t.kind),
     suppressedIdx: index("memories_suppressed_idx").on(t.suppressedAt),
+    expiresIdx: index("memories_expires_idx").on(t.expiresAt),
+  }),
+);
+
+/**
+ * memory_injections — junction table tracking which memories were injected for each user message.
+ * Used by the feedback loop: on the next send, the previous message's injected memories
+ * are compared (cosine similarity) against the new user input. If similarity > 0.5,
+ * the memory is "referenced" (importance boosted, lastReferencedAt updated).
+ * One row per (messageId, memoryId) pair. Deleted with the message (cascade).
+ */
+export const memoryInjections = sqliteTable(
+  "memory_injections",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    memoryId: text("memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    injectedAt: tsNow("injected_at"),
+  },
+  (t) => ({
+    messageIdx: index("memory_injections_message_idx").on(t.messageId),
+    memoryIdx: index("memory_injections_memory_idx").on(t.memoryId),
   }),
 );
 
@@ -419,5 +489,48 @@ export const pageEmbeddings = sqliteTable(
   },
   (t) => ({
     pageIdx: index("page_embeddings_page_idx").on(t.pageId),
+  }),
+);
+
+/**
+ * user_traits — persistent user profile traits (always injected, not similarity-searched).
+ *
+ * Extracted from conversations alongside memories (shared LLM call, kind="profile").
+ * Stored with embeddings for dedup (cosine > 0.85) and contradiction candidate selection
+ * (cosine > 0.75 → checkContradiction). Unlike memories, these are:
+ * - User-scoped (direct userId FK, not thread-scoped)
+ * - Always injected (up to 30, ordered by confidence DESC, updatedAt DESC)
+ * - Survive thread deletion (sourceThreadId ON DELETE SET NULL)
+ *
+ * Active trait = suppressedAt IS NULL.
+ */
+export const userTraits = sqliteTable(
+  "user_traits",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    category: text("category", {
+      enum: ["demographic", "interest", "speech_pattern", "preference"],
+    }).notNull(),
+    content: text("content").notNull(),
+    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    contentHash: text("content_hash").notNull(),
+    model: text("model").notNull(),
+    confidence: real("confidence").notNull().default(0.5),
+    evidenceCount: integer("evidence_count").notNull().default(1),
+    suppressedAt: ts("suppressed_at"),
+    sourceThreadId: text("source_thread_id").references(() => threads.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageIds: text("source_message_ids", { mode: "json" }).$type<string[]>(),
+    createdAt: tsNow("created_at"),
+    updatedAt: tsNow("updated_at"),
+  },
+  (t) => ({
+    userIdx: index("user_traits_user_idx").on(t.userId),
+    categoryIdx: index("user_traits_category_idx").on(t.category),
+    suppressedIdx: index("user_traits_suppressed_idx").on(t.suppressedAt),
   }),
 );

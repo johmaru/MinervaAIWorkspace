@@ -342,6 +342,30 @@ Conversation memories (`fact` or `working`). After an assistant response complet
 | `created_at` | integer NOT NULL | timestamp_ms, default now |
 | `updated_at` | integer NOT NULL | timestamp_ms, default now |
 
+
+### `user_traits`
+
+Persistent user profile traits (always injected, not similarity-searched). Extracted alongside memories via a shared LLM call (`kind: "profile"`). Stored with embeddings for dedup (`cosine > 0.85`) and contradiction candidate selection (`cosine > 0.75`). See [Memory System → User Traits](./memory.md#user-traits-profile).
+
+Unlike `memories`, these are user-scoped (direct `userId` FK, not thread-scoped) and survive thread deletion (`source_thread_id` is `ON DELETE SET NULL`).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | text PK | UUID |
+| `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
+| `category` | text NOT NULL | enum: `demographic`, `interest`, `speech_pattern`, `preference` |
+| `content` | text NOT NULL | |
+| `embedding` | text NOT NULL (JSON) | `number[]` — used for dedup + contradiction, NOT for retrieval |
+| `content_hash` | text NOT NULL | SHA-256, exact dedup |
+| `model` | text NOT NULL | embedding model that produced the vector |
+| `confidence` | real NOT NULL, default 0.5 | increases with repeated evidence (+0.15 per observation, max 1.0) |
+| `evidence_count` | integer NOT NULL, default 1 | how many times this trait was observed |
+| `suppressed_at` | integer | timestamp_ms; soft delete (user delete or contradiction) |
+| `source_thread_id` | text | FK → `threads.id`, `ON DELETE SET NULL` (trait survives thread deletion) |
+| `source_message_ids` | text (JSON) | `string[]` |
+| `created_at` | integer NOT NULL | timestamp_ms, default now |
+| `updated_at` | integer NOT NULL | timestamp_ms, default now |
+
 ### `attachments`
 
 Files attached to messages. Images are stored as base64 dataURLs (passed inline to vision models); PDF/text files have text extracted server-side into `extracted_text`.
@@ -405,6 +429,9 @@ Embedding vectors for `pages` body text. Same dimensionality as `memories.embedd
 | `attachments_message_idx` | `attachments` | `message_id` | normal | load a message's attachments |
 | `attachments_thread_idx` | `attachments` | `thread_id` | normal | list thread attachments |
 | `page_embeddings_page_idx` | `page_embeddings` | `page_id` | normal | load a page's embeddings |
+| `user_traits_user_idx` | `user_traits` | `user_id` | normal | filter traits by user |
+| `user_traits_category_idx` | `user_traits` | `category` | normal | filter traits by category |
+| `user_traits_suppressed_idx` | `user_traits` | `suppressed_at` | normal | exclude soft-deleted traits |
 
 > Note: `skills`, `skill_candidates`, `skill_usage_events`, `mcp_servers`, `connections`, `global_instructions`, `folders`, `threads`, and `verification_tokens` have **no secondary indexes** beyond their primary key. All queries against these tables filter by `user_id` / `id` / indexed columns on joined tables.
 
@@ -445,6 +472,8 @@ All migration files live in the `drizzle/` folder. They are applied in numeric o
 | `0004_abandoned_umar.sql` | Creates the `skill_usage_events` table for skill activation logging. (Shares the `0004` prefix; order between the two `0004` files is arbitrary as they are independent table creations.) |
 | `0005_strong_zaran.sql` | Adds personalization columns to `users`: `personal_style`, `personal_warmth` (default 1), `personal_energy` (default 1), `personal_structure` (default 1), `personal_emoji` (default 1). |
 | `0006_puzzling_bullseye.sql` | Creates the `accounts_provider_unique` unique index on `accounts(provider, provider_account_id)` — extracted as an explicit migration for databases created before the index existed in the schema. |
+| `0007_wise_abomination.sql` | Creates the `memory_injections` junction table for the memory feedback loop. Adds `valid_from`, `valid_until`, `expires_at`, `injection_count`, `last_injected_at`, `last_referenced_at` columns to `memories`, plus the `memories_expires_idx` index. |
+| `0009_user_traits.sql` | Adds `translate_primary_lang` column to `users`. Creates the `user_traits` table for persistent user profile traits (always injected, not similarity-searched). Adds indexes on `user_id`, `category`, and `suppressed_at`. |
 
 ### Adding a new migration
 

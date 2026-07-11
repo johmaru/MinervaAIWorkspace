@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState, useCallback } from "react";
-import { useChat, type ChatMessage, type DualTrace } from "@/hooks/useChat";
+import { useChat, type ChatMessage, type DualTrace, type HyperTrace, type CouncilTrace } from "@/hooks/useChat";
 import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
@@ -576,6 +576,12 @@ function MessageBubble({
           {m.metadata?.dualTrace && (
             <DualTraceDetails trace={m.metadata.dualTrace} />
           )}
+          {m.metadata?.hyperTrace && (
+            <HyperTraceDetails trace={m.metadata.hyperTrace} />
+          )}
+          {m.metadata?.councilTrace && (
+            <CouncilTraceDetails trace={m.metadata.councilTrace} streaming={isStreamingThis} />
+          )}
           {/* Show spinner + progress label while no answer is generated. Also shown while thinking is received. */}
           {isStreamingThis && !m.thinking ? (
             <span aria-label={t("chat.waitingResponse")} className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -734,6 +740,96 @@ function DualTraceDetails({ trace }: { trace: DualTrace }) {
             ))}
           </div>
         )}
+      </div>
+    </Accordion>
+  );
+}
+
+function HyperTraceDetails({ trace }: { trace: HyperTrace }) {
+  const { t } = useI18n();
+  return (
+    <Accordion
+      className="mt-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2"
+      summaryClassName="cursor-pointer select-none text-xs font-medium text-muted-foreground"
+      summary={t("chat.hyperDetails")}
+    >
+      <div className="mt-3 space-y-3">
+        <p className="text-[11px] text-muted-foreground">
+          {t("chat.hyperFinalModel", { model: trace.finalModel })}
+        </p>
+        {trace.rounds.map((round, index) => (
+          <div key={index} className="space-y-2">
+            <h4 className="text-xs font-semibold text-muted-foreground">
+              {t("chat.hyperRound", { round: String(index + 1) })}
+            </h4>
+            <p className="text-[11px] text-muted-foreground">
+              {t("chat.hyperPerspective", { perspective: round.perspective })}
+            </p>
+            <TraceSection title={t("chat.hyperDraft")} content={round.draft} />
+            <TraceSection title={t("chat.hyperCritique")} content={round.critique} />
+            <TraceSection title={t("chat.hyperRevised")} content={round.revised} />
+          </div>
+        ))}
+      </div>
+    </Accordion>
+  );
+}
+
+function CouncilTraceDetails({ trace, streaming = false }: { trace: CouncilTrace; streaming?: boolean }) {
+  const { t } = useI18n();
+  const panelMap = new Map(trace.panels.map((p) => [p.id, p]));
+  return (
+    <Accordion
+      defaultOpen={streaming}
+      className="mt-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2"
+      summaryClassName="cursor-pointer select-none text-xs font-medium text-muted-foreground"
+      summary={
+        <span className="flex items-center gap-2">
+          {t("chat.councilDetails")}
+          {streaming && (
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-foreground/50" aria-hidden="true" />
+          )}
+        </span>
+      }
+    >
+      <div className="mt-3 space-y-3">
+        <p className="text-[11px] text-muted-foreground">
+          {t("chat.councilFinalModel", { model: trace.finalModel })}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {t("chat.councilRoundsCompleted", { count: String(trace.roundsCompleted) })}
+          {trace.timeLimitReached && ` — ${t("chat.councilTimeLimitReached")}`}
+        </p>
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold text-muted-foreground">{t("chat.councilPanels")}</h4>
+          {trace.panels.map((panel) => (
+            <p key={panel.id} className="text-[11px] text-muted-foreground">
+              <strong>{t("chat.councilPanel", { panel: panel.id })}</strong>: {panel.persona}
+            </p>
+          ))}
+        </div>
+        <h4 className="text-xs font-semibold text-muted-foreground">{t("chat.councilInitialAnswers")}</h4>
+        {trace.initialAnswers.map((ans) => {
+          const panel = panelMap.get(ans.panelId);
+          return (
+            <TraceSection
+              key={ans.panelId}
+              title={`${t("chat.councilPanel", { panel: ans.panelId })} — ${panel?.persona ?? ""}`}
+              content={ans.content}
+            />
+          );
+        })}
+        <h4 className="text-xs font-semibold text-muted-foreground">{t("chat.councilDiscussion")}</h4>
+        {trace.discussionTurns.map((turn, idx) => {
+          const panel = panelMap.get(turn.panelId);
+          return (
+            <TraceSection
+              key={`${turn.panelId}-${turn.round}-${idx}`}
+              title={`${t("chat.councilPanel", { panel: turn.panelId })} — R${turn.round} (${panel?.persona ?? ""})`}
+              content={turn.content}
+            />
+          );
+        })}
       </div>
     </Accordion>
   );

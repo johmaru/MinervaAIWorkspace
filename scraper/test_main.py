@@ -337,6 +337,56 @@ class TestSearchTimeRange:
         params = mock_get.call_args.kwargs.get("params", {})
         assert "engines" not in params
 
+
+class TestSearchLanguage:
+    """Verify that the language param is passed through to the SearXNG request params (httpx is mocked)."""
+
+    @staticmethod
+    def _ok_response() -> MagicMock:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"results": []}
+        return mock_resp
+
+    def test_ja_jp_passed_to_searxng(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "language": "ja-JP"}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert params.get("language") == "ja-JP"
+
+    def test_en_us_passed_to_searxng(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "language": "en-US"}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert params.get("language") == "en-US"
+
+    def test_none_omits_language(self, client):
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post(
+                "/search", json={"query": "test", "max_results": 3, "language": None}
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert "language" not in params
+
+    def test_default_no_language(self, client):
+        # No language sent (backward compat: existing calls use auto-locale)
+        mock_get = AsyncMock(return_value=self._ok_response())
+        with patch("httpx.AsyncClient.get", mock_get):
+            resp = client.post("/search", json={"query": "test", "max_results": 3})
+        assert resp.status_code == 200
+        params = mock_get.call_args.kwargs.get("params", {})
+        assert "language" not in params
+
 class TestSearchTimeRangeRetry:
     """Verify that a 0-result time_range search retries without the filter (httpx is mocked)."""
 

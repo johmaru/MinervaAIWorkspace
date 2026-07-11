@@ -186,7 +186,8 @@ describe("searchWeb", () => {
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: "python", max_results: 5, time_range: null }),
+        body: JSON.stringify({ query: "python", max_results: 5, time_range: null, language: null }),
+        signal: expect.any(AbortSignal),
       }),
     );
   });

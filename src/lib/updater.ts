@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { httpsDownload, isDockerEnv } from "@/lib/tunnel";
 import { getDataDir } from "@/lib/user-data";
@@ -46,6 +46,9 @@ export function getAppVersion(): string {
   }
 }
 
+/** Semver validation: MAJOR.MINOR.PATCH (no v-prefix, no pre-release tags) */
+const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+
 /** Compare semver strings: returns 1 if a > b, -1 if a < b, 0 if equal */
 export function compareVersions(a: string, b: string): number {
   const pa = a.replace(/^v/, "").split(".").map((s) => parseInt(s, 10));
@@ -57,6 +60,11 @@ export function compareVersions(a: string, b: string): number {
     if (va < vb) return -1;
   }
   return 0;
+}
+
+/** Validate that a version string is safe (strict semver: digits.digits.digits) */
+export function isValidVersion(version: string): boolean {
+  return SEMVER_RE.test(version);
 }
 
 /** Fetch latest release from GitHub API (cached 1h) */
@@ -116,6 +124,21 @@ export async function downloadUpdate(
     throw new Error("Auto-update is not available in this environment");
   }
 
+  // Validate version: strict semver to prevent path traversal and shell injection
+  if (!isValidVersion(version)) {
+    throw new Error(`Invalid version format: ${version}`);
+  }
+
+  // Validate download URL: must be from GitHub releases
+  const parsedUrl = new URL(downloadUrl);
+  if (!parsedUrl.protocol.startsWith("https")) {
+    throw new Error("Download URL must use HTTPS");
+  }
+  const allowedHosts = ["github.com", "objects.githubusercontent.com"];
+  if (!allowedHosts.includes(parsedUrl.hostname)) {
+    throw new Error(`Download URL host not allowed: ${parsedUrl.hostname}`);
+  }
+
   const dataDir = getDataDir();
   const updatesDir = join(dataDir, "updates");
   const zipPath = join(updatesDir, `UmansChat-${version}-windows-x64.zip`);
@@ -130,14 +153,17 @@ export async function downloadUpdate(
   // tar.exe is not guaranteed on older Windows 10 builds; PowerShell is the
   // safe single choice. The API route runs in node.exe (not Bun), so child_process
   // works normally.
+  // Security: use execFileSync (no shell) with arg-array to prevent shell injection.
   if (existsSync(stagingDir)) {
     rmSync(stagingDir, { recursive: true, force: true });
   }
   mkdirSync(stagingDir, { recursive: true });
-  execSync(
-    `powershell -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${stagingDir}' -Force"`,
-    { stdio: "pipe" },
-  );
+  execFileSync("powershell", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${stagingDir}' -Force`,
+  ], { stdio: "pipe" });
 
   // Write marker file for the launcher to pick up
   const markerPath = join(dataDir, ".update-pending");

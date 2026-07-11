@@ -80,6 +80,7 @@ export async function searchWeb(
   query: string,
   maxResults = 5,
   timeRange?: "day" | "week" | "month" | "year",
+  language?: string,
 ): Promise<WebSearchResponse> {
   if (!process.env.SCRAPER_URL) return { query, results: [] };
   const t0 = Date.now();
@@ -87,7 +88,8 @@ export async function searchWeb(
   const res = await fetch(`${base}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, max_results: maxResults, time_range: timeRange ?? null }),
+    body: JSON.stringify({ query, max_results: maxResults, time_range: timeRange ?? null, language: language ?? null }),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as {

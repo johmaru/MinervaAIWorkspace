@@ -292,21 +292,27 @@ export async function buildMemoryContext({
 }): Promise<{ role: "system"; content: string } | null>
 ```
 
-`buildMemoryContext()` runs both retrieval operations in parallel via `Promise.all`:
+`buildMemoryContext()` runs three retrieval operations in parallel via `Promise.all`:
 
 1. `findRelevantMemories(content, thread.folderId, userId)` — RAG search for past memories.
 2. `fetchRecentThreadTitles(userId, currentThreadId)` — fetches up to 15 recent thread titles (excluding the current thread and threads titled "New chat"), ordered by `updatedAt` desc.
+3. `findProfileTraits(userId)` — fetches up to 30 active user traits (always injected, not similarity-filtered). See [User Traits](#user-traits-profile).
 
-It assembles these into a single system message with two sections:
+It assembles these into a single system message with three sections:
 
+- **User traits:** Always-injected stable user attributes (e.g. age, interests, speech patterns). Placed first so the LLM sees user identity context before anything else.
 - **Recent conversation topics:** A list of recent thread titles, so the LLM can infer which past conversations may be relevant.
 - **Past memories:** The top-5 retrieved memories, formatted as `- [fact] content` or `- [working] content`.
 
-If both sections are empty, returns `null` (no system message injected). The chat route injects this into the system context before the user's message.
+If all sections are empty, returns `null` (no system message injected). The chat route injects this into the system context before the user's message.
 
 ### Injection format
 
 ```text
+User traits — stable attributes about the user. Apply these in every conversation:
+- [demographic] 20歳らしい
+- [interest] ラテン語が好き
+
 Recent conversation topics (most recent first). Use these to infer which past conversations may be relevant to the user's current question:
 - Thread title 1
 - Thread title 2
@@ -468,6 +474,58 @@ type MemoryEntry = {
   updatedAt: string;
 };
 ```
+
+## User Traits (Profile)
+
+User traits are **persistent user attributes** (age, interests, speech patterns, preferences) that are **always injected** into every conversation — unlike memories, which are similarity-filtered via RAG. They solve the problem where "20歳らしい" or "ラテン語が好き" would lose the cosine similarity race when the user asks an unrelated question.
+
+### Extraction — shared LLM call
+
+Profile traits are extracted in the **same LLM call** as memories. The extraction prompt (`memory.ts:SYSTEM_PROMPT`) classifies items as `"fact"`, `"working"`, or `"profile"`. Profile items additionally include a `category` field (`"demographic" | "interest" | "speech_pattern" | "preference"`).
+
+After `parseExtraction()`, profile items are routed to `processProfileTraits()` (memory.ts) while fact/working items follow the existing memory pipeline unchanged.
+
+### `processProfileTraits()` — `memory.ts`
+
+For each extracted profile trait:
+
+1. **Dedup** — `contentHash` (exact) + `cosineSimilarity > 0.85` (semantic duplicate like "ラテン語が好き" vs "ラテン語を好む"). If matched: `evidenceCount += 1`, `confidence = min(1.0, confidence + 0.15)`.
+2. **Contradiction** — `cosineSimilarity > 0.75 but ≤ 0.85` selects candidates for `checkContradiction()` (same pattern as memories). If contradiction: soft-delete old trait, insert new.
+3. **Insert** — New trait with `confidence = 0.5`, `evidenceCount = 1`.
+
+### Retrieval — always inject
+
+`findProfileTraits(userId)` (`traitStore.ts`) queries active traits (`suppressedAt IS NULL`), ordered by `confidence DESC, updatedAt DESC`, limited to 30 rows. Called in parallel within `buildMemoryContext()` alongside `findRelevantMemories` and `fetchRecentThreadTitles`.
+
+Traits are injected as a dedicated section **before** the RAG memory section:
+
+```
+User traits — stable attributes about the user. Apply these in every conversation:
+- [demographic] 20歳らしい
+- [interest] ラテン語が好き
+- [speech_pattern] よく「〜だろ」という表現を使う
+```
+
+### Key differences from memories
+
+| Aspect | Memories | User Traits |
+|--------|----------|-------------|
+| Table | `memories` | `user_traits` |
+| Scope | Thread/folder (via `threadId`) | User-global (direct `userId` FK) |
+| Retrieval | RAG (cosine > 0.3, top-5) | Always injected (up to 30) |
+| Thread deletion | Cascade delete | `sourceThreadId` ON DELETE SET NULL (survives) |
+| Lifecycle | fact (permanent) / working (7-day TTL) | No expiry; soft-delete via `suppressedAt` |
+| Embeddings | Used for RAG retrieval | Used for dedup + contradiction candidate selection only |
+
+### Relevant source files
+
+- `src/db/schema.ts` — `userTraits` table definition
+- `src/lib/memory.ts` — `processProfileTraits()`, `TraitCategory` type, extraction prompt
+- `src/lib/traitStore.ts` — `findProfileTraits()` retrieval
+- `src/lib/memoryStore.ts` — `buildMemoryContext()` injection point
+- `src/app/api/user-traits/route.ts` — GET + POST
+- `src/app/api/user-traits/[id]/route.ts` — PATCH + DELETE
+- `src/components/MemoryViewerModal.tsx` — Profile filter + CRUD UI
 
 ## See also
 

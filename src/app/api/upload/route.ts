@@ -42,7 +42,8 @@ export async function POST(req: Request) {
   if (file.size > MAX_FILE_SIZE) return new Response("File too large (max 10MB)", { status: 413 });
 
   const mimeType = file.type || "application/octet-stream";
-  const filename = file.name;
+  // Sanitize filename: strip path components, remove control chars
+  const filename = file.name.replace(/[^a-zA-Z0-9._\-\s\u3040-\u9fff\uff00-\uffef]/g, "").slice(0, 255) || "unnamed";
 
   let dataUrl: string | null = null;
   let extractedText: string | null = null;

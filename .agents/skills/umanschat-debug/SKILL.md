@@ -3,7 +3,7 @@ name: umanschat-debug
 description: >
   Debugging techniques and troubleshooting guide specific to the UmansChat project.
   Includes known pitfalls and solutions for SSE streaming, Docker builds,
-  transformers.js, pgvector, and Next.js 16. Refer to this when making code
+  transformers.js, SQLite (better-sqlite3), and Next.js 16. Refer to this when making code
   changes or debugging UmansChat.
 origin: session-debug-log
 ---
@@ -23,6 +23,12 @@ Next.js 16 (App Router, Turbopack) + Bun
 ├── src/db/              # Drizzle ORM + better-sqlite3 (SQLite)
 └── Docker               | Bun → Next.js build → runner stage
 ```
+> **DB Migration Notice (2026-07):** UmansChat migrated from PostgreSQL + pgvector
+> to SQLite (better-sqlite3). The `docker compose exec db psql` commands in
+> sections 8–10 are from the old PostgreSQL era. Use `sqlite3` instead:
+> `sqlite3 data/umanschat.db "SELECT id, title, model FROM threads;"`
+> Section 10 (pgvector cosine distance) no longer applies — embeddings are stored
+> as JSON text and queried via application-level cosine similarity.
 
 ## Troubleshooting Dictionary
 
@@ -223,7 +229,11 @@ for await (const chunk of completion) {
 
 ---
 
-### 10. pgvector cosine distance query
+### 10. [LEGACY — PostgreSQL era] pgvector cosine distance query
+
+> **Stale:** UmansChat now uses SQLite + better-sqlite3. Embeddings are stored as
+> JSON text, not pgvector. Cosine similarity is computed at the application level.
+> This section is kept for historical reference only.
 
 ```sql
 -- Similarity search (1 - distance = similarity)

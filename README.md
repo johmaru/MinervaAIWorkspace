@@ -4,6 +4,12 @@ A self-hosted, open-source AI workspace for high-resource OpenAI-compatible prov
 
 [日本語 / Japanese](./README.ja.md)
 
+## Project Status
+
+**UmansChat is pre-release software.** Breaking changes may occur between versions — database schemas, configuration variables, and APIs can change without notice. Back up your `data/` directory and `.env` before updating.
+
+**Docker is the recommended deployment method.** The Docker Compose setup orchestrates all services (app, embedder, scraper, SearXNG, Tor) and updates are straightforward with `docker compose pull && docker compose up -d`. The standalone Windows exe is also available for no-Docker deployments.
+
 ## Contributor Documentation
 
 Comprehensive documentation for contributors is available in the [`docs/`](./docs/) folder. It covers architecture, database schema, chat streaming, memory/skills systems, tool calling, frontend components, deployment, testing, and more. See [`docs/README.md`](./docs/README.md) for the full index.
@@ -16,16 +22,20 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **Branching conversation tree** — regenerate or edit a message to create sibling nodes; navigate siblings with `< 1/N >`
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB per file)
 - **Semantic search** across all threads (cosine similarity)
-- **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context; view, search, edit, delete, and manually add memories from the sidebar 🧠 Memory Manager
+- **Conversation memory** — fact/working memories extracted after each turn and injected as RAG context. Memories have a full lifecycle: replaced memories are time-invalidated (`validUntil`) rather than deleted, working memories auto-expire after 7 days while facts never expire, and a contradiction-detection LLM call prevents conflicting memories. A feedback loop tracks injection count and reference recency — memories the user keeps returning to get an importance boost, improving future retrieval. View, search, edit, delete, and manually add memories from the sidebar 🧠 Memory Manager.
 - **Web page scraping → knowledge ingestion** — scraped pages become a RAG source for future answers; URLs pasted in chat are scraped automatically and injected as context
 - **Web search** — app-level SearXNG pipeline with a dedicated search model for query generation and result summarization; triggers on volatile info, explicit requests, and unfamiliar terms/proper nouns; configurable in settings
 - **Dual-model conclusions** — run two models in cross-review or debate mode, then stream a synthesized final answer with the model work kept in collapsible details
+- **Hyper-Thinking mode** — a single model iteratively refines its answer through 1–5 rounds of self-review, each from a distinct perspective (factual accuracy, logical consistency, completeness, clarity, practical applicability). The final refined answer is streamed; all intermediate drafts and critiques are available in a collapsible trace.
+- **Council mode** — 2–6 panels with distinct AI personas discuss the question, generate initial answers, debate in rounds, and a final model synthesizes the best answer. Configurable panel count and time limit (30–21600s). The full discussion trace is available in a collapsible block.
+- **Workspace tools** — the model can autonomously read/write files, list directories, run shell commands, and read application logs via built-in tools during streaming. Useful for coding assistance, debugging, and file manipulation within the workspace.
 - **Tor proxy** support for anonymous scraping
 - **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control
 - **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service
 - **Folder organization** for threads
 - **Dark / light / system theme**
 - **EN / JA i18n toggle** (English is the default)
+- **Translation page** — standalone `/translate` page (sidebar 🌐 button) with source/target language selection, history, and optional context field. Context-aware mode: paste conversation snippets to get tone/terminology-appropriate translations; collapses to standard translation when context is empty. Multi-candidate mode: generate 3 translations with distinct characteristics (literal, natural, creative) and pick the best one. A primary language for characteristics can be set in Settings (or follow the UI locale automatically).
 - **OpenAI-compatible LLM backend** — UmansAI, OpenAI, vLLM, Ollama, etc.
 - **Auto title generation** from the first user message
 - **Date/time + execution environment** — current date/time (timezone-aware) and detected OS/arch are prepended to every prompt so the model gives environment-appropriate answers
@@ -36,6 +46,7 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **MCP server integration** — register external Model Context Protocol servers (Streamable HTTP or stdio) and enable them per-thread; the LLM discovers and calls their tools during streaming alongside built-in search/scrape tools
 - **Connections (Notion)** — connect your Notion account via OAuth; the LLM calls `notion_search`, `notion_get_page`, and `notion_get_blocks` tools during chat to find and read Notion content; enabled per-thread via the ＋ menu
 - **Account authentication** — Auth.js v5 with Credentials (email/password) and optional Google OAuth; first Docker launch requires account creation, then login; each user's data is isolated
+- **Auth hardening** — IP CIDR whitelist for registration (`ALLOWED_REGISTRATION_IPS`), registration lock (`REGISTRATION_LOCKED`), and dual local/public access without redirect-flipping (AUTH_URL is neutralized; redirects follow the incoming request host). Session auto-detects invalid cookies after DB migration and clears them.
 - **Personalization** — per-user style presets (standard/polite/casual/concise/detailed/academic/creative/technical) + warmth/energy/structure/emoji trait sliders (0-2). Adjusts LLM tone system-wide. Disabled by default; configure in Settings → Personalization.
 - **Skills system** — reusable procedural skills with semantic RAG matching. 6 kinds (workflow/bugfix/project_rule/tool_usage/coding_pattern/debugging). Auto-extracted draft candidates from conversations (up to 3/turn with confidence + reason); approve, edit-and-approve, or reject in the Skill Manager (sidebar 🛠️ button). Manual CRUD also supported. Skills track usage (success/failure counts, last-used).
 - **Time-range filter** — composer dropdown (None/day/week/month/year) that narrows memory, web-knowledge, skill RAG retrieval, and web search results to the selected period.
@@ -43,6 +54,7 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **Reasoning display** — when a model emits thinking tokens, they appear in a collapsible "Thinking" block above the answer; inline `<thinking>` tags are also extracted and rendered.
 - **Rich Markdown** — KaTeX math rendering (`$...$` inline, `$$...$$` block), syntax-highlighted code blocks with copy-to-clipboard, GFM tables/strikethrough/task lists.
 - **Settings GUI** that writes to `.env` (no restart needed for config changes, except embedding-model migration)
+- **Exe rebuild data preservation** — re-running `bun run pack:exe` into an existing `dist/UmansChat/` stashes and restores `.env` and `data/` so settings, API keys, and the database survive a rebuild.
 
 ## Architecture
 
@@ -81,7 +93,7 @@ flowchart LR
 ## Requirements
 
 - **Node.js / Bun** — Bun is the primary runtime and package manager
-- **Docker** (with Docker Compose) — optional; only needed for the scraper, embedder, SearXNG search, and Tor services. The standalone exe and local-dev SQLite path need nothing extra.
+- **Docker** (with Docker Compose) — recommended for self-hosted deployment. The standalone Windows exe and local-dev SQLite path are also available for no-Docker setups.
 - An **OpenAI-compatible LLM API key** (UmansAI, OpenAI, vLLM, Ollama, etc.)
 
 ## Quick Start (Docker)
@@ -286,9 +298,11 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LOG_FILE_MAX_SIZE`     | Max log file size in bytes before rotation (keeps one `.log.1` backup) | `5242880` (5MB)                                 |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
+| `REGISTRATION_LOCKED`     | Lock all new account creation (`true`/`false`)                     | `false`                                              |
+| `ALLOWED_REGISTRATION_IPS`| Comma-separated IPs/CIDRs allowed to register (empty = allow any; fail-closed when IP unknown) | — |
 | `NOTION_CLIENT_ID`       | Notion OAuth client ID (for Connections feature; see [Notion Connection Setup](#notion-connection-setup)) | — |
 | `NOTION_CLIENT_SECRET`   | Notion OAuth client secret                                          | —                                                    |
-| `AUTH_URL`               | Public URL of the app (must match the Notion OAuth redirect URI)   | `http://localhost:3001`                              |
+| `AUTH_URL`               | Public base URL for Settings UI, tunnel status, and OAuth console alignment. Redirects follow the incoming request Host, so local and public access work without flipping this value. | `http://localhost:3001` |
 
 ## Notion Connection Setup
 
@@ -331,17 +345,20 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Rapid mode** — click ⚡ in the composer to skip web search, URL scraping, and memory/skill retrieval for faster responses. Stays on for subsequent messages (and across thread switches) until you click ⚡ again. MCP/connections tools and dual-model mode still work normally.
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
 - **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
+- **Hyper-Thinking mode** — open thread settings, switch **Response mode** to **Hyper Thinking**, and set the number of rounds (1–5, default 3). The model generates an initial draft, then iteratively critiques and revises it from different perspectives (factual accuracy, logical consistency, completeness, clarity, practical applicability). The final refined answer is streamed; all intermediate drafts, critiques, and revisions are available in the collapsible **Hyper Thinking details** block. Each round makes one LLM call, so total cost scales with the round count.
+- **Council mode** — open thread settings, switch **Response mode** to **Council**, and set panel count (2–6, default 3) and time limit (30–21600 seconds, default 60). Each panel receives a distinct persona and generates an initial answer, then panels discuss in rounds. A final model synthesizes the best answer from the discussion. The full discussion trace (panels, initial answers, turns) is available in the collapsible **Council details** block. This mode makes many LLM calls, so expect higher cost and longer response times.
 - **Attachments** — attach images (sent to vision-capable models), PDFs (text extracted), or text/code files (up to 10MB each).
 - **Semantic search** — search across all threads; results are ranked by cosine similarity.
 - **Web scraping** — when web search is enabled, results are scraped and ingested as a RAG source for the current answer.
 - **Tor** — toggle Tor in settings for anonymous scraping.
-- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, Tor options, and log level. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
+- **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, Tor options, log level, translation default mode (single vs multi-candidate), and translation primary language for characteristics. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
 - **Global system instructions** — open Settings → AI & Models to create, edit, and delete named system instructions. Select one as your default; it applies to all threads unless a thread overrides it. In thread settings, pick a different instruction per-thread.
-- **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories.
+- **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories. Each memory shows its injection count, last injected time, and last referenced time so you can see which memories are actively shaping the conversation.
 - **Personalization** — open Settings → Personalization. Pick a style preset (or "None" to disable). Adjust the 4 trait sliders (warmth, energy, structure, emoji; 0-2). Changes apply to all new messages immediately — no restart needed.
 - **Skill Manager** — click 🛠️ in the sidebar. **Active Skills** tab: edit name/content/kind/trigger/tags, archive. **Draft Candidates** tab: review LLM-proposed skills (with confidence score + reason), approve as-is, edit-then-approve, or reject. **Archived** tab: restore archived skills. Skills are matched by cosine similarity to the conversation and injected as context.
 - **Time-range filter** — use the dropdown in the composer (next to ⚡) to limit memory/knowledge/skill retrieval and web search to a recent time window. "None" searches all history.
 - **Folder settings** — right-click a folder → Settings (or create a new folder). Set a folder-level instruction (system prompt for all threads in the folder) and memory scope (global = all threads, folder = only threads in this folder).
+- **Translation** — click the 🌐 Languages icon in the sidebar to open `/translate`. Select source (auto-detect supported) and target languages, enter text, and translate. Optionally expand the "Context" accordion and paste conversation snippets for context-aware translation (tone, terminology, references). Enable multi-candidate mode (Settings → toggle on) to generate 3 translations with distinct characteristics (literal, natural, creative) and pick the best one. Set a primary language for characteristics in Settings, or leave it on auto to follow the UI locale. Translation history is shown below.
 
 ## Database Migrations
 

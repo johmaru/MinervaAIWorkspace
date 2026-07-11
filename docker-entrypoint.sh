@@ -11,6 +11,17 @@ node --experimental-strip-types /app/scripts/sync-env.ts || {
 # (which calls process.chdir to /app/.next/standalone/) opens the same
 # file that migrations wrote to. The app runtime and migrations must
 # share one SQLite file regardless of CWD.
+# Legacy PostgreSQL → SQLite migration: old release images used a PG connection
+# string in DATABASE_URL. The SQLite driver (better-sqlite3) expects a file path.
+# Rewrite any postgres:// or postgresql:// URL to the default SQLite path.
+# This mirrors applyExeEnvDefaults in scripts/pack-preserve.ts for the exe path.
+case "$DATABASE_URL" in
+  postgres://*|postgresql://*)
+    echo "[entrypoint] Detected PostgreSQL DATABASE_URL (postgres://...). Switching to SQLite (data/umanschat.db)."
+    echo "[entrypoint] Previous PG data is not migrated."
+    export DATABASE_URL="/app/data/umanschat.db"
+    ;;
+esac
 case "$DATABASE_URL" in
   /*) ;;  # already absolute — pass through
   *)

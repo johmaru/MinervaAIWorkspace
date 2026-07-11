@@ -64,6 +64,7 @@ const baseSettings = {
   logLevel: "info",
   logFileEnabled: "true",
   logFilePath: "/tmp/umanschat.log",
+  translateDefaultMulti: false,
 };
 
 /**
@@ -270,7 +271,7 @@ describe("SettingsModal — embedDirty and Save payload", () => {
     const embedSelect = screen.getByDisplayValue(/LFM2.5/i);
     fireEvent.change(embedSelect, { target: { value: "Xenova/all-MiniLM-L6-v2" } });
     // Check migration confirmation (must be AFTER all update() calls, since update resets it)
-    const confirmCheckbox = await screen.findByRole("checkbox");
+    const confirmCheckbox = await screen.findByRole("checkbox", { name: /データ削除を理解してマイグレーションを実行する/ });
     fireEvent.click(confirmCheckbox);
     // Save
     fireEvent.click(screen.getByRole("button", { name: "保存" }));

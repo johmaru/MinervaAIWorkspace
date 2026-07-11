@@ -12,6 +12,8 @@ export function createLLM() {
   return new OpenAI({
     baseURL,
     apiKey: process.env.LLM_API_KEY ?? "missing",
+    timeout: 120_000,
+    maxRetries: 1,
   });
 }
 

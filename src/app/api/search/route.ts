@@ -1,9 +1,10 @@
 import { db } from "@/db";
 import { memories, threads, pageEmbeddings, pages } from "@/db/schema";
-import { eq, and, isNull, ne } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { getSessionUser } from "@/lib/auth-guards";
 import { embedText } from "@/lib/embed";
 import { cosineSimilarity } from "@/lib/vectorSearch";
+import { activeMemoryConditions } from "@/lib/memoryUtils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,10 +38,9 @@ export async function POST(req: Request) {
   const queryVector = await embedText(body.query.trim(), "query");
   if (queryVector.length === 0) return Response.json({ results: [], pages: [] });
 
-  // ── Memory search: memories + threads JOIN ──
   const memoryConditions = [
     eq(threads.userId, user.id),
-    isNull(memories.suppressedAt),
+    ...activeMemoryConditions(),
     ...(body.threadId ? [ne(memories.threadId, body.threadId)] : []),
   ];
 

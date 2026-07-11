@@ -38,7 +38,9 @@ import {
 } from "@/lib/connections";
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 import { buildPersonalizationMessage } from "@/lib/personalization";
+import { readWorkspaceFile, writeWorkspaceFile, listWorkspaceDirectory, runWorkspaceCommand } from "@/lib/workspace";
 import { logger } from "@/lib/logger";
+import { readProcessLogs } from "@/lib/logReader";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +79,30 @@ type DualTrace = {
   reviewA?: string;
   reviewB?: string;
   debateTurns?: { speaker: "A" | "B"; model: string; content: string }[];
+};
+type HyperTrace = {
+  rounds: {
+    perspective: string;
+    draft: string;
+    critique: string;
+    revised: string;
+  }[];
+  finalModel: string;
+};
+
+type CouncilPanel = {
+  id: string;
+  persona: string;
+  model: string;
+};
+
+type CouncilTrace = {
+  panels: CouncilPanel[];
+  initialAnswers: { panelId: string; content: string }[];
+  discussionTurns: { panelId: string; round: number; content: string }[];
+  finalModel: string;
+  roundsCompleted: number;
+  timeLimitReached: boolean;
 };
 
 type StreamSend = (event: string, data: unknown) => void;
@@ -186,7 +212,7 @@ export async function POST(req: Request) {
   const streamDone = new Promise<void>((resolve) => {
     resolveStream = resolve;
   });
-  const streamResult: { assistantContent: string } = { assistantContent: "" };
+  const streamResult: { assistantContent: string; assistantMessageId?: string } = { assistantContent: "" };
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -198,7 +224,9 @@ export async function POST(req: Request) {
       let assistantContent = "";
       let assistantReasoning = "";
       let dualTrace: DualTrace | undefined;
+      let hyperTrace: HyperTrace | undefined;
       let mcpConnections: McpConnection[] = [];
+      let councilTrace: CouncilTrace | undefined;
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
@@ -233,6 +261,7 @@ export async function POST(req: Request) {
                   thread,
                   userId: user.id,
                   currentThreadId: thread.id,
+                  userMessageId: prepared.userMessage.id,
                 }).catch((err) => {
                   logger.error("chat", "buildMemoryContext failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
@@ -251,7 +280,7 @@ export async function POST(req: Request) {
         // On failure, skip and continue chat (non-blocking).
         // Lifecycle is contained within the request, closed in finally.
         mcpConnections = [];
-        let mcpTools: McpTool[] = [];
+        const mcpTools: McpTool[] = [];
         const activeMcpServerIds = thread.mcpServerIds ?? [];
         if (activeMcpServerIds.length > 0) {
           try {
@@ -285,7 +314,7 @@ export async function POST(req: Request) {
         // On failure, skip and continue chat (non-blocking).
         const activeConnectionIds = thread.connectionIds ?? [];
         let connectionRows: ConnectionRow[] = [];
-        let connectionTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
+        const connectionTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
         if (activeConnectionIds.length > 0) {
           try {
             connectionRows = await loadConnections(user.id, activeConnectionIds);
@@ -307,8 +336,55 @@ export async function POST(req: Request) {
           skillMessage,
           memoryMessage,
         });
-
-        if (thread.responseMode === "dual") {
+        if (thread.responseMode === "council") {
+          send("status", { label: t(locale, "chat.statusCouncilPreparing") });
+          const council = await runCouncilFlow({
+            llm,
+            baseMessages: finalMessages,
+            finalModel,
+            thread,
+            send,
+            locale,
+          });
+          councilTrace = council.trace;
+          send("council_trace", { councilTrace });
+          await streamCompletion({
+            llm,
+            model: finalModel,
+            messages: council.finalMessages,
+            onDelta: (delta) => { assistantContent += delta; send("delta", { delta }); },
+            onReasoning: (delta) => { assistantReasoning += delta; send("thinking", { delta }); },
+            timeRange: body.timeRange,
+            locale,
+          });
+        } else if (thread.responseMode === "hyper") {
+          send("status", { label: t(locale, "chat.statusHyperPreparing") });
+          const hyper = await runHyperThinkingFlow({
+            llm,
+            baseMessages: finalMessages,
+            finalModel,
+            thread,
+            send,
+            locale,
+          });
+          hyperTrace = hyper.trace;
+          send("hyper_trace", { hyperTrace });
+          await streamCompletion({
+            llm,
+            model: finalModel,
+            messages: hyper.finalMessages,
+            onDelta: (delta) => {
+              assistantContent += delta;
+              send("delta", { delta });
+            },
+            onReasoning: (delta) => {
+              assistantReasoning += delta;
+              send("thinking", { delta });
+            },
+            timeRange: body.timeRange,
+            locale,
+          });
+        } else if (thread.responseMode === "dual") {
           send("status", { label: t(locale, "chat.statusDualPreparing") });
           const dual = await runDualModelFlow({
             llm,
@@ -391,6 +467,7 @@ export async function POST(req: Request) {
               send,
               extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
               mcpConnections,
+              connectionRows,
               timeRange: body.timeRange,
               locale,
             });
@@ -446,9 +523,14 @@ export async function POST(req: Request) {
             reasoning: assistantReasoning || null,
             metadata: dualTrace
               ? { dualTrace, model: finalModel, elapsedMs }
-              : { model: finalModel, elapsedMs },
+              : hyperTrace
+                ? { hyperTrace, model: finalModel, elapsedMs }
+                : councilTrace
+                  ? { councilTrace, model: finalModel, elapsedMs }
+                  : { model: finalModel, elapsedMs },
           })
           .returning();
+        streamResult.assistantMessageId = assistantMsg.id;
 
         await db
           .update(threads)
@@ -457,25 +539,39 @@ export async function POST(req: Request) {
 
         send("done", { assistantMessageId: assistantMsg.id, model: finalModel, elapsedMs });
       } catch (err) {
-        if (assistantContent) {
-          const [partial] = await db
-            .insert(messages)
-            .values({
-              threadId: body.threadId,
-              parentId: prepared.userMessage.id,
-              role: "assistant",
-              content: assistantContent,
-              reasoning: assistantReasoning || null,
-              metadata: dualTrace ? { dualTrace } : null,
-            })
-            .returning();
-          await db
-            .update(threads)
-            .set({ currentLeafId: partial.id, updatedAt: new Date() })
-            .where(eq(threads.id, body.threadId));
-        }
+        // Send error event FIRST so the client is never left hanging.
+        // If the partial-save DB insert below throws, the error event is already sent.
         send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") });
         logger.error("chat", "stream-error", { threadId: body.threadId, error: err instanceof Error ? err.message : String(err) });
+        // Save partial assistant content if any was generated before the error
+        if (assistantContent) {
+          try {
+            const [partial] = await db
+              .insert(messages)
+              .values({
+                threadId: body.threadId,
+                parentId: prepared.userMessage.id,
+                role: "assistant",
+                content: assistantContent,
+                metadata: dualTrace
+                  ? { dualTrace, model: finalModel, elapsedMs: Date.now() - streamStartedAt }
+                  : hyperTrace
+                    ? { hyperTrace, model: finalModel, elapsedMs: Date.now() - streamStartedAt }
+                    : councilTrace
+                      ? { councilTrace, model: finalModel, elapsedMs: Date.now() - streamStartedAt }
+                      : { model: finalModel, elapsedMs: Date.now() - streamStartedAt },
+                reasoning: assistantReasoning || null,
+              })
+              .returning();
+            streamResult.assistantMessageId = partial.id;
+            await db
+              .update(threads)
+              .set({ currentLeafId: partial.id, updatedAt: new Date() })
+              .where(eq(threads.id, body.threadId));
+          } catch (saveErr) {
+            logger.error("chat", "partial-save-failed", { threadId: body.threadId, error: saveErr instanceof Error ? saveErr.message : String(saveErr) });
+          }
+        }
       } finally {
         await db
           .update(threads)
@@ -490,12 +586,17 @@ export async function POST(req: Request) {
           try { await conn.client.close(); } catch { /* ignore close errors */ }
         }
 
+        // Notify the after() callback of completion FIRST, so memory generation
+        // proceeds even if controller.close() throws (e.g. client already disconnected).
+        resolveStream();
+
         // Close the stream immediately (lower client's isStreaming).
         logger.info("chat", "stream-complete", { threadId: body.threadId, duration: Date.now() - streamStartedAt, contentLength: assistantContent.length });
-        controller.close();
-
-        // Notify the after() callback of completion.
-        resolveStream();
+        try {
+          controller.close();
+        } catch {
+          // Controller may already be closed if the client disconnected.
+        }
       }
     },
   });
@@ -522,6 +623,7 @@ export async function POST(req: Request) {
         llm,
         finalModel,
         user.id,
+        [prepared.userMessage.id, streamResult.assistantMessageId].filter(Boolean) as string[],
       );
     } catch (err) {
       logger.error("memory", "generation failed", { error: err instanceof Error ? err.message : String(err) });
@@ -712,6 +814,8 @@ async function buildSearchContext({
       .slice(-6)
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content })),
+    undefined,
+    getEnvContext(),
   );
   logger.info("search-timing", "decideSearch", { duration: Date.now() - tDecide, searchLevel: decision.searchLevel, queries: decision.queries.length });
 
@@ -725,7 +829,7 @@ async function buildSearchContext({
   if (decision.searchLevel === "wiki") {
     const tWiki = Date.now();
     const wikiResults = await Promise.all(
-      decision.queries.slice(0, 2).map((q) => searchWikipedia(q).catch(() => null)),
+      decision.queries.slice(0, 2).map((sq) => searchWikipedia(sq.query).catch(() => null)),
     );
     const valid = wikiResults.filter((r): r is WikipediaResult => r !== null);
     logger.info("search-timing", "wikipedia lookup", { duration: Date.now() - tWiki, found: valid.length });
@@ -756,23 +860,26 @@ async function buildSearchContext({
   const allSources: SourceInfo[] = [];
   const allResults: { url: string; title: string; snippet: string; content: string }[] = [];
 
-  const queries = decision.queries.slice(0, maxRounds);
+  const searchQueries = decision.queries.slice(0, maxRounds);
   // Execute queries in parallel to reduce latency (serial would take up to maxRounds times longer)
   const tParallel = Date.now();
   const queryResults = await Promise.all(
-    queries.map(async (query, qi) => {
+    searchQueries.map(async (sq, qi) => {
       const tQuery = Date.now();
+      // Per-query time_range takes precedence over the global UI timeRange toggle.
+      // If sq.time_range is null, fall back to the global toggle.
+      const effectiveTimeRange = sq.time_range ?? timeRange;
       try {
-        const response = await searchWeb(query, maxResults, timeRange);
-        logger.info("search-timing", "query", { index: qi + 1, total: queries.length, duration: Date.now() - tQuery, results: response.results.length });
+        const response = await searchWeb(sq.query, maxResults, effectiveTimeRange, locale === "ja" ? "ja-JP" : "en-US");
+        logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: response.results.length });
         return response;
       } catch {
-        logger.info("search-timing", "query", { index: qi + 1, total: queries.length, duration: Date.now() - tQuery, results: 0, error: true });
+        logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: 0, error: true });
         return null;
       }
     }),
   );
-  logger.info("search-timing", "all queries parallel", { duration: Date.now() - tParallel, count: queries.length });
+  logger.info("search-timing", "all queries parallel", { duration: Date.now() - tParallel, count: searchQueries.length });
   for (const response of queryResults) {
     if (!response) continue;
     for (const r of response.results.slice(0, maxResults)) {
@@ -883,6 +990,76 @@ function buildFinalMessages({
   ];
 }
 
+async function runHyperThinkingFlow({
+  llm,
+  baseMessages,
+  finalModel,
+  thread,
+  send,
+  locale,
+}: {
+  llm: OpenAI;
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  finalModel: string;
+  thread: typeof threads.$inferSelect;
+  send: StreamSend;
+  locale: Locale;
+}): Promise<{ trace: HyperTrace; finalMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] }> {
+  const rounds = Math.min(5, Math.max(1, thread.hyperRounds ?? 3));
+  const perspectives = HYPER_PERSPECTIVES;
+
+  // Initial draft generation
+  send("status", { label: t(locale, "chat.statusHyperDraft") });
+  let currentDraft = await completeText(
+    llm,
+    finalModel,
+    withHyperInstruction(baseMessages, "Generate your best initial answer to the user's request. Be thorough and precise."),
+  );
+
+  const traceRounds: HyperTrace["rounds"] = [];
+
+  for (let i = 0; i < rounds; i++) {
+    const perspective = perspectives[i % perspectives.length];
+
+    // Self-critique: verify the current draft from a different perspective
+    send("status", { label: t(locale, "chat.statusHyperCritique", { round: String(i + 1), total: String(rounds), perspective }) });
+    const critique = await completeText(
+      llm,
+      finalModel,
+      [
+        ...baseMessages,
+        { role: "assistant", content: currentDraft },
+        { role: "user", content: `Review your answer above from the perspective of "${perspective}". Identify factual errors, logical gaps, missing edge cases, and areas for improvement. Be specific and critical. Do not rewrite the answer yet.` },
+      ],
+    );
+
+    // Revised answer: improve based on the critique
+    send("status", { label: t(locale, "chat.statusHyperRevise", { round: String(i + 1), total: String(rounds) }) });
+    const revised = await completeText(
+      llm,
+      finalModel,
+      [
+        ...baseMessages,
+        { role: "assistant", content: currentDraft },
+        { role: "user", content: `Critique from "${perspective}" perspective:\n${critique}\n\nBased on this critique, provide an improved answer to the original user request. Address all identified issues. Output only the revised answer.` },
+      ],
+    );
+
+    traceRounds.push({ perspective, draft: currentDraft, critique, revised });
+    currentDraft = revised;
+  }
+
+  const trace: HyperTrace = {
+    rounds: traceRounds,
+    finalModel,
+  };
+
+  return {
+    trace,
+    finalMessages: buildHyperSynthesisMessages(baseMessages, currentDraft),
+  };
+}
+
 async function runDualModelFlow({
   llm,
   baseMessages,
@@ -968,6 +1145,16 @@ function withDualInstruction(
   ];
 }
 
+function withHyperInstruction(
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  instruction: string,
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  return [
+    ...baseMessages,
+    { role: "system", content: instruction },
+  ];
+}
+
 async function runDebateTurns({
   llm,
   baseMessages,
@@ -1041,6 +1228,193 @@ function buildSynthesisMessages(
     { role: "user", content: "Give the final answer based on the dual-model trace." },
   ];
 }
+
+function buildHyperSynthesisMessages(
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  finalDraft: string,
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  return [
+    ...baseMessages,
+    {
+      role: "system",
+      content:
+        "You are giving the final answer after multiple rounds of self-review and refinement. " +
+        "The improved answer below is your best answer. Output it directly, with no meta-commentary about the review process.",
+    },
+    { role: "assistant", content: finalDraft },
+    { role: "user", content: "Provide the final answer to the original request based on the refined answer above." },
+  ];
+}
+
+async function runCouncilFlow({
+  llm,
+  baseMessages,
+  finalModel,
+  thread,
+  send,
+  locale,
+}: {
+  llm: OpenAI;
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  finalModel: string;
+  thread: typeof threads.$inferSelect;
+  send: StreamSend;
+  locale: Locale;
+}): Promise<{ trace: CouncilTrace; finalMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] }> {
+  const councilSize = Math.min(6, Math.max(2, thread.councilSize ?? 3));
+  const timeLimitMs = Math.min(21600, Math.max(30, thread.councilTimeLimit ?? 60)) * 1000;
+
+  // 1. Generate N distinct personas optimized for the user's question
+  send("status", { label: t(locale, "chat.statusCouncilPersonas") });
+  const personas = await generateCouncilPersonas(llm, finalModel, baseMessages, councilSize);
+
+  const panels: CouncilPanel[] = personas.map((persona, i) => ({
+    id: `panel-${i + 1}`,
+    persona,
+    model: finalModel,
+  }));
+  send("council_panels", { councilPanels: panels, councilFinalModel: finalModel });
+
+  // 2. Each panel generates an initial answer sequentially
+  const initialAnswers: { panelId: string; content: string }[] = [];
+  for (const panel of panels) {
+    send("status", { label: t(locale, "chat.statusCouncilInitial", { panel: panel.id }) });
+    const answer = await completeText(
+      llm,
+      finalModel,
+      withCouncilPersona(baseMessages, panel.persona, "Provide your initial answer to the user's question. Answer directly from your persona's perspective."),
+    );
+    initialAnswers.push({ panelId: panel.id, content: answer });
+    send("council_initial", { councilPanelId: panel.id, councilContent: answer });
+  }
+
+  // 3. Discussion rounds (repeat within time limit)
+  // Timer starts here (persona generation + initial answers are not counted)
+  const discussionStartedAt = Date.now();
+  const discussionTurns: { panelId: string; round: number; content: string }[] = [];
+  let round = 0;
+  let timeLimitReached = false;
+
+  while (Date.now() - discussionStartedAt < timeLimitMs) {
+    round++;
+    send("status", { label: t(locale, "chat.statusCouncilRound", { round: String(round) }) });
+
+    for (const panel of panels) {
+      if (Date.now() - discussionStartedAt >= timeLimitMs) {
+        timeLimitReached = true;
+        break;
+      }
+      send("status", { label: t(locale, "chat.statusCouncilPanel", { panel: panel.id, round: String(round) }) });
+      const transcript = formatCouncilTranscript(panels, initialAnswers, discussionTurns);
+      const turn = await completeText(
+        llm,
+        finalModel,
+        withCouncilPersona(baseMessages, panel.persona, `Discussion so far:\n${transcript}\n\nAs your persona, respond to the discussion. You may agree, disagree, add nuance, or correct errors. Be concise but substantive.`),
+      );
+      discussionTurns.push({ panelId: panel.id, round, content: turn });
+      send("council_turn", { councilPanelId: panel.id, councilRound: round, councilContent: turn });
+    }
+    if (timeLimitReached) break;
+  }
+
+  const trace: CouncilTrace = {
+    panels,
+    initialAnswers,
+    discussionTurns,
+    finalModel,
+    roundsCompleted: round,
+    timeLimitReached,
+  };
+
+  return {
+    trace,
+    finalMessages: buildCouncilSynthesisMessages(baseMessages, trace),
+  };
+}
+
+async function generateCouncilPersonas(
+  llm: OpenAI,
+  model: string,
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  count: number,
+): Promise<string[]> {
+  const personaPrompt = `You are a persona designer. The user has asked a question. Generate ${count} distinct expert personas who would approach this question from radically different angles. Each persona should have a unique perspective, background, and methodology. Return ONLY a JSON array of ${count} strings, each string being a persona description (name + expertise + thinking style in 1-2 sentences). Example format: ["Dr. Ada Chen — systems architect who thinks in terms of tradeoffs and edge cases", "Marcus Webb — pragmatic engineer who values simplicity and shipping", ...]`;
+  const result = await completeText(llm, model, [
+    ...baseMessages,
+    { role: "system", content: personaPrompt },
+    { role: "user", content: "Generate the personas now." },
+  ]);
+  try {
+    const parsed = JSON.parse(result);
+    if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) {
+      return parsed.slice(0, count);
+    }
+  } catch {
+    const lines = result.split(/\n|\d+\./).map((s) => s.trim()).filter(Boolean);
+    if (lines.length >= count) return lines.slice(0, count);
+  }
+  const defaults = [
+    "Analytical thinker — breaks problems into components, values data and evidence",
+    "Creative synthesizer — sees unexpected connections, values novel approaches",
+    "Practical pragmatist — focuses on what actually works in practice",
+    "Devil's advocate — challenges assumptions and finds weaknesses",
+    "Systems thinker — considers second-order effects and long-term implications",
+    "User advocate — prioritizes the end-user experience and accessibility",
+  ];
+  return defaults.slice(0, count);
+}
+
+function withCouncilPersona(
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  persona: string,
+  instruction: string,
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  return [
+    ...baseMessages,
+    {
+      role: "system",
+      content: `Your persona: ${persona}\n\n${instruction}\n\nStay in character. Do not mention that you are playing a role.`,
+    },
+  ];
+}
+
+function formatCouncilTranscript(
+  panels: CouncilPanel[],
+  initialAnswers: { panelId: string; content: string }[],
+  turns: { panelId: string; round: number; content: string }[],
+): string {
+  const panelMap = new Map(panels.map((p) => [p.id, p]));
+  const lines: string[] = [];
+  for (const ans of initialAnswers) {
+    const panel = panelMap.get(ans.panelId);
+    lines.push(`[${ans.panelId} (${panel?.persona ?? "Unknown"}) — Initial answer]:\n${ans.content}`);
+  }
+  for (const turn of turns) {
+    const panel = panelMap.get(turn.panelId);
+    lines.push(`[${turn.panelId} (${panel?.persona ?? "Unknown"}) — Round ${turn.round}]:\n${turn.content}`);
+  }
+  return lines.join("\n\n");
+}
+
+function buildCouncilSynthesisMessages(
+  baseMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  trace: CouncilTrace,
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const transcript = formatCouncilTranscript(trace.panels, trace.initialAnswers, trace.discussionTurns);
+  return [
+    ...baseMessages,
+    {
+      role: "system",
+      content:
+        "You are the final synthesizer. A council of AI panels with different personas has discussed the user's question. " +
+        "Review the full discussion below and provide the best possible final answer. " +
+        "Synthesize the strongest points, resolve disagreements, and present a coherent conclusion. " +
+        "Do not mention the discussion process unless it adds value to the answer.",
+    },
+    { role: "assistant", content: `Council discussion transcript:\n${transcript}` },
+    { role: "user", content: "Provide the final answer based on the council discussion." },
+  ];
+}
 async function completeText(
   llm: OpenAI,
   model: string,
@@ -1058,6 +1432,14 @@ async function completeText(
   } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
   return completion.choices[0]?.message?.content?.trim() ?? "";
 }
+
+const HYPER_PERSPECTIVES = [
+  "factual accuracy and correctness",
+  "logical consistency and soundness of reasoning",
+  "completeness — missing edge cases, exceptions, or important context",
+  "clarity and conciseness — removing unnecessary verbosity",
+  "practical applicability and actionability",
+];
 
 /**
  * Tool definitions for streaming completion.
@@ -1084,7 +1466,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "search_web",
       description:
-        "Search the web for current information or unfamiliar terms. Use when you need facts you are not confident about.",
+        "Search the web for current information using SearXNG. Use when you need facts you are not confident about. IMPORTANT: Pass keyword-based queries (e.g. 'AI news July 2026'), NOT natural-language questions (e.g. 'What is today's AI news?'). Include the date when searching for time-sensitive information.",
       parameters: {
         type: "object",
         properties: {
@@ -1105,6 +1487,84 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           query: { type: "string", description: "Search query (entity name or term)" },
         },
         required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "Read the contents of a file within the workspace. Returns the text content. Use for reading source code, config files, or any text file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Path relative to workspace root (e.g. 'src/main.ts', 'config.json'). Use absolute paths only if inside workspace." },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description: "Write text content to a file within the workspace. Creates parent directories if needed. Overwrites existing files. Use for creating or editing source code, config files, etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Path relative to workspace root" },
+          content: { type: "string", description: "The text content to write" },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_directory",
+      description: "List files and directories at the given path within the workspace. Returns names with type indicators (file/dir). Use to explore the workspace structure.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Path relative to workspace root. Use '.' for workspace root." },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description: "Execute a shell command in the workspace directory. On Windows, runs via cmd.exe. Use for building, testing, running scripts, git operations, etc. Output (stdout+stderr) is returned. Commands have a 30-second timeout.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "The command to execute" },
+        },
+        required: ["command"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_logs",
+      description: "Read the application's own process logs to diagnose errors, crashes, or unexpected behavior. Returns recent log lines from either Docker container logs (in Docker) or the log file (in exe). Use when investigating errors, crashes, or debugging issues.",
+      parameters: {
+        type: "object",
+        properties: {
+          tailLines: {
+            type: "number",
+            description: "Number of recent log lines to retrieve (default 200, max 2000)",
+          },
+          minLevel: {
+            type: "string",
+            enum: ["debug", "info", "warn", "error"],
+            description: "Minimum log level to include, for file-based logs (default 'info'). Ignored in Docker mode.",
+          },
+        },
       },
     },
   },
@@ -1249,9 +1709,9 @@ async function streamCompletion({
     // Execute each tool call and append the result as a tool role message
     for (const tc of toolCalls) {
       let toolContent: string;
-      let parsedArgs: { url?: string; query?: string };
+      let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string };
       try {
-        parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string };
+        parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string };
       } catch {
         parsedArgs = {};
       }
@@ -1279,7 +1739,7 @@ async function streamCompletion({
         send?.("status", { label: t(locale, "chat.statusToolSearch") });
         const tTool = Date.now();
         try {
-          const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange);
+          const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange, locale === "ja" ? "ja-JP" : "en-US");
           for (const r of response.results) {
             sources.push({
               url: r.url,
@@ -1313,6 +1773,58 @@ async function streamCompletion({
           toolContent = `Wikipedia lookup failed for: ${parsedArgs.query}`;
         }
         logger.info("search-timing", "tool", { tool: "search_wikipedia", round: rounds, duration: Date.now() - tTool });
+      } else if (tc.name === "read_file" && parsedArgs.path) {
+        send?.("status", { label: t(locale, "chat.statusToolReadFile") });
+        const tTool = Date.now();
+        try {
+          const result = await readWorkspaceFile(parsedArgs.path);
+          toolContent = result;
+        } catch (err) {
+          toolContent = `Failed to read file: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        logger.info("search-timing", "tool", { tool: "read_file", round: rounds, duration: Date.now() - tTool });
+      } else if (tc.name === "write_file" && parsedArgs.path && parsedArgs.content !== undefined) {
+        send?.("status", { label: t(locale, "chat.statusToolWriteFile") });
+        const tTool = Date.now();
+        try {
+          const result = await writeWorkspaceFile(parsedArgs.path, parsedArgs.content);
+          toolContent = result;
+        } catch (err) {
+          toolContent = `Failed to write file: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        logger.info("search-timing", "tool", { tool: "write_file", round: rounds, duration: Date.now() - tTool });
+      } else if (tc.name === "list_directory" && parsedArgs.path) {
+        send?.("status", { label: t(locale, "chat.statusToolListDir") });
+        const tTool = Date.now();
+        try {
+          const result = await listWorkspaceDirectory(parsedArgs.path);
+          toolContent = result;
+        } catch (err) {
+          toolContent = `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        logger.info("search-timing", "tool", { tool: "list_directory", round: rounds, duration: Date.now() - tTool });
+      } else if (tc.name === "run_command" && parsedArgs.command) {
+        send?.("status", { label: t(locale, "chat.statusToolRunCommand") });
+        const tTool = Date.now();
+        try {
+          const result = await runWorkspaceCommand(parsedArgs.command);
+          toolContent = result;
+        } catch (err) {
+          toolContent = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        logger.info("search-timing", "tool", { tool: "run_command", round: rounds, duration: Date.now() - tTool });
+      } else if (tc.name === "read_logs") {
+        send?.("status", { label: t(locale, "chat.statusToolReadLogs") });
+        const tTool = Date.now();
+        try {
+          const tailLines = typeof parsedArgs.tailLines === "number" ? parsedArgs.tailLines : 200;
+          const minLevel = (parsedArgs.minLevel === "debug" || parsedArgs.minLevel === "info" || parsedArgs.minLevel === "warn" || parsedArgs.minLevel === "error") ? parsedArgs.minLevel : "info";
+          const result = await readProcessLogs(tailLines, minLevel);
+          toolContent = `[source: ${result.source}${result.containerId ? `, container: ${result.containerId}` : ""}${result.truncated ? ", truncated" : ""}]\n${result.lines}`;
+        } catch (err) {
+          toolContent = `Failed to read logs: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        logger.info("search-timing", "tool", { tool: "read_logs", round: rounds, duration: Date.now() - tTool });
       } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
         // MCP tool: function name format "{serverName}__{toolName}"
         const parsed = parseMcpToolFunctionName(tc.name);

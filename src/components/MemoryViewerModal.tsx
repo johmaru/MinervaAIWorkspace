@@ -7,11 +7,18 @@ import { clientFetch } from "@/lib/clientFetch";
 
 type MemoryEntry = {
   id: string;
-  threadId: string;
-  threadTitle: string;
-  kind: "fact" | "working";
+  threadId?: string;
+  threadTitle?: string;
+  kind: "fact" | "working" | "profile";
   content: string;
   importance: number;
+  injectionCount?: number;
+  lastInjectedAt?: string | null;
+  lastReferencedAt?: string | null;
+  // Profile-only fields
+  category?: string;
+  confidence?: number;
+  evidenceCount?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -21,21 +28,34 @@ type ThreadRow = {
   title: string;
 };
 
+type FilterType = "all" | "fact" | "working" | "profile";
+
+type TraitCategory = "demographic" | "interest" | "speech_pattern" | "preference";
+
+const VALID_CATEGORIES: TraitCategory[] = ["demographic", "interest", "speech_pattern", "preference"];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  demographic: "memoryViewer.demographic",
+  interest: "memoryViewer.interest",
+  speech_pattern: "memoryViewer.speechPattern",
+  preference: "memoryViewer.preference",
+};
+
 type Props = {
   open: boolean;
   onClose: () => void;
 };
 
 /**
- * MemoryViewerModal — viewer/editor for the memories table.
+ * MemoryViewerModal — viewer/editor for the memories and user_traits tables.
  * List display + search/filter + edit (PATCH) + delete (logical) + add (POST).
- * Targets only the memories table (page_embeddings are excluded).
+ * When filter="profile", targets user_traits; otherwise targets memories.
  */
 export function MemoryViewerModal({ open, onClose }: Props) {
   const { t } = useI18n();
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState<"all" | "fact" | "working">("all");
+  const [filter, setFilter] = useState<FilterType>("all");
   const [search, setSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -44,6 +64,7 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   const [editContent, setEditContent] = useState("");
   const [editKind, setEditKind] = useState<"fact" | "working">("fact");
   const [editImportance, setEditImportance] = useState(0.5);
+  const [editCategory, setEditCategory] = useState<TraitCategory>("preference");
   const [saving, setSaving] = useState(false);
 
   // Delete confirmation state
@@ -54,20 +75,54 @@ export function MemoryViewerModal({ open, onClose }: Props) {
   const [addContent, setAddContent] = useState("");
   const [addKind, setAddKind] = useState<"fact" | "working">("fact");
   const [addImportance, setAddImportance] = useState(0.5);
+  const [addCategory, setAddCategory] = useState<TraitCategory>("preference");
   const [addThreadId, setAddThreadId] = useState<string | null>(null);
   const [addThreadTitle, setAddThreadTitle] = useState("");
 
   const [error, setError] = useState<string | null>(null);
 
-  const fetchMemories = useCallback(async () => {
+  const isProfileMode = filter === "profile";
+
+  const fetchMemories = useCallback(async (currentFilter: FilterType) => {
     setLoading(true);
     try {
-      const res = await clientFetch("/api/memories");
+      const endpoint = currentFilter === "profile" ? "/api/user-traits" : "/api/memories";
+      const res = await clientFetch(endpoint);
       if (!res.ok) {
         setError(t("memoryViewer.error"));
         return;
       }
-      setMemories((await res.json()) as MemoryEntry[]);
+      const rows = (await res.json()) as Record<string, unknown>[];
+      // Normalize both API responses to MemoryEntry[]
+      const normalized: MemoryEntry[] = rows.map((r) => {
+        if (currentFilter === "profile") {
+          return {
+            id: r.id as string,
+            kind: "profile",
+            content: r.content as string,
+            importance: (r.confidence as number) ?? 0.5,
+            category: r.category as string,
+            confidence: r.confidence as number,
+            evidenceCount: r.evidenceCount as number,
+            createdAt: r.createdAt as string,
+            updatedAt: r.updatedAt as string,
+          };
+        }
+        return {
+          id: r.id as string,
+          threadId: r.threadId as string,
+          threadTitle: r.threadTitle as string,
+          kind: r.kind as "fact" | "working",
+          content: r.content as string,
+          importance: (r.importance as number) ?? 0.5,
+          injectionCount: r.injectionCount as number,
+          lastInjectedAt: (r.lastInjectedAt as string) ?? null,
+          lastReferencedAt: (r.lastReferencedAt as string) ?? null,
+          createdAt: r.createdAt as string,
+          updatedAt: r.updatedAt as string,
+        };
+      });
+      setMemories(normalized);
       setError(null);
     } catch {
       setError(t("memoryViewer.error"));
@@ -76,11 +131,15 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     }
   }, [t]);
 
-  // Fetch memory list + latest threads when modal opens
+  // Fetch memory list + latest threads when modal opens, and re-fetch when
+  // switching between memories (/api/memories) and user-traits (/api/user-traits)
+  // endpoints. For all/fact/working filter changes, client-side filtering
+  // (the `filtered` variable below) handles it without an unnecessary API call
+  // that would flash the loading state and clear already-loaded data.
   useEffect(() => {
     if (!open) return;
     setPendingDeleteId(null);
-    void fetchMemories();
+    void fetchMemories(filter);
     void clientFetch("/api/threads")
       .then((res) => res.json())
       .then((rows: ThreadRow[]) => {
@@ -92,7 +151,10 @@ export function MemoryViewerModal({ open, onClose }: Props) {
         setAddThreadId(null);
         setAddThreadTitle("");
       });
-  }, [open, fetchMemories]);
+    // Re-fetch only when the endpoint type changes (profile ↔ non-profile),
+    // not on every filter value change. `filter` is read at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isProfileMode]);
 
   const filtered = memories.filter(
     (m) =>
@@ -104,7 +166,14 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     setPendingDeleteId(null);
     setEditingId(m.id);
     setEditContent(m.content);
-    setEditKind(m.kind);
+    if (m.kind === "profile") {
+      const cat = m.category && VALID_CATEGORIES.includes(m.category as TraitCategory)
+        ? (m.category as TraitCategory)
+        : "preference";
+      setEditCategory(cat);
+    } else {
+      setEditKind(m.kind);
+    }
     setEditImportance(m.importance);
   };
 
@@ -112,14 +181,16 @@ export function MemoryViewerModal({ open, onClose }: Props) {
     if (!editingId) return;
     setSaving(true);
     try {
-      const res = await clientFetch(`/api/memories/${editingId}`, {
+      const endpoint = isProfileMode
+        ? `/api/user-traits/${editingId}`
+        : `/api/memories/${editingId}`;
+      const body = isProfileMode
+        ? { content: editContent.trim(), category: editCategory }
+        : { content: editContent.trim(), kind: editKind, importance: editImportance };
+      const res = await clientFetch(endpoint, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: editContent.trim(),
-          kind: editKind,
-          importance: editImportance,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         setError(t("memoryViewer.error"));
@@ -127,60 +198,79 @@ export function MemoryViewerModal({ open, onClose }: Props) {
       }
       setEditingId(null);
       setError(null);
-      await fetchMemories();
+      await fetchMemories(filter);
     } catch {
       setError(t("memoryViewer.error"));
     } finally {
       setSaving(false);
     }
-  }, [editingId, editContent, editKind, editImportance, fetchMemories, t]);
+  }, [editingId, editContent, editKind, editImportance, editCategory, isProfileMode, filter, fetchMemories, t]);
 
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        const res = await clientFetch(`/api/memories/${id}`, { method: "DELETE" });
+        const endpoint = isProfileMode
+          ? `/api/user-traits/${id}`
+          : `/api/memories/${id}`;
+        const res = await clientFetch(endpoint, { method: "DELETE" });
         if (!res.ok) {
           setError(t("memoryViewer.error"));
           return;
         }
         setError(null);
         setPendingDeleteId(null);
-        await fetchMemories();
+        await fetchMemories(filter);
       } catch {
         setError(t("memoryViewer.error"));
       }
     },
-    [fetchMemories, t],
+    [filter, isProfileMode, fetchMemories, t],
   );
 
   const handleAdd = useCallback(async () => {
-    if (!addContent.trim() || !addThreadId) return;
+    if (!addContent.trim()) return;
+    if (!isProfileMode && !addThreadId) return;
     setSaving(true);
     try {
-      const res = await clientFetch("/api/memories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: addContent.trim(),
-          kind: addKind,
-          importance: addImportance,
-          threadId: addThreadId,
-        }),
-      });
-      if (!res.ok) {
-        setError(t("memoryViewer.error"));
-        return;
+      if (isProfileMode) {
+        const res = await clientFetch("/api/user-traits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: addContent.trim(),
+            category: addCategory,
+          }),
+        });
+        if (!res.ok) {
+          setError(t("memoryViewer.error"));
+          return;
+        }
+      } else {
+        const res = await clientFetch("/api/memories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: addContent.trim(),
+            kind: addKind,
+            importance: addImportance,
+            threadId: addThreadId,
+          }),
+        });
+        if (!res.ok) {
+          setError(t("memoryViewer.error"));
+          return;
+        }
       }
       setAddContent("");
       setAddOpen(false);
       setError(null);
-      await fetchMemories();
+      await fetchMemories(filter);
     } catch {
       setError(t("memoryViewer.error"));
     } finally {
       setSaving(false);
     }
-  }, [addContent, addKind, addImportance, addThreadId, fetchMemories, t]);
+  }, [addContent, addKind, addImportance, addThreadId, addCategory, isProfileMode, filter, fetchMemories, t]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -226,12 +316,13 @@ export function MemoryViewerModal({ open, onClose }: Props) {
           />
           <select
             value={filter}
-            onChange={(e) => setFilter(e.target.value as "all" | "fact" | "working")}
+            onChange={(e) => setFilter(e.target.value as FilterType)}
             className="rounded-xl bg-muted px-3 py-2 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="all">{t("memoryViewer.filterAll")}</option>
             <option value="fact">{t("memoryViewer.filterFact")}</option>
             <option value="working">{t("memoryViewer.filterWorking")}</option>
+            <option value="profile">{t("memoryViewer.filterProfile")}</option>
           </select>
           <MotionButton
             type="button"
@@ -254,44 +345,63 @@ export function MemoryViewerModal({ open, onClose }: Props) {
               className="rounded-lg bg-background px-3 py-2 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
             />
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-muted-foreground">{t("memoryViewer.kind")}</label>
-                <select
-                  value={addKind}
-                  onChange={(e) => setAddKind(e.target.value as "fact" | "working")}
-                  className="rounded-lg bg-background px-2 py-1 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
-                >
-                  <option value="fact">{t("memoryViewer.fact")}</option>
-                  <option value="working">{t("memoryViewer.working")}</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-muted-foreground">{t("memoryViewer.importance")}</label>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  value={addImportance}
-                  onChange={(e) => setAddImportance(Number(e.target.value))}
-                  className="w-32"
-                />
-                <span className="text-xs tabular-nums text-muted-foreground">{Math.round(addImportance * 100)}%</span>
-              </div>
-              <div className="ml-auto text-xs text-muted-foreground">
-                {addThreadId ? (
-                  <>
-                    {t("memoryViewer.thread")}: {addThreadTitle || addThreadId}
-                  </>
-                ) : (
-                  t("memoryViewer.noThread")
-                )}
-              </div>
+              {isProfileMode ? (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground">{t("memoryViewer.category")}</label>
+                  <select
+                    value={addCategory}
+                    onChange={(e) => setAddCategory(e.target.value as TraitCategory)}
+                    className="rounded-lg bg-background px-2 py-1 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {VALID_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>{t(CATEGORY_LABELS[c])}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground">{t("memoryViewer.kind")}</label>
+                    <select
+                      value={addKind}
+                      onChange={(e) => setAddKind(e.target.value as "fact" | "working")}
+                      className="rounded-lg bg-background px-2 py-1 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="fact">{t("memoryViewer.fact")}</option>
+                      <option value="working">{t("memoryViewer.working")}</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground">{t("memoryViewer.importance")}</label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={addImportance}
+                      onChange={(e) => setAddImportance(Number(e.target.value))}
+                      className="w-32"
+                    />
+                    <span className="text-xs tabular-nums text-muted-foreground">{Math.round(addImportance * 100)}%</span>
+                  </div>
+                </>
+              )}
+              {!isProfileMode && (
+                <div className="ml-auto text-xs text-muted-foreground">
+                  {addThreadId ? (
+                    <>
+                      {t("memoryViewer.thread")}: {addThreadTitle || addThreadId}
+                    </>
+                  ) : (
+                    t("memoryViewer.noThread")
+                  )}
+                </div>
+              )}
             </div>
             <MotionButton
               type="button"
               onClick={handleAdd}
-              disabled={!addContent.trim() || !addThreadId || saving}
+              disabled={!addContent.trim() || (!isProfileMode && !addThreadId) || saving}
               className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-200 hover:opacity-90 disabled:opacity-50"
               whileTap={{ scale: 0.97 }}
             >
@@ -322,28 +432,42 @@ export function MemoryViewerModal({ open, onClose }: Props) {
                       className="rounded-lg bg-background px-3 py-2 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
                     />
                     <div className="flex flex-wrap items-center gap-3">
-                      <select
-                        value={editKind}
-                        onChange={(e) => setEditKind(e.target.value as "fact" | "working")}
-                        className="rounded-lg bg-background px-2 py-1 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="fact">{t("memoryViewer.fact")}</option>
-                        <option value="working">{t("memoryViewer.working")}</option>
-                      </select>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range"
-                          min={0}
-                          max={1}
-                          step={0.1}
-                          value={editImportance}
-                          onChange={(e) => setEditImportance(Number(e.target.value))}
-                          className="w-32"
-                        />
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {Math.round(editImportance * 100)}%
-                        </span>
-                      </div>
+                      {m.kind === "profile" ? (
+                        <select
+                          value={editCategory}
+                          onChange={(e) => setEditCategory(e.target.value as TraitCategory)}
+                          className="rounded-lg bg-background px-2 py-1 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          {VALID_CATEGORIES.map((c) => (
+                            <option key={c} value={c}>{t(CATEGORY_LABELS[c])}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <>
+                          <select
+                            value={editKind}
+                            onChange={(e) => setEditKind(e.target.value as "fact" | "working")}
+                            className="rounded-lg bg-background px-2 py-1 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-primary"
+                          >
+                            <option value="fact">{t("memoryViewer.fact")}</option>
+                            <option value="working">{t("memoryViewer.working")}</option>
+                          </select>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.1}
+                              value={editImportance}
+                              onChange={(e) => setEditImportance(Number(e.target.value))}
+                              className="w-32"
+                            />
+                            <span className="text-xs tabular-nums text-muted-foreground">
+                              {Math.round(editImportance * 100)}%
+                            </span>
+                          </div>
+                        </>
+                      )}
                       <div className="ml-auto flex gap-2">
                         <MotionButton
                           type="button"
@@ -373,10 +497,18 @@ export function MemoryViewerModal({ open, onClose }: Props) {
                         className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
                           m.kind === "fact"
                             ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                            : m.kind === "profile"
+                            ? "bg-green-500/15 text-green-600 dark:text-green-400"
                             : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
                         }`}
                       >
-                        {m.kind === "fact" ? t("memoryViewer.fact") : t("memoryViewer.working")}
+                        {m.kind === "fact"
+                          ? t("memoryViewer.fact")
+                          : m.kind === "profile"
+                          ? m.category && CATEGORY_LABELS[m.category]
+                            ? t(CATEGORY_LABELS[m.category])
+                            : t("memoryViewer.profile")
+                          : t("memoryViewer.working")}
                       </span>
                       <button
                         type="button"
@@ -389,9 +521,19 @@ export function MemoryViewerModal({ open, onClose }: Props) {
                       </button>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>{m.threadTitle}</span>
-                      <span>·</span>
-                      <span>{Math.round(m.importance * 100)}%</span>
+                      {m.threadTitle && <span>{m.threadTitle}</span>}
+                      {m.threadTitle && <span>·</span>}
+                      <span>
+                        {m.kind === "profile"
+                          ? `${t("memoryViewer.confidence")}: ${Math.round((m.confidence ?? 0) * 100)}%`
+                          : `${Math.round(m.importance * 100)}%`}
+                      </span>
+                      {m.kind === "profile" && m.evidenceCount !== undefined && (
+                        <>
+                          <span>·</span>
+                          <span>{t("memoryViewer.evidenceCount")}: {m.evidenceCount}</span>
+                        </>
+                      )}
                       <span>·</span>
                       <span>{new Date(m.updatedAt).toLocaleString()}</span>
                       <div className="ml-auto flex gap-1">

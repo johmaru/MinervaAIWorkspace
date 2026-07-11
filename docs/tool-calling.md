@@ -120,7 +120,7 @@ On parse failure or LLM error, falls back to the heuristic decision, or `{ searc
 |---------------|--------|
 | `"none"` or empty queries | Returns `null` — no search, no system message |
 | `"wiki"` | Calls `searchWikipedia()` for up to 2 queries in parallel. On hit: system message with Wikipedia extract. On miss: system message noting "answer from training data." |
-| `"web"` | Calls `searchWeb()` in parallel for up to `maxRounds` queries (env `WEB_SEARCH_MAX_ROUNDS`, default 1, max 5), `maxResults` per query (env `WEB_SEARCH_MAX_RESULTS`, default 3). Results are JSON-stringified into a system message. Each result's content is sliced to `SEARCH_RESULT_CONTENT_SLICE = 2000` chars. |
+| `"web"` | Calls `searchWeb()` in parallel for up to `maxRounds` queries (env `WEB_SEARCH_MAX_ROUNDS`, default 1, max 5), `maxResults` per query (env `WEB_SEARCH_MAX_RESULTS`, default 3). Each query is a `SearchQuery` object with a per-query `time_range` that overrides the global UI toggle when non-null. A `language` param (BCP47 tag derived from locale, e.g. `ja-JP`) is passed to SearXNG to prefer locale-matched results. Results are JSON-stringified into a system message. Each result's content is sliced to `SEARCH_RESULT_CONTENT_SLICE = 2000` chars. |
 
 The resulting system message is placed into `buildFinalMessages()` and tells the model: "Search has been completed. Use this to answer directly. Do NOT attempt to search or scrape again."
 

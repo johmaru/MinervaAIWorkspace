@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `hyper_rounds` integer DEFAULT 3 NOT NULL;
