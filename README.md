@@ -278,6 +278,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
+| `TRANSLATE_TIMEOUT`     | Translation LLM timeout in seconds (increase for long texts or multi-candidate mode) | `30`                                                 |
 | `EMBED_MODEL`           | Embedding model name (`Xenova/*` ONNX model for `local` provider, or `sentence-transformers` model for `http` provider)  | `LiquidAI/LFM2.5-Embedding-350M`                     |
 | `EMBED_DIM`             | Embedding dimension (must match `EMBED_MODEL`)                     | `1024`                                               |
 | `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `local`                                              |

@@ -288,6 +288,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `LLM_MODEL`             | デフォルトモデル                                                  | `umans-glm-5.2`                                      |
 | `LLM_MODELS`            | モデルセレクタ用のカンマ区切りモデル一覧（OAI互換モード用。Umansモードでは無視） | —                                                    |
 | `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
+| `TRANSLATE_TIMEOUT`     | 翻訳LLMのタイムアウト（秒）。長文や複数候補モードで増やす        | `30`                                                 |
 | `EMBED_MODEL`           | 埋め込みモデル名（`local` プロバイダでは `Xenova/*` ONNX モデル、`http` プロバイダでは `sentence-transformers` モデル） | `LiquidAI/LFM2.5-Embedding-350M`                           |
 | `EMBED_DIM`             | 埋め込み次元数（`EMBED_MODEL` に合わせる）                          | `1024`                                               |
 | `EMBED_PROVIDER`        | 埋め込みバックエンド: `local`（ONNX）または `http`（Python embedder） | `local`                                  |

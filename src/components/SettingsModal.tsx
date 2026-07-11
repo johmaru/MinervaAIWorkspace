@@ -68,6 +68,7 @@ type SettingsResponse = {
   translateDefaultMulti: boolean;
   // Primary language for translate characteristics (null = follow UI locale)
   translatePrimaryLang: string | null;
+  translateTimeout: number;
 };
 
 type TorConnection = {
@@ -716,6 +717,20 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <option value="vi">Tiếng Việt</option>
                 <option value="th">ไทย</option>
               </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.translateTimeout")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.translateTimeoutDesc")}</span>
+              </label>
+              <input
+                type="number"
+                min={5}
+                max={300}
+                value={form.translateTimeout ?? 30}
+                onChange={(e) => update("translateTimeout", Math.min(300, Math.max(5, Number(e.target.value) || 30)))}
+                className="mt-1 w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
             </div>
           </div>
 

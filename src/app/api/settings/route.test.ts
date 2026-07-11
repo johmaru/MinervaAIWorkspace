@@ -317,6 +317,8 @@ describe("POST /api/settings — scraper /config dynamic update", () => {
 });
 
 describe("POST /api/settings — personalization settings save", () => {
+  const origTranslateTimeout = process.env.TRANSLATE_TIMEOUT;
+
   beforeEach(() => {
     fetchMock.mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -330,6 +332,8 @@ describe("POST /api/settings — personalization settings save", () => {
     fetchMock.mockReset();
     vi.unstubAllGlobals();
     dbUpdateMock.mockClear();
+    if (origTranslateTimeout === undefined) delete process.env.TRANSLATE_TIMEOUT;
+    else process.env.TRANSLATE_TIMEOUT = origTranslateTimeout;
   });
 
   async function postSettings(body: Record<string, unknown>) {
@@ -388,6 +392,29 @@ describe("POST /api/settings — personalization settings save", () => {
       personalStructure: 1,
       personalEmoji: 1,
     });
+  });
+
+  it("translateTimeout: 4 returns 400", async () => {
+    const res = await postSettings({ translateTimeout: 4 });
+    expect(res.status).toBe(400);
+    expect(dbUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("translateTimeout: 301 returns 400", async () => {
+    const res = await postSettings({ translateTimeout: 301 });
+    expect(res.status).toBe(400);
+    expect(dbUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("translateTimeout: 60 writes TRANSLATE_TIMEOUT to .env", async () => {
+    readFileSyncMock.mockReturnValue("LLM_MODEL=old\n");
+    writeFileSyncMock.mockImplementation(() => undefined);
+
+    const res = await postSettings({ translateTimeout: 60 });
+    expect(res.status).toBe(200);
+    const written = writeFileSyncMock.mock.calls[0][1] as string;
+    expect(written).toContain('TRANSLATE_TIMEOUT="60"');
+    expect(process.env.TRANSLATE_TIMEOUT).toBe("60");
   });
 });
 

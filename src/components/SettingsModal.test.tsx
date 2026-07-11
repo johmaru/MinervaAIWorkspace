@@ -65,6 +65,7 @@ const baseSettings = {
   logFileEnabled: "true",
   logFilePath: "/tmp/umanschat.log",
   translateDefaultMulti: false,
+  translateTimeout: 30,
 };
 
 /**

@@ -161,6 +161,7 @@ export async function GET(req: Request) {
     translatePrimaryLang: userRow?.translatePrimaryLang ?? null,
     personalEmoji: userRow?.personalEmoji ?? 1,
     translateDefaultMulti: process.env.TRANSLATE_DEFAULT_MULTI === "true",
+    translateTimeout: Number(process.env.TRANSLATE_TIMEOUT) || 30,
     // Logging
     logLevel: process.env.LOG_LEVEL || "info",
     logFileEnabled: process.env.LOG_FILE_ENABLED || (existsSync("/var/run/docker.sock") ? "false" : "true"),
@@ -213,6 +214,7 @@ type SettingsBody = {
   allowedRegistrationIps?: string;
   // Translate default mode
   translateDefaultMulti?: boolean;
+  translateTimeout?: number;
   // Logging
   logLevel?: string;
   logFileEnabled?: string;
@@ -251,6 +253,9 @@ export async function POST(req: Request) {
   }
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
+  }
+  if (body.translateTimeout !== undefined && (body.translateTimeout < 5 || body.translateTimeout > 300)) {
+    return new Response("translateTimeout must be 5-300 (seconds)", { status: 400 });
   }
 
   // Personalization validation
@@ -386,6 +391,7 @@ export async function POST(req: Request) {
     if (body.registrationLocked !== undefined) updates.REGISTRATION_LOCKED = body.registrationLocked ? "true" : "false";
     if (body.allowedRegistrationIps !== undefined) updates.ALLOWED_REGISTRATION_IPS = body.allowedRegistrationIps;
     if (body.translateDefaultMulti !== undefined) updates.TRANSLATE_DEFAULT_MULTI = body.translateDefaultMulti ? "true" : "false";
+    if (body.translateTimeout !== undefined) updates.TRANSLATE_TIMEOUT = String(body.translateTimeout);
     // Logging
     if (body.logLevel !== undefined) updates.LOG_LEVEL = body.logLevel;
     if (body.logFileEnabled !== undefined) updates.LOG_FILE_ENABLED = body.logFileEnabled;
