@@ -1,11 +1,14 @@
 <!-- BEGIN:work-completion-skill -->
 # Work Completion Checklist — MANDATORY
 
-**Before yielding any task, read `skill://work-completion-checklist`.**
-It covers: post-implementation review, test verification, git commit/push,
-README sync, the no-uncommitted-files rule (every file must be committed
-or added to `.gitignore`), and the end-of-task checklist. This is the
-highest-priority end-of-work gate — skipping it is not optional.
+**The `work-completion-checklist` rule (`alwaysApply: true`) is auto-injected
+into every system prompt.** It covers: post-implementation review, test
+verification, git commit/push, README sync, the no-uncommitted-files rule
+(every file must be committed or added to `.gitignore`), and the end-of-task
+checklist. This is the highest-priority end-of-work gate — skipping it is
+not optional.
+
+For detailed guidance and examples, read `skill://work-completion-checklist`.
 <!-- END:work-completion-skill -->
 
 <!-- BEGIN:ai-tool-adapters -->
