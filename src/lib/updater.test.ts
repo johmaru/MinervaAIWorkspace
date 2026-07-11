@@ -15,6 +15,7 @@ import {
   isExeEnv,
   checkForUpdate,
   downloadUpdate,
+  isValidVersion,
 } from "@/lib/updater";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -137,6 +138,40 @@ describe("updater", () => {
       expect(join(dataDir, ".update-pending")).toBe(
         join("/custom/user/root", "data", ".update-pending"),
       );
+    });
+  });
+
+  describe("isValidVersion (security)", () => {
+    it("accepts valid semver", () => {
+      expect(isValidVersion("1.0.0")).toBe(true);
+      expect(isValidVersion("0.0.0")).toBe(true);
+      expect(isValidVersion("99.99.99")).toBe(true);
+    });
+
+    it("rejects version with single quote (shell injection)", () => {
+      expect(isValidVersion("1.0.0'; evil-command; '")).toBe(false);
+    });
+
+    it("rejects version with path traversal", () => {
+      expect(isValidVersion("../../../etc/passwd")).toBe(false);
+      expect(isValidVersion("..\\..\\windows")).toBe(false);
+    });
+
+    it("rejects version with v-prefix", () => {
+      expect(isValidVersion("v1.0.0")).toBe(false);
+    });
+
+    it("rejects version with pre-release tag", () => {
+      expect(isValidVersion("1.0.0-beta")).toBe(false);
+    });
+
+    it("rejects empty string", () => {
+      expect(isValidVersion("")).toBe(false);
+    });
+
+    it("rejects non-numeric segments", () => {
+      expect(isValidVersion("a.b.c")).toBe(false);
+      expect(isValidVersion("1.0.x")).toBe(false);
     });
   });
 });

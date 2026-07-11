@@ -129,6 +129,7 @@ class SearchRequest(BaseModel):
     query: str
     max_results: int = 5
     time_range: str | None = None  # "day" | "week" | "month" | "year" | None
+    language: str | None = None  # BCP47 tag e.g. "ja-JP", "en-US". None = auto-locale.
 
 ALLOWED_TIME_RANGES = {"day", "week", "month", "year"}
 
@@ -183,6 +184,8 @@ async def search(req: SearchRequest):
             params = {"q": req.query, "format": "json"}
             if time_range:
                 params["time_range"] = time_range
+            if req.language:
+                params["language"] = req.language
 
             results = await _fetch_page(client, params)
 

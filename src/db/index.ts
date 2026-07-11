@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { mkdirSync, renameSync, unlinkSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { dirname, basename, join } from "node:path";
 import * as schema from "./schema";
 import { logger } from "../lib/logger";
@@ -116,19 +116,34 @@ function recoverDatabase(dbPath: string): Database.Database {
   for (const ext of ["-wal", "-shm", "-journal"]) {
     try { unlinkSync(dbPath + ext); } catch { /* Ignore if not present */ }
   }
-  // .recover outputs SQL text to stdout. Using the shell's `>` to write to dbPath
-  // produces an SQL text file that crashes with SQLITE_NOTADB.
-  // The correct approach is to pipe .recover output to another sqlite3 process
-  // to build a binary DB: `sqlite3 <backup> .recover | sqlite3 <newdb>`.
+  // .recover outputs SQL text to stdout. Piping .recover output to another
+  // sqlite3 process builds a binary DB: `sqlite3 <backup> .recover | sqlite3 <newdb>`.
   // If backupPath is not SQLite (i.e. SQL text from a deployed bug),
   // attempt recovery from the previous real DB backup.
+  // Security: use spawnSync (no shell) to prevent shell metacharacter injection
+  // from DATABASE_URL. Two-step pipe: capture .recover stdout, feed as stdin.
   let recoverSource = backupPath;
   if (!isSqliteFile(backupPath)) {
     recoverSource = findRealBackup(dbPath, backupPath) ?? backupPath;
   }
   try {
-    // Create a new empty DB (if it doesn't exist). Pipe .recover SQL into it.
-    execSync(`sqlite3 "${recoverSource}" ".recover" | sqlite3 "${dbPath}"`, { stdio: "ignore" });
+    // Step 1: sqlite3 <recoverSource> .recover → SQL text on stdout
+    const recoverProc = spawnSync("sqlite3", [recoverSource, ".recover"], {
+      encoding: "utf8",
+      maxBuffer: 512 * 1024 * 1024, // 512MB — enough for large DBs
+    });
+    if (recoverProc.status === 0 && recoverProc.stdout) {
+      // Step 2: sqlite3 <dbPath> — feed recovered SQL via stdin
+      const importProc = spawnSync("sqlite3", [dbPath], {
+        input: recoverProc.stdout,
+        encoding: "utf8",
+      });
+      if (importProc.status !== 0) {
+        throw new Error(`sqlite3 import failed: ${importProc.stderr || "unknown"}`);
+      }
+    } else {
+      throw new Error(`sqlite3 .recover failed: ${recoverProc.stderr || "unknown"}`);
+    }
   } catch {
     // sqlite3 CLI missing or .recover failed → empty new file. Migration rebuilds the schema.
     new Database(dbPath).close();
