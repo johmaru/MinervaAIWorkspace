@@ -1151,6 +1151,15 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           {/* Chat export */}
           <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
             <span className="block text-xs font-medium text-foreground">{t("settings.chatExportSectionTitle")}</span>
+            {onOpenHelp && (
+              <button
+                type="button"
+                onClick={() => onOpenHelp("system.chatExport")}
+                className="ml-2 inline-block text-xs text-foreground underline"
+              >
+                {t("help.openInHelp")} →
+              </button>
+            )}
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.chatExportPathLabel")}</span>

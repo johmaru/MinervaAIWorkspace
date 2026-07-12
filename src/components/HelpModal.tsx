@@ -47,11 +47,31 @@ export function HelpModal({ open, onClose, initialTopic }: Props) {
               </button>
             </li>
           </ul>
+          <p className="mb-1 mt-4 px-2 text-xs font-semibold text-muted-foreground">
+            {t("help.categories.system.label")}
+          </p>
+          <ul className="flex gap-1 sm:block sm:space-y-0.5">
+            <li>
+              <button
+                type="button"
+                onClick={() => setActiveTopic("system.chatExport")}
+                className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
+                  activeTopic === "system.chatExport"
+                    ? "bg-muted font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted/50"
+                }`}
+              >
+                {t("help.categories.system.chatExport.label")}
+              </button>
+            </li>
+          </ul>
         </nav>
         {/* Right content */}
         <div className="flex-1 overflow-y-auto pr-1">
           {activeTopic === "connections.notion" ? (
             <NotionTopic />
+          ) : activeTopic === "system.chatExport" ? (
+            <ChatExportTopic />
           ) : (
             <div className="flex h-full items-center justify-center text-center">
               <div>
@@ -122,6 +142,46 @@ export function HelpModal({ open, onClose, initialTopic }: Props) {
             <li>{t(`${n}.errorDenied`)}</li>
             <li>{t(`${n}.errorFailed`)}</li>
             <li>{t(`${n}.noConnections`)}</li>
+          </ul>
+        </section>
+      </div>
+    );
+  }
+
+  function ChatExportTopic() {
+    const n = "help.categories.system.chatExport";
+    return (
+      <div className="space-y-4">
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.whatIsTitle`)}</h3>
+          <p className="text-sm text-muted-foreground">{t(`${n}.whatIs`)}</p>
+        </section>
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.fileStructureTitle`)}</h3>
+          <p className="text-sm text-muted-foreground">{t(`${n}.fileStructure`)}</p>
+          <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.fileStructureExample`)}</code>
+        </section>
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.dockerTitle`)}</h3>
+          <p className="text-sm text-muted-foreground">{t(`${n}.dockerDesc`)}</p>
+          <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.dockerExample`)}</code>
+          <p className="mt-1 text-xs text-muted-foreground">{t(`${n}.dockerNote`)}</p>
+        </section>
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.nonDockerTitle`)}</h3>
+          <p className="text-sm text-muted-foreground">{t(`${n}.nonDockerDesc`)}</p>
+          <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.nonDockerExample`)}</code>
+        </section>
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.disableTitle`)}</h3>
+          <p className="text-sm text-muted-foreground">{t(`${n}.disableDesc`)}</p>
+        </section>
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.troubleshootingTitle`)}</h3>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            <li>{t(`${n}.troubleDockerWrongVar`)}</li>
+            <li>{t(`${n}.troubleNoFiles`)}</li>
+            <li>{t(`${n}.troubleWindowsPath`)}</li>
           </ul>
         </section>
       </div>
