@@ -310,6 +310,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `LOG_LEVEL`             | ログレベル閾値（`debug`/`info`/`warn`/`error`）                    | `info`                                               |
 | `LOG_FILE_ENABLED`      | `data/logs/umanschat.log` へのファイル出力（`true`/`false`。自動: exe→`true`、Docker→`false`） | auto                                   |
 | `LOG_FILE_MAX_SIZE`     | ローテーション前の最大ファイルサイズ（`.log.1` バックアップを1つ保持） | `5242880` (5MB)                                 |
+| `CHAT_EXPORT_PATH`      | チャットをMarkdownファイルとして保存するディレクトリ（`<YYYY>/<MM>/<DD>/<title>.md`、空 = 無効） | —                            |
 | `TZ`                   | プロンプト日時表示のタイムゾーン（空 = `Asia/Tokyo`）              | —                                                    |
 | `NOTION_CLIENT_ID`      | Notion OAuth クライアント ID（コネクション機能。[Notion 連携設定](#notion-連携設定)を参照） | — |
 | `NOTION_CLIENT_SECRET`  | Notion OAuth クライアントシークレット                              | —                                                    |

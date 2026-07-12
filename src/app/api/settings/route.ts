@@ -166,6 +166,8 @@ export async function GET(req: Request) {
     logLevel: process.env.LOG_LEVEL || "info",
     logFileEnabled: process.env.LOG_FILE_ENABLED || (existsSync("/var/run/docker.sock") ? "false" : "true"),
     logFilePath: getLogFilePath(),
+    // Chat export
+    chatExportPath: process.env.CHAT_EXPORT_PATH || "",
   });
 }
 
@@ -218,6 +220,8 @@ type SettingsBody = {
   // Logging
   logLevel?: string;
   logFileEnabled?: string;
+  // Chat export
+  chatExportPath?: string;
   applyMigration?: boolean;
 };
 
@@ -395,6 +399,7 @@ export async function POST(req: Request) {
     // Logging
     if (body.logLevel !== undefined) updates.LOG_LEVEL = body.logLevel;
     if (body.logFileEnabled !== undefined) updates.LOG_FILE_ENABLED = body.logFileEnabled;
+    if (body.chatExportPath !== undefined) updates.CHAT_EXPORT_PATH = body.chatExportPath;
     envContent = updateEnvContent(envContent, updates);
 
     writeFileSync(envPath, envContent);

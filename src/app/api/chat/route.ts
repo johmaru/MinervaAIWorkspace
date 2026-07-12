@@ -38,6 +38,7 @@ import {
 } from "@/lib/connections";
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 import { buildPersonalizationMessage } from "@/lib/personalization";
+import { appendChatExport } from "@/lib/chatExport";
 import { readWorkspaceFile, writeWorkspaceFile, listWorkspaceDirectory, runWorkspaceCommand } from "@/lib/workspace";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
@@ -611,6 +612,27 @@ export async function POST(req: Request) {
   after(async () => {
     await streamDone;
     if (!streamResult.assistantContent) return;
+    // Chat export: append user+assistant pair to the configured path.
+    // Runs for all modes (including rapid) — it's a chat record, not memory analysis.
+    // Gated on CHAT_EXPORT_PATH: skip the DB title re-read when export is disabled (the default).
+    if (process.env.CHAT_EXPORT_PATH?.trim()) {
+      try {
+        // Re-read thread title (prepareTurn may have updated it for the first message).
+        const [exportThread] = await db
+          .select({ title: threads.title })
+          .from(threads)
+          .where(eq(threads.id, body.threadId));
+        await appendChatExport({
+          threadTitle: exportThread?.title ?? thread.title,
+          userContent: prepared.content,
+          assistantContent: streamResult.assistantContent,
+        });
+      } catch (err) {
+        logger.error("chat-export", "route callback failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     // Rapid mode: skip memory and skill generation, exit immediately.
     if (body.rapid) return;
     try {

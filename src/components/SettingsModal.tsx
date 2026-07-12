@@ -69,6 +69,8 @@ type SettingsResponse = {
   // Primary language for translate characteristics (null = follow UI locale)
   translatePrimaryLang: string | null;
   translateTimeout: number;
+  // Chat export
+  chatExportPath: string;
 };
 
 type TorConnection = {
@@ -1144,6 +1146,23 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             <div>
               <span className="block text-[10px] text-muted-foreground">{t("settings.logFilePathLabel")}</span>
               <p className="break-all text-[10px] text-muted-foreground/70">{form.logFilePath}</p>
+            </div>
+          </div>
+          {/* Chat export */}
+          <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
+            <span className="block text-xs font-medium text-foreground">{t("settings.chatExportSectionTitle")}</span>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.chatExportPathLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.chatExportPathHint")}</span>
+              </label>
+              <input
+                type="text"
+                value={form.chatExportPath ?? ""}
+                onChange={(e) => update("chatExportPath", e.target.value)}
+                placeholder={t("settings.chatExportPathPlaceholder")}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
             </div>
           </div>
           </div>

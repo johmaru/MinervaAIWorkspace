@@ -297,6 +297,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LOG_LEVEL`             | Log threshold (`debug`/`info`/`warn`/`error`)                     | `info`                                               |
 | `LOG_FILE_ENABLED`      | Write logs to `data/logs/umanschat.log` (`true`/`false`; auto: exe→`true`, Docker→`false`) | auto                                   |
 | `LOG_FILE_MAX_SIZE`     | Max log file size in bytes before rotation (keeps one `.log.1` backup) | `5242880` (5MB)                                 |
+| `CHAT_EXPORT_PATH`      | Directory to export chat turns as Markdown (`<YYYY>/<MM>/<DD>/<title>.md`; empty = disabled) | —                            |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
 | `REGISTRATION_LOCKED`     | Lock all new account creation (`true`/`false`)                     | `false`                                              |
