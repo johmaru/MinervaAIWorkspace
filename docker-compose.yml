@@ -25,6 +25,10 @@ services:
       # For starting/stopping the Tor container: mount Docker socket + compose file
       - /var/run/docker.sock:/var/run/docker.sock
       - ./docker-compose.yml:/app/docker-compose.yml:ro
+      # Chat export: mount a host directory into the container.
+      # Set CHAT_EXPORT_HOST_PATH in .env to a host path (use forward slashes on Windows: C:/Users/...).
+      # When empty, defaults to ./data/chat-export (no special host path).
+      - ${CHAT_EXPORT_HOST_PATH:-./data/chat-export}:/app/chat-export
     env_file:
       - .env
     environment:
@@ -37,6 +41,9 @@ services:
       AUTH_TRUST_HOST: "true"
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Chat export: in-container path is always /app/chat-export when CHAT_EXPORT_HOST_PATH is set.
+      # This overrides the .env value so the app writes to the mounted directory.
+      CHAT_EXPORT_PATH: ${CHAT_EXPORT_HOST_PATH:+/app/chat-export}
     ports:
       - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
 
