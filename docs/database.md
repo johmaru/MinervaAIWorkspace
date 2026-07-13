@@ -168,7 +168,7 @@ Email verification tokens (Auth.js adapter contract). No primary key.
 
 ### `skills`
 
-Per-user reusable procedures/rules, extracted from conversations and stored with embeddings. Searched via client-side cosine similarity and injected into system context. See [Skills System](./skills.md).
+Per-user reusable procedures/rules, extracted from conversations and stored with embeddings. Searched via sqlite-vec `vec_distance_cosine()` and injected into system context. See [Skills System](./skills.md).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -176,7 +176,7 @@ Per-user reusable procedures/rules, extracted from conversations and stored with
 | `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
 | `name` | text NOT NULL | |
 | `content` | text NOT NULL | |
-| `embedding` | text NOT NULL (JSON) | `number[]` — see [Embedding storage](#embedding-storage) |
+| `embedding` | BLOB (Float32) | `number[]` via embeddingColumn customType — see [Embedding storage](#embedding-storage) |
 | `content_hash` | text NOT NULL | change detection |
 | `kind` | text NOT NULL, default `workflow` | enum: `workflow`, `bugfix`, `project_rule`, `tool_usage`, `coding_pattern`, `debugging` |
 | `trigger` | text | natural-language trigger |
@@ -324,7 +324,7 @@ Branching message tree. `parent_id` is NULL for the thread root; edits/regenerat
 
 ### `memories`
 
-Conversation memories (`fact` or `working`). After an assistant response completes, the conversation is summarized/classified via LLM and stored with an embedding. On the next send, client-side cosine search → recency-sorted → top-5 injected into system context (RAG). See [Memory System](./memory.md).
+Conversation memories (`fact` or `working`). After an assistant response completes, the conversation is summarized/classified via LLM and stored with an embedding. On the next send, sqlite-vec cosine search → recency-sorted → top-5 injected into system context (RAG). See [Memory System](./memory.md).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -334,7 +334,7 @@ Conversation memories (`fact` or `working`). After an assistant response complet
 | `kind` | text NOT NULL | enum: `fact`, `working` |
 | `content` | text NOT NULL | |
 | `source_message_ids` | text (JSON) | `string[]` |
-| `embedding` | text NOT NULL (JSON) | `number[]` — see [Embedding storage](#embedding-storage) |
+| `embedding` | BLOB (Float32) | `number[]` via embeddingColumn customType — see [Embedding storage](#embedding-storage) |
 | `content_hash` | text NOT NULL | dedup/change detection |
 | `model` | text NOT NULL | embedding model that produced the vector |
 | `importance` | real NOT NULL, default 0.5 | |
@@ -355,7 +355,7 @@ Unlike `memories`, these are user-scoped (direct `userId` FK, not thread-scoped)
 | `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
 | `category` | text NOT NULL | enum: `demographic`, `interest`, `speech_pattern`, `preference` |
 | `content` | text NOT NULL | |
-| `embedding` | text NOT NULL (JSON) | `number[]` — used for dedup + contradiction, NOT for retrieval |
+| `embedding` | BLOB (Float32) | `number[]` — used for dedup + contradiction, NOT for retrieval |
 | `content_hash` | text NOT NULL | SHA-256, exact dedup |
 | `model` | text NOT NULL | embedding model that produced the vector |
 | `confidence` | real NOT NULL, default 0.5 | increases with repeated evidence (+0.15 per observation, max 1.0) |
@@ -399,14 +399,14 @@ Permanent knowledge from scraped web pages. One row per URL; if `content_hash` m
 
 ### `page_embeddings`
 
-Embedding vectors for `pages` body text. Same dimensionality as `memories.embedding`. Cosine similarity computed in `vectorSearch.ts`.
+Embedding vectors for `pages` body text. Same dimensionality as `memories.embedding`. Cosine distance computed via `vec_distance_cosine()`.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | text PK | UUID |
 | `page_id` | text NOT NULL | FK → `pages.id`, `CASCADE` |
 | `content_hash` | text NOT NULL | invalidates embedding when page content changes |
-| `embedding` | text NOT NULL (JSON) | `number[]` — see [Embedding storage](#embedding-storage) |
+| `embedding` | BLOB (Float32) | `number[]` via embeddingColumn customType — see [Embedding storage](#embedding-storage) |
 | `model` | text NOT NULL | embedding model that produced the vector |
 | `created_at` | integer NOT NULL | timestamp_ms, default now |
 
