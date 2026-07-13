@@ -1,13 +1,13 @@
 # Embeddings & Vector Search
 
-Documentation of UmansChat's embedding generation subsystem: the provider abstraction over local ONNX and HTTP Python embedders, embedding storage in SQLite, client-side cosine similarity search, content hashing for deduplication, and the dimension-migration flow.
+Documentation of UmansChat's embedding generation subsystem: the provider abstraction over local ONNX and HTTP Python embedders, embedding storage as Float32 BLOB in SQLite, vector search via sqlite-vec's `vec_distance_cosine()` SQL function, content hashing for deduplication, and the dimension-migration flow.
 
 ## Relevant source files
 
 - `src/lib/embed.ts` — provider abstraction, pipeline lifecycle, `embedText` / `embedTexts` / `hashContent` / `resetEmbedPipeline`
-- `src/lib/vectorSearch.ts` — `cosineSimilarity()` pure-JS helper
+- `src/lib/vectorSearch.ts` — `toVecBuffer()`, `distanceToSimilarity()`, `cosineSimilarity()` (JS fallback)
 - `src/app/api/settings/route.ts` — `EMBED_MODEL_BASE` candidate list, dimension migration flow (`POST /api/settings`)
-- `src/db/schema.ts` — `memories`, `skills`, and `page_embeddings` table definitions (JSON embedding columns)
+- `src/db/schema.ts` — `memories`, `skills`, `page_embeddings`, `todos`, `user_traits` table definitions (Float32 BLOB embedding columns via `embeddingColumn` customType)
 - `src/lib/memory.ts` — memory extraction & storage (calls `embedText`)
 - `src/lib/memoryStore.ts` — RAG retrieval (calls `cosineSimilarity`)
 - `src/lib/skillStore.ts` — skill retrieval (calls `cosineSimilarity`)
@@ -159,67 +159,57 @@ The **local** Xenova provider ignores `kind` entirely (symmetric models need no 
 
 ## Embedding storage
 
-Embeddings are stored as **JSON text arrays** in SQLite, not as native vector columns. All three embedding-bearing tables define the column identically:
+Embeddings are stored as **Float32 BLOB** in SQLite, via the `embeddingColumn` customType defined in `src/db/schema.ts`:
 
 ```typescript
-embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+const embeddingColumn = (name: string) =>
+  customType<{ data: number[]; driverData: Buffer }>({
+    dataType: () => "text",  // BLOB values persist as BLOB in TEXT-affinity columns
+    toDriver(value) { return Buffer.from(new Float32Array(value).buffer); },
+    fromDriver(value) {
+      if (typeof value === "string") return JSON.parse(value); // legacy fallback
+      return Array.from(new Float32Array(value.buffer, value.byteOffset, value.byteLength / 4));
+    },
+  })(name);
 ```
 
-| Table | Column | File |
-|-------|--------|------|
-| `memories` | `embedding` | `src/db/schema.ts:336` |
-| `skills` | `embedding` | `src/db/schema.ts:112` |
-| `page_embeddings` | `embedding` | `src/db/schema.ts:416` |
-
-### Drizzle auto-parse
-
-Drizzle's `{ mode: "json" }` instructs the driver to serialize `number[]` to a JSON string on write and parse it back to `number[]` on read automatically. Application code therefore works with plain `number[]` everywhere — no manual `JSON.parse`/`JSON.stringify` is needed at call sites.
+Five tables use this column: `memories`, `skills`, `page_embeddings`, `todos`, `user_traits`.
 
 ### Dimension is not column-enforced
 
-Because the column is a `text` column holding a JSON array, SQLite does not enforce the vector dimension. A 384-dim vector and a 1024-dim vector both fit. The dimension is instead a **runtime contract** governed by `EMBED_DIM`:
+The column DDL is `text` but BLOB values persist as BLOB (SQLite storage class rule). SQLite does not enforce the vector dimension. `vec_distance_cosine()` errors on dimension mismatch. The expected dimension is a **runtime contract** governed by `EMBED_DIM`.
 
-- `cosineSimilarity()` guards against dimension mismatch by returning `0` when `a.length !== b.length` (see [Vector search](#vector-search)).
-- The migration flow (below) exists precisely because mixing vectors from different model spaces yields meaningless similarity scores, even when dimensions happen to match.
-
-The `model` column on `memories` and `page_embeddings` records which embedding model produced each vector (`"manual"` for API-created memories), aiding diagnosis but not enforcing compatibility.
+A one-time data migration converts legacy JSON text embeddings to Float32 BLOB on startup (via `vec_f32()` SQL function in `initDatabase()`).
 
 ## Vector search
 
-UmansChat performs vector search entirely in JavaScript — there is no pgvector or SQLite vector extension. All candidate rows for a user are loaded into memory and scored in a loop. The core computation lives in `src/lib/vectorSearch.ts`:
+Vector search is performed via sqlite-vec's `vec_distance_cosine(embedding, ?)` SQL function — a C+SIMD brute-force scan that is ~20x faster than the previous JS loop. The extension is loaded in `initDatabase()` via `sqliteVec.load(db)`.
 
-```typescript
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
-  let dot = 0;
-  let magA = 0;
-  let magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(magA) * Math.sqrt(magB);
-  if (denom === 0) return 0;
-  return dot / denom;
-}
+```sql
+-- Example: top-5 memories by cosine similarity
+SELECT id, content,
+       vec_distance_cosine(embedding, ?) AS distance
+FROM memories
+WHERE user_id = ?
+  AND vec_distance_cosine(embedding, ?) < 0.7  -- similarity > 0.3
+ORDER BY distance
+LIMIT 5
 ```
 
-### Cosine similarity
+`vec_distance_cosine` returns **distance** (1 - cosine_similarity). Threshold conversion:
 
-Cosine similarity measures the angle between two vectors, ranging from `-1` (opposite) through `0` (orthogonal) to `1` (identical direction). The formula is $\cos\theta = \frac{\mathbf{a}\cdot\mathbf{b}}{|\mathbf{a}|\,|\mathbf{b}|}$, computed in a single pass over the vectors. Because the embedding providers return L2-normalized vectors, $|\mathbf{a}|=|\mathbf{b}|=1$ in the common case and the result reduces to the dot product — but the function computes magnitudes explicitly so it is correct for un-normalized input too.
+| Similarity threshold | Distance threshold | Usage |
+|---------------------|-------------------|-------|
+| > 0.3 | < 0.7 | General retrieval (memories, skills, todos, pages) |
+| > 0.5 | < 0.5 | Feedback loop (user continued topic) |
+| > 0.75 | < 0.25 | Contradiction candidate detection |
+| > 0.85 | < 0.15 | Trait semantic dedup |
 
-### Edge cases
+The query vector is passed as a Float32Array `Buffer` via `toVecBuffer()` from `vectorSearch.ts`.
 
-The function defensively returns `0` (semantically "no similarity") in three situations:
+### JS fallback
 
-| Condition | Return | Rationale |
-|-----------|-------:|-----------|
-| Either array is empty (`length === 0`) | `0` | Embedding generation failed (model loading / error); nothing to compare |
-| Dimensions mismatch (`a.length !== b.length`) | `0` | Vectors from different model spaces; comparing them is meaningless |
-| Either vector is zero magnitude (`denom === 0`) | `0` | Avoids division by zero; a zero vector has no direction |
-
-Returning `0` rather than throwing lets retrieval pipelines (`memoryStore.ts`, `skillStore.ts`) treat failed/empty embeddings as simply non-matching, filtering them out via the `similarity > 0.3` threshold.
+`cosineSimilarity(a, b)` is kept in `vectorSearch.ts` as a pure-JS fallback for tests and small in-memory comparisons. It is not used in production query paths.
 
 ### How retrieval uses it
 

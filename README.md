@@ -32,7 +32,7 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **Todo list** — per-user task management with a sidebar modal UI (create, edit, complete, delete, filter by status). Todos support priority levels, due dates, and are vector-embedded for future semantic search. The AI can also create, list, update, and delete todos during chat via built-in tools.
 - **Tor proxy** support for anonymous scraping
 - **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control
-- **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service
+- **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service; vector search via sqlite-vec
 - **Folder organization** for threads
 - **Dark / light / system theme**
 - **EN / JA i18n toggle** (English is the default)

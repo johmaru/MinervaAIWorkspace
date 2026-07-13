@@ -520,24 +520,29 @@ The `data/` directory is volume-mounted so the database persists across containe
 
 ## Embedding storage
 
-UmansChat stores embedding vectors as **JSON text arrays**, not as native vector columns:
+UmansChat stores embedding vectors as **Float32 BLOB** via sqlite-vec:
 
 ```ts
-// src/db/schema.ts
-embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+// src/db/schema.ts — embeddingColumn customType
+// dataType: "text" (SQLite storage class is BLOB for BLOB values in TEXT-affinity columns)
+// toDriver: number[] → Buffer(Float32Array)
+// fromDriver: Buffer → number[]
+const embeddingColumn = (name: string) => customType({ ... })(name);
 ```
 
-SQLite has no native vector type, and UmansChat deliberately avoids extensions like `sqlite-vec` or `pgvector`. Instead:
+sqlite-vec (v0.1.9) is a loadable SQLite extension bundled with the app (npm package `sqlite-vec` with platform-specific prebuilt binaries for Windows x64 and Linux x64). It is loaded in `initDatabase()` via `sqliteVec.load(db)`.
 
-- The column type is `text`, stored as a JSON-serialized array of numbers (e.g. `[0.0123, -0.0456, …]`).
-- The **dimensionality is not enforced at the column level** — any-length array is accepted by SQLite.
-- The expected dimension comes from the `EMBED_DIM` environment variable (default `1024`, matching `LFM2.5-Embedding-350M`). It is used by the **client-side cosine similarity function** in `src/lib/vectorSearch.ts` for validation, not by the database.
-- Cosine similarity is computed in application code by loading candidate vectors and comparing in JS. There is no vector index; candidate sets are pre-filtered by `user_id` / `folder_id` / `kind` via standard SQL indexes before the in-memory comparison.
+- The column DDL is `text`, but BLOB values persist as BLOB (SQLite storage class rule — no ALTER TABLE needed).
+- Cosine distance is computed via `vec_distance_cosine(embedding, ?)` SQL function — a C+SIMD brute-force scan, ~20x faster than the previous JS loop.
+- The **dimensionality is not enforced at the column level** — any-length BLOB is accepted by SQLite. `vec_distance_cosine` errors on dimension mismatch.
+- The expected dimension comes from `EMBED_DIM` (default `1024`, matching `LFM2.5-Embedding-350M`).
+- Candidate sets are pre-filtered by `user_id` / `folder_id` / `kind` via standard SQL indexes before the distance computation.
+- A one-time data migration converts legacy JSON text embeddings to Float32 BLOB on startup (via `vec_f32()` SQL function).
 
 This design means:
 
 - **No DDL is needed when changing `EMBED_DIM`.** Switching embedding models only requires clearing the now-incompatible vector data. The Settings GUI's embedding-model migration (`applyMigration`) deletes all rows from `memories` and `page_embeddings` and re-embeds `skills` (user-created, persistent). See [Memory System](./memory.md) and [Skills System](./skills.md).
-- **No vector extension dependency.** No `pgvector`, no `sqlite-vec`, no HNSW index to maintain or rebuild.
+- **sqlite-vec is bundled, not external.** Prebuilt binaries ship via npm optionalDependencies — no Docker service, no separate process.
 - **Column type is dimension-agnostic.** The same `embedding` column stores 384-, 768-, or 1024-dimensional vectors without a schema change.
 
 ## See also

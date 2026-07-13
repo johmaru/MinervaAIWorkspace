@@ -378,6 +378,8 @@ The one intentional difference is SQLite journal mode: Docker uses `journal_mode
 
 When adding a new runtime dependency or build artifact, it must be added to **both** the Dockerfile's runner stage copy list and `pack-exe.ts`'s copy steps, or the two deployments will diverge.
 
+**sqlite-vec** is a npm dependency with platform-specific prebuilt binaries (`sqlite-vec-windows-x64` for exe, `sqlite-vec-linux-x64` for Docker). Both are resolved automatically by `bun install` / `npm install`. The extension is loaded in `initDatabase()` (`src/db/index.ts`) for all Database instances. The launcher's `runMigrations()` does not load sqlite-vec (migrations are DDL-only, no vec functions).
+
 ## See also
 
 - [Settings & Environment](./settings-env.md) — full `.env` variable reference, the Settings API, and runtime cache invalidation

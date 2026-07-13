@@ -43,14 +43,16 @@ pipeline (`transformers.js`) and disables web scraping.
 
 ### Design tenets
 
-1. **Self-hosted & self-contained** — no managed database, no vector DB, no external
-   cache layer. The SQLite file *is* the entire persistence layer.
+1. **Self-hosted & self-contained** — no managed database, no external vector DB
+   service, no external cache layer. The SQLite file *is* the entire persistence layer.
+   Vector search uses sqlite-vec, a loadable SQLite extension bundled with the app
+   (not an external service).
 2. **OpenAI-compatible** — the LLM client (`src/lib/llm.ts`) uses the OpenAI SDK with a
    configurable `baseURL`, so any OpenAI-compatible endpoint works (UmansAI, OpenAI, vLLM, Ollama).
 3. **Branching-first** — the message store is a tree, not a flat list. Every edit or
    regenerate creates a sibling node, preserving the full conversation history.
-4. **RAG without a vector DB** — embeddings are stored as JSON arrays in `text` columns;
-   cosine similarity is computed in-process in JavaScript.
+4. **RAG with sqlite-vec** — embeddings are stored as Float32 BLOB; cosine distance
+   is computed via sqlite-vec's `vec_distance_cosine()` SQL function in-process.
 5. **Streaming-first** — chat responses are delivered via Server-Sent Events, with the
    client driving optimistic UI updates before the server responds.
 
