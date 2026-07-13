@@ -6,8 +6,33 @@ import {
   real,
   index,
   uniqueIndex,
+  customType,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+
+/**
+ * Embedding column type: stored as a Float32Array BLOB (compact, native for sqlite-vec),
+ * but exposed as number[] in TypeScript. The column DDL is still `text` (SQLite storage
+ * class is determined by the value, not the column affinity — BLOB values persist as BLOB
+ * even in TEXT-affinity columns), so no ALTER TABLE is needed when switching from the
+ * old JSON-text storage.
+ *
+ * - toDriver: number[] → Buffer(Float32Array) for storage
+ * - fromDriver: Buffer → number[] for reads
+ */
+const embeddingColumn = (name: string) =>
+  customType<{ data: number[]; driverData: Buffer }>({
+    dataType: () => "text",
+    toDriver(value) {
+      return Buffer.from(new Float32Array(value).buffer);
+    },
+    fromDriver(value) {
+      if (!value) return [];
+      // Legacy JSON text (pre-sqlite-vec migration) — parse as number[]
+      if (typeof value === "string") return JSON.parse(value);
+      return Array.from(new Float32Array(value.buffer, value.byteOffset, value.byteLength / 4));
+    },
+  })(name);
 
 /** Common helper for timestamp columns: stored as Unix epoch ms (integer), read/written as Date. */
 function ts(name: string) {
@@ -92,8 +117,9 @@ export const verificationTokens = sqliteTable("verification_tokens", {
 });
 
 // Embedding dimensions: env EMBED_DIM (default 1024 = LFM2.5-Embedding-350M).
-// In SQLite, embeddings are stored as text (JSON array), so the dimension is
-// not a column type but used for validation by the client-side cosine function (vectorSearch.ts).
+// Embeddings are stored as Float32 BLOB via sqlite-vec (vec_distance_cosine).
+// The column DDL is `text` but BLOB values persist as BLOB (SQLite storage class rule).
+// Dimension is not enforced at column level — runtime contract via EMBED_DIM.
 
 /**
  * skills — per-user reusable procedures/rules.
@@ -111,7 +137,7 @@ export const skills = sqliteTable("skills", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   content: text("content").notNull(),
-  embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+  embedding: embeddingColumn("embedding").notNull(),
   contentHash: text("content_hash").notNull(),
   kind: text("kind", {
     enum: ["workflow", "bugfix", "project_rule", "tool_usage", "coding_pattern", "debugging"],
@@ -354,7 +380,7 @@ export const messages = sqliteTable(
  *   with cosine > 0.5 (user continued the topic). importance is adjusted ±0.05/0.02 per cycle.
  * - folderId: When folders.memoryScope is "folder", search is limited to the same folder.
  *   "global" searches across all threads (default).
- * - embedding: JSON array (text column, mode: json). Cosine computed in vectorSearch.ts.
+ * - embedding: Float32 BLOB (embeddingColumn customType). Cosine via sqlite-vec vec_distance_cosine().
  *
  * Active memory = suppressedAt IS NULL AND (validUntil IS NULL OR validUntil > now)
  *   AND (expiresAt IS NULL OR expiresAt > now).
@@ -371,7 +397,7 @@ export const memories = sqliteTable(
     kind: text("kind", { enum: ["fact", "working"] }).notNull(),
     content: text("content").notNull(),
     sourceMessageIds: text("source_message_ids", { mode: "json" }).$type<string[]>(),
-    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    embedding: embeddingColumn("embedding").notNull(),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     importance: real("importance").notNull().default(0.5),
@@ -405,7 +431,7 @@ export const todos = sqliteTable(
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     description: text("description"),
-    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    embedding: embeddingColumn("embedding").notNull(),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     status: text("status", {
@@ -506,7 +532,7 @@ export const pages = sqliteTable(
 /**
  * page_embeddings — embedding vectors for page body text.
  * Same dimensions as the embedding column in the memories table. EMBED_DIM (configurable via env).
- * embedding is a JSON array (text column, mode: json). Cosine computed in vectorSearch.ts.
+ * embedding is a Float32 BLOB (embeddingColumn). Cosine via sqlite-vec vec_distance_cosine().
  */
 export const pageEmbeddings = sqliteTable(
   "page_embeddings",
@@ -516,7 +542,7 @@ export const pageEmbeddings = sqliteTable(
       .notNull()
       .references(() => pages.id, { onDelete: "cascade" }),
     contentHash: text("content_hash").notNull(),
-    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    embedding: embeddingColumn("embedding").notNull(),
     model: text("model").notNull(),
     createdAt: tsNow("created_at"),
   },
@@ -548,7 +574,7 @@ export const userTraits = sqliteTable(
       enum: ["demographic", "interest", "speech_pattern", "preference"],
     }).notNull(),
     content: text("content").notNull(),
-    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    embedding: embeddingColumn("embedding").notNull(),
     contentHash: text("content_hash").notNull(),
     model: text("model").notNull(),
     confidence: real("confidence").notNull().default(0.5),

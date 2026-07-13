@@ -280,7 +280,8 @@ export async function POST(req: Request) {
 
   // Determine the new dimension
   const newDim = body.embedDim ?? dbVectorDim;
-  // In SQLite, embeddings are stored as text (JSON arrays), so no column DDL is needed for dimension changes.
+  // Embeddings are stored as Float32 BLOB (sqlite-vec). No DDL is needed for dimension changes
+  // (BLOB storage class persists in TEXT-affinity columns without ALTER TABLE).
   // However, different models' vector spaces are incompatible, so when the dimension changes,
   // all existing embedding data must be deleted.
   const needsMigration = body.embedDim !== undefined && body.embedDim !== dbVectorDim;
@@ -296,10 +297,9 @@ export async function POST(req: Request) {
       { status: 409 },
     );
   }
-
   let pipelineResetForMigration = false;
   if (needsMigration && body.applyMigration) {
-    // The embedding column is text (JSON), so no DDL is needed. Since the dimension changes,
+    // Embeddings are stored as Float32 BLOB. No DDL is needed. Since the dimension changes,
     // delete all existing vector data (vectors from different model spaces are incompatible).
     // memories and page_embeddings can be regenerated from conversations, so they are deleted.
     // skills are user-created persistent prompts, so they are not deleted but re-embedded.

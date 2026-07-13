@@ -2,7 +2,7 @@ import { eq, and, desc, asc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { todos } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
-import { cosineSimilarity } from "@/lib/vectorSearch";
+import { toVecBuffer } from "@/lib/vectorSearch";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 export type TodoPriority = "low" | "medium" | "high";
@@ -143,17 +143,10 @@ export async function deleteTodo(userId: string, id: string): Promise<void> {
 
 /**
  * Semantic search: find todos matching a query string.
- * Embeds the query, scores all user todos via cosineSimilarity, filters > 0.3, returns top-5.
+ * Embeds the query, uses vec_distance_cosine in SQL (similarity > 0.3 = distance < 0.7).
  * Returns [] if no todos or embedding fails.
  */
 export async function searchTodos(userId: string, query: string, limit = 5) {
-  const allUserTodos = await db
-    .select()
-    .from(todos)
-    .where(eq(todos.userId, userId));
-
-  if (allUserTodos.length === 0) return [];
-
   let queryVec: number[];
   try {
     queryVec = await embedText(query, "query");
@@ -161,16 +154,16 @@ export async function searchTodos(userId: string, query: string, limit = 5) {
     return [];
   }
   if (queryVec.length === 0) return [];
+  const queryBuf = toVecBuffer(queryVec);
 
-  const scored = allUserTodos
-    .filter((t) => t.embedding.length > 0)
-    .map((t) => ({
-      todo: t,
-      score: cosineSimilarity(queryVec, t.embedding),
-    }))
-    .filter((r) => r.score > 0.3)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+  const rows = await db.all(sql`
+    SELECT *
+    FROM todos
+    WHERE user_id = ${userId}
+      AND vec_distance_cosine(embedding, ${queryBuf}) < 0.7
+    ORDER BY vec_distance_cosine(embedding, ${queryBuf})
+    LIMIT ${limit}
+  `);
 
-  return scored.map((r) => r.todo);
+  return rows;
 }
