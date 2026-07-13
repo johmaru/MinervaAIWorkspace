@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
       "node_modules/better-sqlite3/build/Release/**/*",
       "node_modules/onnxruntime-node/bin/napi-v3/win32/x64/**/*",
       "node_modules/@xenova/transformers/dist/**/*",
+      "node_modules/sqlite-vec-windows-x64/**/*",
+      "node_modules/sqlite-vec-linux-x64/**/*",
     ],
   },
 };

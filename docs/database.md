@@ -19,7 +19,7 @@ UmansChat uses **SQLite** via the [`better-sqlite3`](https://github.com/WiseLibs
 - **ORM:** Drizzle — lightweight, type-safe, SQL-first. The schema is defined in TypeScript (`src/db/schema.ts`) and Drizzle generates SQL migrations with `drizzle-kit`.
 - **DB file:** `data/umanschat.db` (a single file on disk; the `data/` directory is created automatically on first launch). Overridable via the `DATABASE_URL` environment variable.
 
-No external database server is required. There is no pgvector extension and no HNSW index — embeddings are stored as JSON text and cosine similarity is computed in application code (see [Embedding storage](#embedding-storage)).
+No external database server is required. Vector search uses sqlite-vec (v0.1.9), a loadable SQLite extension bundled with the app — embeddings are stored as Float32 BLOB and cosine distance is computed via `vec_distance_cosine()` SQL function (see [Embedding storage](#embedding-storage)).
 
 ## Connection setup
 
