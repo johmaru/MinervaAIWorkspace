@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
-import { users, memories, pageEmbeddings, skills } from "@/db/schema";
+import { users, memories, pageEmbeddings, skills, todos } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
@@ -319,6 +319,12 @@ export async function POST(req: Request) {
     for (const skill of allSkills) {
       const vector = await embedText(skill.content, "document");
       await db.update(skills).set({ embedding: vector }).where(eq(skills.id, skill.id));
+    }
+    const allTodos = await db.select({ id: todos.id, title: todos.title, description: todos.description }).from(todos);
+    for (const todo of allTodos) {
+      const embedContent = `${todo.title}${todo.description ? "\n" + todo.description : ""}`;
+      const vector = await embedText(embedContent, "document");
+      await db.update(todos).set({ embedding: vector }).where(eq(todos.id, todo.id));
     }
   }
 

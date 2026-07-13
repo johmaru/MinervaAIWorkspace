@@ -393,6 +393,39 @@ export const memories = sqliteTable(
     expiresIdx: index("memories_expires_idx").on(t.expiresAt),
   }),
 );
+/**
+ * todos — per-user task items with vector embedding for future semantic search.
+ * status: pending → in_progress → completed. Physical DELETE (todos are disposable).
+ * threadId is nullable: todos from the modal have null, AI-created todos link to the chat thread.
+ */
+export const todos = sqliteTable(
+  "todos",
+  {
+    id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+    contentHash: text("content_hash").notNull(),
+    model: text("model").notNull(),
+    status: text("status", {
+      enum: ["pending", "in_progress", "completed"],
+    }).notNull().default("pending"),
+    priority: text("priority", {
+      enum: ["low", "medium", "high"],
+    }).notNull().default("medium"),
+    dueAt: ts("due_at"),
+    completedAt: ts("completed_at"),
+    threadId: text("thread_id").references(() => threads.id, { onDelete: "set null" }),
+    createdAt: tsNow("created_at"),
+    updatedAt: tsNow("updated_at"),
+  },
+  (t) => ({
+    userIdx: index("todos_user_idx").on(t.userId),
+    statusIdx: index("todos_status_idx").on(t.status),
+    dueIdx: index("todos_due_idx").on(t.dueAt),
+  }),
+);
 
 /**
  * memory_injections — junction table tracking which memories were injected for each user message.

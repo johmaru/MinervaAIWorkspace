@@ -4,6 +4,7 @@ import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDef
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions, folders } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
+import { createTodo, listTodos, updateTodo, deleteTodo } from "@/lib/todoStore";
 import type { Locale } from "@/lib/i18n/types";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
@@ -357,6 +358,8 @@ export async function POST(req: Request) {
             onReasoning: (delta) => { assistantReasoning += delta; send("thinking", { delta }); },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
           });
         } else if (thread.responseMode === "hyper") {
           send("status", { label: t(locale, "chat.statusHyperPreparing") });
@@ -384,6 +387,8 @@ export async function POST(req: Request) {
             },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
           });
         } else if (thread.responseMode === "dual") {
           send("status", { label: t(locale, "chat.statusDualPreparing") });
@@ -411,6 +416,8 @@ export async function POST(req: Request) {
             },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
           });
         } else {
           if (body.rapid) {
@@ -430,6 +437,8 @@ export async function POST(req: Request) {
               },
               timeRange: body.timeRange,
               locale,
+              userId: user.id,
+              threadId: body.threadId,
             });
           } else {
             // Function calling (tool use) probe: determine if the model supports tool use.
@@ -471,6 +480,8 @@ export async function POST(req: Request) {
               connectionRows,
               timeRange: body.timeRange,
               locale,
+              userId: user.id,
+              threadId: body.threadId,
             });
           }
         }
@@ -511,6 +522,8 @@ export async function POST(req: Request) {
             },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;
@@ -1590,6 +1603,69 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "todo_create",
+      description: "Create a new todo item (task) for the user. Use when the user asks to add, create, or schedule a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The todo title" },
+          description: { type: "string", description: "Optional description or notes" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level (default: medium)" },
+          due_at: { type: "string", description: "Due date in ISO 8601 format (e.g. 2026-07-15T00:00:00Z)" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todo_list",
+      description: "List the user's todo items. Use when the user asks what tasks they have, or wants to see their todo list.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["pending", "in_progress", "completed", "all"], description: "Filter by status (default: all)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todo_update",
+      description: "Update an existing todo item (change title, description, status, priority, or due date). Use when the user asks to modify, complete, or reschedule a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The todo id" },
+          title: { type: "string", description: "New title" },
+          description: { type: "string", description: "New description" },
+          status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "New status" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "New priority" },
+          due_at: { type: "string", description: "New due date in ISO 8601 format, or null to clear" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todo_delete",
+      description: "Delete a todo item. Use when the user asks to remove or delete a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The todo id to delete" },
+        },
+        required: ["id"],
+      },
+    },
+  },
 ];
 
 const MAX_TOOL_ROUNDS = 3;
@@ -1607,6 +1683,8 @@ async function streamCompletion({
   connectionRows,
   timeRange,
   locale,
+  userId,
+  threadId,
 }: {
   llm: OpenAI;
   model: string;
@@ -1620,6 +1698,8 @@ async function streamCompletion({
   connectionRows?: ConnectionRow[];
   timeRange?: "day" | "week" | "month" | "year";
   locale: Locale;
+  userId: string;
+  threadId?: string | null;
 }) {
   const llmStreamStartedAt = Date.now();
   logger.info("chat", "llm-stream-start", { model });
@@ -1731,9 +1811,9 @@ async function streamCompletion({
     // Execute each tool call and append the result as a tool role message
     for (const tc of toolCalls) {
       let toolContent: string;
-      let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string };
+      let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string };
       try {
-        parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string };
+        parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string };
       } catch {
         parsedArgs = {};
       }
@@ -1847,6 +1927,35 @@ async function streamCompletion({
           toolContent = `Failed to read logs: ${err instanceof Error ? err.message : String(err)}`;
         }
         logger.info("search-timing", "tool", { tool: "read_logs", round: rounds, duration: Date.now() - tTool });
+      } else if (tc.name === "todo_create" && parsedArgs.title) {
+        send?.("status", { label: t(locale, "chat.statusToolTodoCreate") });
+        const created = await createTodo(userId, {
+          title: parsedArgs.title,
+          description: parsedArgs.description,
+          priority: parsedArgs.priority === "low" || parsedArgs.priority === "medium" || parsedArgs.priority === "high" ? parsedArgs.priority : undefined,
+          dueAt: parsedArgs.due_at ? new Date(parsedArgs.due_at) : null,
+          threadId: threadId ?? null,
+        });
+        toolContent = JSON.stringify(created);
+      } else if (tc.name === "todo_list") {
+        send?.("status", { label: t(locale, "chat.statusToolTodoList") });
+        const status = parsedArgs.status === "pending" || parsedArgs.status === "in_progress" || parsedArgs.status === "completed" ? parsedArgs.status : undefined;
+        const list = await listTodos(userId, status);
+        toolContent = JSON.stringify(list);
+      } else if (tc.name === "todo_update" && parsedArgs.id) {
+        send?.("status", { label: t(locale, "chat.statusToolTodoUpdate") });
+        const updated = await updateTodo(userId, parsedArgs.id, {
+          title: parsedArgs.title,
+          description: parsedArgs.description,
+          status: parsedArgs.status === "pending" || parsedArgs.status === "in_progress" || parsedArgs.status === "completed" ? parsedArgs.status : undefined,
+          priority: parsedArgs.priority === "low" || parsedArgs.priority === "medium" || parsedArgs.priority === "high" ? parsedArgs.priority : undefined,
+          dueAt: parsedArgs.due_at === null ? null : (parsedArgs.due_at ? new Date(parsedArgs.due_at) : undefined),
+        });
+        toolContent = updated ? JSON.stringify(updated) : "Todo not found";
+      } else if (tc.name === "todo_delete" && parsedArgs.id) {
+        send?.("status", { label: t(locale, "chat.statusToolTodoDelete") });
+        await deleteTodo(userId, parsedArgs.id);
+        toolContent = "Todo deleted";
       } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
         // MCP tool: function name format "{serverName}__{toolName}"
         const parsed = parseMcpToolFunctionName(tc.name);
