@@ -97,6 +97,7 @@ vi.mock("@/components/ThreadSettings", () => ({
 
 beforeEach(() => {
   localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("umanschat-send-mode", "enter");
   mockState = {
     messages: [],
     thread: null,
@@ -377,5 +378,59 @@ describe("ChatWindow — message rendering", () => {
     mockState.error = "boom";
     render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
     expect(screen.getByText(/boom/)).toBeInTheDocument();
+  });
+});
+
+describe("ChatWindow — ctrl-enter mode (default)", () => {
+  beforeEach(() => {
+    localStorage.removeItem("umanschat-send-mode");
+    mockState.thread = mockThread();
+  });
+
+  it("sends on Ctrl+Enter, inserts newline on Enter (ctrl-enter mode)", () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    mockState.send = send;
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    const ta = screen.getByPlaceholderText(/Ctrl\+Enter で送信/) as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "hello" } });
+
+    // Enter単体 → 送信されない
+    fireEvent.keyDown(ta, { key: "Enter", shiftKey: false });
+    expect(send).not.toHaveBeenCalled();
+
+    // Ctrl+Enter → 送信
+    fireEvent.keyDown(ta, { key: "Enter", ctrlKey: true });
+    expect(send).toHaveBeenCalledWith("hello", { attachmentIds: [] });
+  });
+
+  it("Cmd+Enter sends on Mac (ctrl-enter mode)", () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    mockState.send = send;
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    const ta = screen.getByPlaceholderText(/Ctrl\+Enter で送信/) as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "hello" } });
+    fireEvent.keyDown(ta, { key: "Enter", metaKey: true });
+    expect(send).toHaveBeenCalledWith("hello", { attachmentIds: [] });
+  });
+
+  it("does not send during IME composition in ctrl-enter mode", () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    mockState.send = send;
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    const ta = screen.getByPlaceholderText(/Ctrl\+Enter で送信/) as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "hello" } });
+    fireEvent.keyDown(ta, { key: "Enter", ctrlKey: true, keyCode: 229 });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("toggle button switches to enter mode", () => {
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    // Default: ctrl-enter mode, button shows ⌃↵
+    expect(screen.getByLabelText("Ctrl+Enter送信モード")).toBeInTheDocument();
+    // Click to toggle to enter mode
+    fireEvent.click(screen.getByLabelText("Ctrl+Enter送信モード"));
+    // Now in enter mode, placeholder changes
+    expect(screen.getByPlaceholderText(/Enter で送信/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Enter送信モード")).toBeInTheDocument();
   });
 });

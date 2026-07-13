@@ -345,7 +345,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 ## Usage
 
 - **Create a thread** — start typing in the composer; the thread is created on first send and an auto title is generated from your first message.
-- **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token. Each completed assistant message shows the model name and elapsed response time below the answer.
+- **Send a message** — by default, press `Ctrl+Enter` (or `Cmd+Enter` on Mac) to send and `Enter` for a newline. Click the `⌃↵` toggle in the composer to switch to `Enter`-to-send mode (`Shift+Enter` for newline). Responses stream token-by-token. Each completed assistant message shows the model name and elapsed response time below the answer.
 - **Rapid mode** — click ⚡ in the composer to skip web search, URL scraping, and memory/skill retrieval for faster responses. Stays on for subsequent messages (and across thread switches) until you click ⚡ again. MCP/connections tools and dual-model mode still work normally.
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
 - **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
