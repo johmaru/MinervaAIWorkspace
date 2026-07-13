@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   // Treat native modules as external packages (load via require instead of bundling).
   // better-sqlite3 is a native addon; including it in the Next.js bundle causes
   // dlopen to fail during the "Collecting page data" phase.
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "sqlite-vec"],
   // Include native binaries in the trace (required for standalone distribution).
   outputFileTracingIncludes: {
     "/*": [
