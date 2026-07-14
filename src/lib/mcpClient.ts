@@ -6,6 +6,55 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { logger } from "@/lib/logger";
 
 /**
+ * Allowed binaries for MCP stdio transport.
+ * Excludes: docker (host escape), env (command passthrough),
+ * sh/bash/cmd (shell injection), curl/wget/nc (network tools).
+ */
+const ALLOWED_MCP_BINARIES = new Set([
+  "npx", "node", "python", "python3", "uvx", "bun",
+]);
+
+/**
+ * Flags that enable code execution — always blocked in MCP args.
+ */
+const BLOCKED_MCP_FLAGS = new Set([
+  "-e", "--eval",
+  "-c",
+  "-i", "--interactive",
+  "--exec",
+]);
+
+/**
+ * Validate an MCP stdio command and its args.
+ * @returns { allowed: boolean, reason?: string }
+ */
+export function validateMcpStdioCommand(
+  command: string,
+  args: string[],
+): { allowed: boolean; reason?: string } {
+  // Extract binary name from path
+  const parts = command.split(/[/\\]/);
+  const binaryName = (parts[parts.length - 1] || "").replace(/\.exe$/i, "").toLowerCase();
+
+  if (!binaryName) {
+    return { allowed: false, reason: "empty command" };
+  }
+
+  if (!ALLOWED_MCP_BINARIES.has(binaryName)) {
+    return { allowed: false, reason: `binary "${binaryName}" is not in the allowed list` };
+  }
+
+  for (const arg of args) {
+    const flag = arg.toLowerCase();
+    if (BLOCKED_MCP_FLAGS.has(flag)) {
+      return { allowed: false, reason: `flag "${arg}" is blocked (code execution)` };
+    }
+  }
+
+  return { allowed: true };
+}
+
+/**
  * Normalized shape of MCP server config.
  * Compatible with DB mcpServers rows (has id/name/transport/url/command/args/env).
  */
@@ -101,10 +150,23 @@ export async function connectMcpServer(
         logger.error("mcp", "stdio server has no command, skipping", { server: config.name });
         return null;
       }
+      const stdioArgs = config.args ?? [];
+      const validation = validateMcpStdioCommand(config.command, stdioArgs);
+      if (!validation.allowed) {
+        logger.error("mcp", "stdio command blocked", { server: config.name, reason: validation.reason });
+        return null;
+      }
+      // Minimal env: no secrets leaked to MCP child process
+      const safeEnv: Record<string, string> = {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        USERPROFILE: process.env.USERPROFILE ?? "",
+        LANG: process.env.LANG ?? "en_US.UTF-8",
+      };
       const transport = new StdioClientTransport({
         command: config.command,
-        args: config.args ?? [],
-        env: config.env ?? undefined,
+        args: stdioArgs,
+        env: { ...safeEnv, ...(config.env ?? {}) },
       });
       await client.connect(transport);
     } else {

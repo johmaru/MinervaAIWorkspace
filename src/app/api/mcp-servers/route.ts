@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { mcpServers } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
+import { validateMcpStdioCommand } from "@/lib/mcpClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +69,10 @@ export async function POST(req: Request) {
   } else {
     if (!body.command?.trim()) {
       return new Response("command is required for stdio transport", { status: 400 });
+    }
+    const validation = validateMcpStdioCommand(body.command.trim(), body.args ?? []);
+    if (!validation.allowed) {
+      return new Response(`Invalid command: ${validation.reason}`, { status: 400 });
     }
   }
 

@@ -1,16 +1,12 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import { readFileSync, writeFileSync } from "node:fs";
 import { getRequestLocale, t } from "@/lib/i18n";
 import { getSessionUser } from "@/lib/auth-guards";
 import { resolveEnvPath, escapeEnvValue } from "@/lib/envUtils";
 
-const execAsync = promisify(exec);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const COMPOSE_DIR = process.cwd();
 const SOCKS_PROXY = "socks5://tor:9050";
 
 /**
@@ -127,12 +123,18 @@ export async function POST(req: Request) {
     );
   }
 
-  // Restart the scraper container to reflect SCRAPE_PROXY changes
+  // Notify scraper of proxy change via /config endpoint (no container restart needed)
   try {
-    await execAsync("docker compose restart scraper", {
-      cwd: COMPOSE_DIR,
-      timeout: 60_000,
+    const scraperUrl = process.env.SCRAPER_URL || "http://scraper:8000";
+    const response = await fetch(`${scraperUrl}/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scrape_proxy: wantProxy || null }),
+      signal: AbortSignal.timeout(10_000),
     });
+    if (!response.ok) {
+      throw new Error(`scraper /config returned ${response.status}`);
+    }
   } catch (err) {
     return Response.json(
       { error: t(locale, "settings.apiTorRestartScraperFail", { error: err instanceof Error ? err.message : String(err) }) },

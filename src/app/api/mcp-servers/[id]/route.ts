@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { mcpServers } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
+import { validateMcpStdioCommand } from "@/lib/mcpClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,8 +54,15 @@ export async function PATCH(
 
   const values: Partial<typeof mcpServers.$inferInsert> = { updatedAt: new Date() };
   if (typeof body.name === "string") values.name = body.name.trim();
-  if (body.url !== undefined) values.url = body.url;
-  if (body.command !== undefined) values.command = body.command;
+  if (body.command !== undefined) {
+    if (body.command && body.command.trim()) {
+      const validation = validateMcpStdioCommand(body.command.trim(), body.args ?? []);
+      if (!validation.allowed) {
+        return new Response(`Invalid command: ${validation.reason}`, { status: 400 });
+      }
+    }
+    values.command = body.command;
+  }
   if (body.args !== undefined) values.args = body.args;
   if (body.env !== undefined) values.env = body.env;
 

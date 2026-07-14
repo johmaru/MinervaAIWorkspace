@@ -22,9 +22,6 @@ services:
       - ./.env:/app/.env
       # SQLite data persistence: keep data/umanschat.db on the host
       - ./data:/app/data
-      # For starting/stopping the Tor container: mount Docker socket + compose file
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
       # Chat export: mount a host directory into the container.
       # Set CHAT_EXPORT_HOST_PATH in .env to a host path (use forward slashes on Windows: C:/Users/...).
       # When empty, defaults to ./data/chat-export (no special host path).
@@ -35,6 +32,7 @@ services:
       SCRAPER_URL: http://scraper:8000
       SEARXNG_URL: http://searxng:8080
       EMBEDDER_URL: http://embedder:8001
+      DOCKER_ENV: "true"
       # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY / DATABASE_URL are
       # read from the .env file (supports GUI editing)
       AUTH_SECRET: ${AUTH_SECRET}

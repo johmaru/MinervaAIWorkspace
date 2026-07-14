@@ -1,20 +1,13 @@
 /**
- * Environment-aware process log reader.
+ * Process log reader.
  *
- * Docker environment: queries the Docker Engine API via the unix socket
- *   GET /containers/{id}/logs?stdout=true&stderr=true&tail={tailLines}
- *   where {id} = hostname() (Docker sets hostname = short container ID).
- *   The socket at /var/run/docker.sock is already mounted (docker-compose.yml).
- *
- * exe environment: reads the tail of data/logs/umanschat.log
- *   (path resolved by logger.getLogFilePath()).
+ * Reads the tail of data/logs/umanschat.log
+ * (path resolved by logger.getLogFilePath()).
+ * File logging is always enabled (Docker and exe).
  */
 
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync } from "node:fs";
-import { hostname } from "node:os";
-import * as http from "node:http";
 import { getLogFilePath, type LogLevel } from "@/lib/logger";
-import { isDockerEnv } from "@/lib/tunnel";
 
 /** Result returned by readProcessLogs. */
 export interface LogReadResult {
@@ -45,14 +38,7 @@ export async function readProcessLogs(
 ): Promise<LogReadResult> {
   const cappedTail = Math.min(Math.max(tailLines, 1), 2000);
 
-  if (isDockerEnv()) {
-    try {
-      return await readDockerLogs(cappedTail);
-    } catch {
-      // Docker API failed — fall back to file reader
-      return readFileLogs(cappedTail, minLevel);
-    }
-  }
+  // Always use file-based log reading. Docker socket is no longer mounted.
   return readFileLogs(cappedTail, minLevel);
 }
 
@@ -80,73 +66,6 @@ export function parseDockerLogStream(data: Buffer): string {
   return parts.join("");
 }
 
-/**
- * Fetch logs from the Docker Engine API via the unix socket.
- * Container ID = hostname() (Docker default). Falls back to listing
- * containers if hostname() doesn't resolve.
- */
-async function readDockerLogs(tailLines: number): Promise<LogReadResult> {
-  const containerId = hostname();
-  let body = await dockerGet(`/containers/${containerId}/logs?stdout=true&stderr=true&tail=${tailLines}`);
-  if (body === null) {
-    // hostname() didn't match a container — try listing and picking the first
-    const listBody = await dockerGet("/containers/json?limit=1");
-    if (listBody) {
-      try {
-        const containers = JSON.parse(listBody.toString("utf8")) as Array<{ Id: string }>;
-        if (containers.length > 0) {
-          const fallbackId = containers[0].Id;
-          body = await dockerGet(`/containers/${fallbackId}/logs?stdout=true&stderr=true&tail=${tailLines}`);
-        }
-      } catch {
-        // JSON parse failed — nothing more we can do
-      }
-    }
-  }
-  if (body === null) {
-    throw new Error("Docker API request failed (container not found or socket error)");
-  }
-  const lines = parseDockerLogStream(body);
-  return {
-    source: "docker",
-    lines: lines || "(no log lines returned)",
-    truncated: false,
-    containerId,
-  };
-}
-
-/**
- * Send a GET request to the Docker Engine API via the unix socket.
- * Returns null if the request fails (non-200, socket error, or 404).
- */
-function dockerGet(path: string): Promise<Buffer | null> {
-  const { promise, resolve } = Promise.withResolvers<Buffer | null>();
-  const req = http.request(
-    {
-      socketPath: "/var/run/docker.sock",
-      path,
-      method: "GET",
-      headers: { Host: "localhost" },
-      signal: AbortSignal.timeout(5000),
-    },
-    (res) => {
-      if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => resolve(Buffer.concat(chunks)));
-        res.on("error", () => resolve(null));
-      } else {
-        // Non-OK status (e.g. 404) — consume the body to free the socket
-        res.resume();
-        resolve(null);
-      }
-    },
-  );
-  // AbortSignal.timeout fires as an "error" event with name "TimeoutError"
-  req.on("error", () => resolve(null));
-  req.end();
-  return promise;
-}
 
 // ── File path ─────────────────────────────────────────────────────────
 

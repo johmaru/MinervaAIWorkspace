@@ -1578,7 +1578,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "run_command",
-      description: "Execute a shell command in the workspace directory. On Windows, runs via cmd.exe. Use for building, testing, running scripts, git operations, etc. Output (stdout+stderr) is returned. Commands have a 30-second timeout.",
+      description: "Execute a whitelisted shell command in the workspace directory. Allowed: git (read-only: status, log, diff, show, branch, blame, remote, ls-files, etc.), ls, cat, head, tail, grep, rg, find, wc, echo, pwd, tree, file. Blocked: node, npm, bun, python, curl, wget, rm, shells, and all write operations. Output (stdout+stderr) is returned. 30-second timeout.",
       parameters: {
         type: "object",
         properties: {

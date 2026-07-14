@@ -24,22 +24,10 @@ RUN DATABASE_URL=":memory:" NODE_OPTIONS="--max-old-space-size=3072" npx next bu
 FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-# Docker CLI + Compose v2 (for starting/stopping the Tor container; uses host's docker.sock via mount)
-# node:22-slim (Debian Bookworm) does not have docker-cli in its official repos, so
-# add Docker's apt source and install from there.
+# Install runtime dependencies (no Docker CLI needed — socket mount removed)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg sqlite3 && \
-    install -m 0755 -d /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
-    chmod a+r /etc/apt/keyrings/docker.asc && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends docker-ce-cli && \
-    rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /usr/local/lib/docker/cli-plugins && \
-    curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
-      -o /usr/local/lib/docker/cli-plugins/docker-compose && \
-    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    apt-get install -y --no-install-recommends ca-certificates curl sqlite3 && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/.next ./.next
 # Next.js standalone server.js serves static files (CSS/JS/fonts) from
 # __dirname/.next/static and __dirname/public. The standalone output does not
