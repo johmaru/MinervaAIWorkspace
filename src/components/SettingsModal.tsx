@@ -90,7 +90,7 @@ type Props = {
  * App settings modal (opened from the ⚙️ button in the sidebar).
  *
  * All .env settings are editable via GUI:
- * - LLM settings (BASE_URL, API_KEY, MODEL, MODELS, Thinking Effort)
+ * - LLM settings (API_KEY, MODEL, Thinking Effort, Fallback)
  * - Embedding model (migration confirmation on dimension change)
  * - Web search (max results, SCRAPER_URL, SEARXNG_URL)
  * - Tor proxy (TOR_PROXY, SCRAPE_PROXY)

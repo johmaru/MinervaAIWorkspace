@@ -572,11 +572,9 @@ Returns all current settings from `.env` + per-user DB settings. Secrets are nev
 ```typescript
 {
   // LLM
-  llmBaseUrl: string;
   llmApiKey: string;        // always "" (never returned)
   hasLlmApiKey: boolean;
   llmModel: string;
-  llmModels: string;
   thinkingEffort: string;
   // Embeddings
   embedModel: string;
@@ -631,10 +629,8 @@ Saves settings to `.env` (persisted) and `process.env` (immediate). Per-user fie
 ```typescript
 {
   // LLM
-  llmBaseUrl?: string;
   llmApiKey?: string;            // undefined = preserve existing
   llmModel?: string;
-  llmModels?: string;
   thinkingEffort?: string;
   // Embeddings
   embedModel?: string;

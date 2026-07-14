@@ -109,7 +109,7 @@ Convenience wrapper that combines the above:
 ```
 Client (Settings modal)
   │
-  │  POST /api/settings  { llmBaseUrl, llmApiKey, embedModel, ... }
+  │  POST /api/settings  { llmApiKey, llmModel, embedModel, ... }
   ▼
 getSessionUser()  ──── 401 if not authenticated
   │
