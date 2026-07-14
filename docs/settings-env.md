@@ -202,11 +202,11 @@ fetch(`${scraperBase}/config`, {
     scrape_timeout: Number(process.env.SCRAPE_TIMEOUT) || 30,
   }),
 }).catch(() => {
-  // .env / process.env already updated; scraper picks up on next container restart
+  // .env / process.env already updated; scraper picks up on next /config call
 });
 ```
 
-If the scraper is temporarily unreachable, the `.env` and `process.env` values are still persisted — the scraper reads them from `.env` on its next container restart.
+If the scraper is temporarily unreachable, the `.env` and `process.env` values are still persisted — the scraper reads them from `.env` on its next startup or `/config` call.
 
 ## Embedding model migration
 

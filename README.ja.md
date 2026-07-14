@@ -223,7 +223,7 @@ docker compose up -d
 
 GUI からいつでもトンネルの起動/停止ができます。`AUTH_URL` は動的反映されるため（NextAuth がリクエスト毎に読み込み）、Google OAuth のコールバック URL も即座に切り替わります。
 
-### .env での設定（Docker CLI）
+### .env での設定
 
 ```bash
 # .env
@@ -231,9 +231,7 @@ TUNNEL_TOKEN=your-token-here
 AUTH_URL=https://your-tunnel.example.com
 ```
 
-```bash
-docker compose --profile tunnel up -d
-```
+アプリが `TUNNEL_TOKEN` を検出すると自動的にトンネルが起動します。`docker compose --profile tunnel` は不要 — cloudflared はアプリコンテナ内の子プロセスとして動作します。
 
 ### Google OAuth のリダイレクト URI
 
@@ -242,8 +240,8 @@ Google Cloud Console で認可リダイレクト URI を以下に設定:
 
 ### Docker とスタンドアロン exe の違い
 
-- **Docker Compose**: cloudflared コンテナを Docker socket 経由で管理（トークン変更時は `--force-recreate` で再作成）。
-- **スタンドアロン exe（Windows x64 のみ）**: 初回使用時に cloudflared バイナリを `data/cloudflared/` にダウンロード。固定バージョン（`2024.12.2`）+ SHA256 検証 + HTTPS のみ + 自動更新なし。バージョンアップは開発者が再ビルドが必要。
+- **Docker Compose**: cloudflared はアプリコンテナ内の子プロセスとして動作します。初回使用時にバイナリが `data/cloudflared/` にダウンロードされ、SHA256 検証が行われます。
+- **スタンドアロン exe（Windows x64 のみ）**: Docker と同じ — 初回使用時に cloudflared バイナリを `data/cloudflared/` にダウンロード。固定バージョン（`2024.12.2`）+ SHA256 検証 + HTTPS のみ + 自動更新なし。バージョンアップは開発者が再ビルドが必要。
 - **Linux x64 で Node/Bun 実行時**: ソースから Linux 上で実行する場合（スタンドアロン exe ではなく）、Linux 版 cloudflared バイナリを同じセキュリティ検証付きでダウンロード。
 - macOS は非対応（`.tgz` 展開が必要なため、未実装）。
 

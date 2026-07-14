@@ -97,8 +97,7 @@ The `app` makes outbound HTTP calls to `embedder` and `scraper`; the `scraper` i
 `searxng`, which optionally routes through `tor`. All four companion services are independently
 optional — the app runs without any of them in local-dev and exe modes.
 
-The Dockerfile is a 3-stage build (deps → build → runner) on `node:22-slim`, and installs the
-Docker CLI in the runner image so the app can manage the Tor container lifecycle at runtime.
+The Dockerfile is a 3-stage build (deps → build → runner) on `node:22-slim`. The runner image installs `ca-certificates`, `curl`, and `sqlite3` only — no Docker CLI or socket mount. The Tor proxy is toggled via the scraper's `/config` HTTP endpoint, and cloudflared runs as a child process.
 
 See [Deployment](./deployment.md) for full Docker, exe, and CI/CD details.
 

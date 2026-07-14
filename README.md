@@ -213,7 +213,7 @@ To expose the app over public HTTPS without port forwarding or a public IP, use 
 
 The tunnel can be started/stopped from the same GUI at any time. `AUTH_URL` is applied dynamically (NextAuth reads it per-request), so the Google OAuth callback URL switches immediately.
 
-### Setup via .env (Docker CLI)
+### Setup via .env
 
 ```bash
 # .env
@@ -221,9 +221,7 @@ TUNNEL_TOKEN=your-token-here
 AUTH_URL=https://your-tunnel.example.com
 ```
 
-```bash
-docker compose --profile tunnel up -d
-```
+The tunnel starts automatically when the app detects `TUNNEL_TOKEN`. No `docker compose --profile tunnel` needed — cloudflared runs as a child process inside the app container.
 
 ### Google OAuth redirect URI
 
@@ -232,8 +230,8 @@ In Google Cloud Console, set the authorized redirect URI to:
 
 ### Docker vs standalone exe
 
-- **Docker Compose**: The cloudflared container is managed via Docker socket (`--force-recreate` on token change).
-- **Standalone exe (Windows x64 only)**: cloudflared binary is downloaded to `data/cloudflared/` on first use. The binary is pinned to a fixed version (`2024.12.2`) with SHA256 verification, HTTPS-only download, and no automatic updates. Version upgrades require a rebuild by the developer.
+- **Docker Compose**: cloudflared runs as a child process inside the app container. The binary is downloaded to `data/cloudflared/` on first use with SHA256 verification.
+- **Standalone exe (Windows x64 only)**: Same as Docker — cloudflared binary is downloaded to `data/cloudflared/` on first use. Pinned to a fixed version (`2024.12.2`) with SHA256 verification, HTTPS-only download, and no automatic updates. Version upgrades require a rebuild by the developer.
 - **Node/Bun on Linux x64**: When running from source on Linux (not the standalone exe), the Linux cloudflared binary is downloaded to `data/cloudflared/` with the same security checks.
 - macOS is not supported (requires `.tgz` extraction, not implemented).
 

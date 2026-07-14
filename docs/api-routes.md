@@ -1287,7 +1287,7 @@ Tor proxy management for the scraper service. The Tor container is always runnin
 **Behavior:**
 - `action="start"`: Sets `SCRAPE_PROXY` and `TOR_PROXY` to `socks5://tor:9050` in `.env` and `process.env`.
 - `action="stop"`: Sets both to empty string.
-- After updating `.env`, restarts the scraper container via `docker compose restart scraper` (60s timeout) to reflect proxy changes.
+- After updating `.env`, notifies the scraper via its `/config` HTTP endpoint (10s timeout) to apply proxy changes without container restart.
 - Error messages are localized via `t(locale, ...)`.
 
 **Response shape:**

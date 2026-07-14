@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
 import { users, memories, pageEmbeddings, skills, todos } from "@/db/schema";
@@ -164,7 +164,7 @@ export async function GET(req: Request) {
     translateTimeout: Number(process.env.TRANSLATE_TIMEOUT) || 30,
     // Logging
     logLevel: process.env.LOG_LEVEL || "info",
-    logFileEnabled: process.env.LOG_FILE_ENABLED || (existsSync("/var/run/docker.sock") ? "false" : "true"),
+    logFileEnabled: process.env.LOG_FILE_ENABLED || "true",
     logFilePath: getLogFilePath(),
     // Chat export
     chatExportPath: process.env.CHAT_EXPORT_PATH || "",

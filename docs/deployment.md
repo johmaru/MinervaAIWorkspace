@@ -39,8 +39,6 @@ The `app` service depends on `embedder` and `scraper` (both `service_started`); 
 |--------|-------|---------|
 | `./.env` | `/app/.env` | Environment config — GUI edits persist across rebuilds (not baked into the image) |
 | `./data` | `/app/data` | SQLite database persistence (`data/umanschat.db` lives on the host) |
-| `/var/run/docker.sock` | `/var/run/docker.sock` | Docker socket — lets the app start/stop the Tor container |
-| `./docker-compose.yml` | `/app/docker-compose.yml:ro` | Compose file (read-only) — needed for `docker compose` invocations from inside the app |
 | `umanschat-embedder-hf` (named) | `/root/.cache/huggingface` | HuggingFace model cache for the embedder |
 
 ### Environment
@@ -55,9 +53,8 @@ The `app` image is built in three stages:
 
 **Stage 2 — `build` (base: `node:22-slim`):** Copies `node_modules` from the deps stage, copies the full source, rebuilds `better-sqlite3` for Node (the deps stage compiled it with Bun's toolchain), then runs `npx next build` with `DATABASE_URL=":memory:"` and `NODE_OPTIONS="--max-old-space-size=3072"`.
 
-**Stage 3 — `runner` (base: `node:22-slim`):** The runtime image. Installs `ca-certificates curl gnupg sqlite3` plus the Docker CLI and Compose v2 plugin (downloaded from GitHub releases) so the app can manage the Tor container via the mounted socket. Then copies the build artifacts: `.next/` (including standalone server + static assets), `public/`, `package.json`, `drizzle/` migrations, `drizzle.config.ts`, `node_modules`, `scripts/`, and `.env.example`. The entrypoint is `docker-entrypoint.sh` and the default command is `node .next/standalone/server.js`.
 
-### docker-entrypoint.sh
+**Stage 3 — `runner` (base: `node:22-slim`):** The runtime image. Installs `ca-certificates curl sqlite3` (no Docker CLI — the Docker socket is no longer mounted). Then copies the build artifacts: `.next/` (including standalone server + static assets), `public/`, `package.json`, `drizzle/` migrations, `drizzle.config.ts`, `node_modules`, `scripts/`, and `.env.example`. The entrypoint is `docker-entrypoint.sh` and the default command is `node .next/standalone/server.js`.
 
 The entrypoint runs four steps before handing off to the server:
 
@@ -219,37 +216,23 @@ Required permissions: `contents: write` (create release + upload asset) and `pac
 
 UmansChat optionally exposes the app over public HTTPS via a Cloudflare named tunnel, without port forwarding or a reverse proxy. This is useful for accessing the app remotely or for OAuth callbacks that require HTTPS.
 
-`src/lib/tunnel.ts` detects the execution environment and manages the tunnel accordingly. The core branch is Docker vs non-Docker:
+`src/lib/tunnel.ts` manages the tunnel as a child process in both Docker and exe environments. The Docker socket is no longer mounted.
 
 ```typescript
 export function isDockerEnv(): boolean {
-  return existsSync("/var/run/docker.sock");
+  return process.env.DOCKER_ENV === "true";
 }
 ```
 
-### Three operating modes
+### Operating mode
 
-**1. Docker Compose (container profile):** When `/var/run/docker.sock` exists, the tunnel is managed as a compose service. The `cloudflared` service in `docker-compose.yml` is gated behind the `profiles: ["tunnel"]` flag — it does not start unless activated with `--profile tunnel`. Starting/stopping is done via:
-
-```bash
-# Start (used by src/lib/tunnel.ts internally)
-docker compose --profile tunnel up -d --force-recreate cloudflared
-
-# Stop
-docker compose --profile tunnel stop cloudflared
-```
-
-The `--force-recreate` flag ensures a running container with a stale `TUNNEL_TOKEN` env var is recreated when the token changes via the Settings GUI.
-
-**2. Standalone exe (downloaded binary):** When not in Docker and running as a compiled exe, `startExeTunnel()` downloads the `cloudflared` binary to `data/cloudflared/` (resolved relative to `dirname(process.execPath)`), then spawns it as a child process:
+cloudflared runs as a child process in all environments (Docker, exe, and direct node/bun). The binary is downloaded to `data/cloudflared/` on first use:
 
 ```typescript
 cloudflaredProcess = spawn(binaryPath, ["tunnel", "run", "--token", token], { stdio: "ignore" });
 ```
 
 The process is kept in a module-level variable and stopped via `SIGTERM`.
-
-**3. Node/Bun direct (downloaded binary):** When running directly under node or bun (e.g. `bun run dev` or `node umanschat.cjs`) rather than as a compiled exe, the same exe code path is used — the only difference is that `appRoot` resolves to `process.cwd()` instead of the exe directory, so the binary lands in `data/cloudflared/` relative to the working directory.
 
 > macOS is unsupported — `getBinaryName()` throws for non-win32/non-linux platforms because `.tgz` extraction would be required (not implemented).
 
