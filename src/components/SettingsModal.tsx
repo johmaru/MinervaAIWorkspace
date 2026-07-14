@@ -102,6 +102,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const [form, setForm] = useState<Partial<SettingsResponse>>({});
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelDisplayNames, setModelDisplayNames] = useState<Record<string, string>>({});
+  const [modelReasoningLevels, setModelReasoningLevels] = useState<Record<string, string[]>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
   const [migrationConfirmed, setMigrationConfirmed] = useState(false);
@@ -172,9 +173,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     try {
       const res = await clientFetch("/api/models");
       if (!res.ok) return;
-      const data = (await res.json()) as { models: string[]; displayNames?: Record<string, string> };
+      const data = (await res.json()) as { models: string[]; displayNames?: Record<string, string>; reasoningLevels?: Record<string, string[]> };
       setModelList(data.models);
       setModelDisplayNames(data.displayNames ?? {});
+      setModelReasoningLevels(data.reasoningLevels ?? {});
     } catch {
       // Silent failure: model selector stays as text fallback
     }
@@ -296,6 +298,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     settings !== null &&
     settings.dbVectorDim > 0 &&
     selectedOption.dim !== settings.dbVectorDim;
+
+  const currentReasoningLevels = modelReasoningLevels[form.llmModel ?? ""] ?? ["none", "low", "medium", "high", "max"];
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -659,12 +663,16 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmFallbackModelLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmFallbackModelEnv")}</span>
               </label>
-              <input
-                type="text"
+              <select
                 value={form.llmFallbackModel ?? ""}
-                onChange={(e) => update("llmFallbackModel", e.target.value)}
+                onChange={(e) => update("llmFallbackModel", e.target.value || "")}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
+              >
+                <option value="">— (disabled)</option>
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="mb-1 block">
@@ -683,18 +691,26 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.thinkingEffort")}</span>
               </label>
               <select
-                value={form.thinkingEffort ?? "medium"}
+                value={currentReasoningLevels.length === 0 ? "" : (form.thinkingEffort ?? "medium")}
                 onChange={(e) => update("thinkingEffort", e.target.value)}
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                disabled={currentReasoningLevels.length === 0}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20 disabled:opacity-50"
               >
-                <option value="none">none</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="max">max</option>
+                {currentReasoningLevels.length === 0 ? (
+                  <option value="" disabled>(not controllable)</option>
+                ) : (
+                  currentReasoningLevels.map((lvl) => (
+                    <option key={lvl} value={lvl}>{lvl}</option>
+                  ))
+                )}
+                {currentReasoningLevels.length > 0 && !currentReasoningLevels.includes(form.thinkingEffort ?? "medium") && form.thinkingEffort && (
+                  <option value={form.thinkingEffort}>{form.thinkingEffort} (stale)</option>
+                )}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                {t("settings.thinkingEffortDesc")}
+                {currentReasoningLevels.length === 0
+                  ? t("settings.thinkingEffortNotControllable")
+                  : t("settings.thinkingEffortDesc")}
               </p>
             </div>
             <div className="sm:col-span-2">
@@ -867,13 +883,18 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.webSearchModel")}</span>
               </label>
-              <input
-                type="text"
+              <select
                 value={form.webSearchModel ?? "umans-qwen3.6-35b-a3b"}
                 onChange={(e) => update("webSearchModel", e.target.value)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-                placeholder="umans-qwen3.6-35b-a3b"
-              />
+              >
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
+                ))}
+                {!modelList.includes(form.webSearchModel ?? "") && form.webSearchModel && (
+                  <option value={form.webSearchModel}>{modelDisplayNames[form.webSearchModel] ?? form.webSearchModel}</option>
+                )}
+              </select>
               <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
             </div>
             <div>

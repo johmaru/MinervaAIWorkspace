@@ -123,7 +123,7 @@ function mockFetch(overrides?: {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ models: ["umans-glm-5.2", "umans-coder"], displayNames: { "umans-glm-5.2": "Umans GLM 5.2", "umans-coder": "Umans Coder" } }),
+        json: () => Promise.resolve({ models: ["umans-glm-5.2", "umans-coder"], displayNames: { "umans-glm-5.2": "Umans GLM 5.2", "umans-coder": "Umans Coder" }, reasoningLevels: { "umans-glm-5.2": ["none", "high", "max"], "umans-coder": [] } }),
       });
     }
     if (url === "/api/update") {
