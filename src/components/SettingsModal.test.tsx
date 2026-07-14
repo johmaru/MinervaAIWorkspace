@@ -17,6 +17,8 @@ const baseSettings = {
   hasLlmApiKey: true,
   llmModel: "umans-glm-5.2",
   llmModels: "",
+  llmFallbackModel: "",
+  llmFallbackTimeoutMs: 10000,
   thinkingEffort: "medium",
   embedModel: "LiquidAI/LFM2.5-Embedding-350M",
   embedDim: 1024,

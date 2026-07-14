@@ -30,6 +30,18 @@ export function embedModel(): string {
   return process.env.EMBED_MODEL ?? "text-embedding-3-small";
 }
 
+/** Fallback model id. Returns null if LLM_FALLBACK_MODEL is unset (fallback disabled). */
+export function fallbackModel(): string | null {
+  const v = process.env.LLM_FALLBACK_MODEL;
+  return v?.trim() || null;
+}
+
+/** TTFT timeout in milliseconds before falling back. Defaults to 10000 (10s). */
+export function fallbackTimeoutMs(): number {
+  const v = Number(process.env.LLM_FALLBACK_TIMEOUT_MS);
+  return v > 0 ? v : 10_000;
+}
+
 /** Whether LLM_BASE_URL points to the UmansAPI (Umans mode). */
 export function isUmansProvider(): boolean {
   const baseURL = process.env.LLM_BASE_URL ?? "";

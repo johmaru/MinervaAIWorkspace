@@ -116,6 +116,8 @@ export async function GET(req: Request) {
     hasLlmApiKey: !!process.env.LLM_API_KEY,
     llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
     llmModels: process.env.LLM_MODELS || "",
+    llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
+    llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS) || 10000,
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
     // Embeddings
     embedModel: process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M",
@@ -186,6 +188,8 @@ type SettingsBody = {
   personalEmoji?: number;
   llmModel?: string;
   llmModels?: string;
+  llmFallbackModel?: string;
+  llmFallbackTimeoutMs?: number;
   thinkingEffort?: string;
   // Embeddings
   embedModel?: string;
@@ -372,6 +376,8 @@ export async function POST(req: Request) {
     if (body.llmBaseUrl !== undefined) updates.LLM_BASE_URL = body.llmBaseUrl;
     if (body.llmApiKey !== undefined) updates.LLM_API_KEY = body.llmApiKey;
     if (body.llmModel !== undefined) updates.LLM_MODEL = body.llmModel;
+    if (body.llmFallbackModel !== undefined) updates.LLM_FALLBACK_MODEL = body.llmFallbackModel;
+    if (body.llmFallbackTimeoutMs !== undefined) updates.LLM_FALLBACK_TIMEOUT_MS = String(body.llmFallbackTimeoutMs);
     if (body.llmModels !== undefined) updates.LLM_MODELS = body.llmModels;
     if (body.thinkingEffort !== undefined) updates.THINKING_EFFORT = body.thinkingEffort;
     // Embeddings
@@ -421,7 +427,7 @@ export async function POST(req: Request) {
       setConfiguredAuthUrl(body.authUrl);
     }
     // Invalidate in-process cache when LLM-related settings change (no restart needed)
-    const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS"].some(
+    const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_TIMEOUT_MS"].some(
       (k) => k in updates,
     );
     if (llmChanged) {
