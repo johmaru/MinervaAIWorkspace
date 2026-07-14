@@ -91,10 +91,25 @@ export function resolvePublicOrigin(
   const xfh = headers.get("x-forwarded-host");
   const rawHost = (xfh ?? headers.get("host"))?.split(",")[0]?.trim();
 
+  // Security: when a public AUTH_URL is configured and the request host is
+ // NOT local, prefer AUTH_URL over the host header to prevent Host header
+ // injection (e.g. attacker sends Host: evil.com to manipulate OAuth redirect_uri).
+ // Local hosts (localhost, 127.0.0.1) are always served from the local origin
+ // to preserve the dual-access contract.
+  if (rawHost && configuredAuthUrl && !isLocalOrigin(configuredAuthUrl)) {
+    const hostHostname = hostnameFromHost(rawHost);
+    if (hostHostname !== null && !isLocalHostname(hostHostname)) {
+      try {
+        return new URL(configuredAuthUrl).origin;
+      } catch {
+        // Invalid configured URL → fall through to host header
+      }
+    }
+  }
+
   if (rawHost && hostnameFromHost(rawHost) !== null) {
     return `${protoFromHost(headers, rawHost)}://${rawHost}`;
   }
-
   if (configuredAuthUrl) {
     try {
       return new URL(configuredAuthUrl).origin;

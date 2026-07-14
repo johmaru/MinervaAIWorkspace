@@ -137,6 +137,9 @@ export function normalizeUrl(rawUrl: string): string {
   try {
     const u = new URL(rawUrl);
     if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    // SSRF protection: block private/internal IP ranges and metadata endpoints
+    const hostname = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (isPrivateHost(hostname)) return "";
     u.hash = "";
     let s = u.toString();
     if (s.endsWith("/") && s !== `${u.origin}/`) s = s.slice(0, -1);
@@ -144,4 +147,47 @@ export function normalizeUrl(rawUrl: string): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * Returns true for private/internal hostnames that should not be scraped.
+ * Blocks: localhost, 127.0.0.0/8, 10.x, 172.16-31.x, 192.168.x,
+ * 169.254.x (link-local + cloud metadata), ::1, fc00::/7, and
+ * Docker-internal hostnames (scraper, embedder, searxng, tor, app).
+ */
+function isPrivateHost(hostname: string): boolean {
+  // IPv4-mapped IPv6: ::ffff:1.2.3.4 → check as IPv4
+  if (/^::ffff:/.test(hostname)) {
+    return isPrivateHost(hostname.slice(7));
+  }
+  // Decimal IP: 2130706433 = 127.0.0.1
+  if (/^\d{8,}$/.test(hostname)) {
+    const num = parseInt(hostname, 10);
+    if (num > 0 && num <= 0xFFFFFFFF) {
+      const a = (num >>> 24) & 0xFF;
+      const b = (num >>> 16) & 0xFF;
+      return isPrivateHost(`${a}.${b}.0.0`) || isPrivateHost(`${a}.${b}.${(num >>> 8) & 0xFF}.${num & 0xFF}`);
+    }
+  }
+  // IPv4 dotted-quad
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+    const parts = hostname.split(".").map(Number);
+    if (parts[0] === 127) return true; // loopback
+    if (parts[0] === 10) return true; // private
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // private
+    if (parts[0] === 192 && parts[1] === 168) return true; // private
+    if (parts[0] === 169 && parts[1] === 254) return true; // link-local + cloud metadata
+    if (parts[0] === 0) return true; // 0.0.0.0
+    return false;
+  }
+  // IPv6
+  if (hostname === "::1" || hostname === "::") return true;
+  if (/^f[cd]/.test(hostname)) return true; // ULA fc00::/7
+  if (/^fe80:/.test(hostname)) return true; // link-local
+  // Docker-internal hostnames
+  const dockerHosts = ["scraper", "embedder", "searxng", "tor", "app", "cloudflared"];
+  if (dockerHosts.includes(hostname)) return true;
+  // localhost
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  return false;
 }

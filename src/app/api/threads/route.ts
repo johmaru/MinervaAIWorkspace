@@ -23,7 +23,7 @@ export async function GET() {
     })
     .from(threads)
     .where(eq(threads.userId, user.id))
-    .orderBy(desc(threads.updatedAt));
+    .orderBy(desc(threads.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

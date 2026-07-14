@@ -27,7 +27,7 @@ export async function GET() {
     })
     .from(mcpServers)
     .where(eq(mcpServers.userId, user.id))
-    .orderBy(desc(mcpServers.updatedAt));
+    .orderBy(desc(mcpServers.updatedAt)).limit(100);
   return Response.json(rows);
 }
 
