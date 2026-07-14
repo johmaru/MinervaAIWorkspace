@@ -6,7 +6,7 @@
  *
  * Strings NOT translated (excluded from this dictionary):
  * - Brand name `UmansChat`
- * - Environment variable names (LLM_BASE_URL, LLM_API_KEY, ...) and technical values (none/low/medium/high/max, socks5://tor:9050)
+ * - Environment variable names (LLM_API_KEY, LLM_MODEL, ...) and technical values (none/low/medium/high/max, socks5://tor:9050)
  * - English API validation error strings (for developers)
  * - Default titles stored in DB: "New chat" / "New folder"
  */
@@ -252,14 +252,10 @@ const ja = {
     tabConnections: "コネクション",
     tabServerAccess: "公開・セキュリティ",
     llmSettings: "LLM 設定",
-    llmBaseUrlLabel: "API ベース URL",
     llmApiKeyLabel: "API キー",
     llmModelLabel: "デフォルトモデル",
-    llmModelsLabel: "利用可能モデル",
-    llmBaseUrlEnv: "LLM_BASE_URL",
     llmApiKeyEnv: "LLM_API_KEY",
     llmModelEnv: "LLM_MODEL",
-    llmModelsEnv: "LLM_MODELS",
     llmFallbackModelLabel: "フォールバックモデル",
     llmFallbackModelEnv: "LLM_FALLBACK_MODEL",
     llmFallbackTimeoutLabel: "フォールバックタイムアウト (ms)",
@@ -293,7 +289,6 @@ const ja = {
     translatePrimaryLangAuto: "UI言語に合わせる",
     translateTimeout: "翻訳: タイムアウト（秒）",
     translateTimeoutDesc: "LLM翻訳のタイムアウト時間（5〜300秒）。長文や複数候補モードで時間がかかる場合は増やしてください",
-    llmModels: "LLM_MODELS（カンマ区切り）",
     thinkingEffort: "Thinking Effort（モデル毎に異なる。例: none, low, medium, high, max）",
     thinkingEffortDesc: "LLM の推論強度。モデル毎に対応レベルが異なる（GLM-5.2: none/high/max、Flash: none/low/medium/high）。未対応モデルでは反映されません。",
     embedModel: "埋め込みモデル",
@@ -912,14 +907,10 @@ const en: typeof ja = {
     tabConnections: "Connections",
     tabServerAccess: "Access & Security",
     llmSettings: "LLM Settings",
-    llmBaseUrlLabel: "API base URL",
     llmApiKeyLabel: "API key",
     llmModelLabel: "Default model",
-    llmModelsLabel: "Available models",
-    llmBaseUrlEnv: "LLM_BASE_URL",
     llmApiKeyEnv: "LLM_API_KEY",
     llmModelEnv: "LLM_MODEL",
-    llmModelsEnv: "LLM_MODELS",
     llmFallbackModelLabel: "Fallback model",
     llmFallbackModelEnv: "LLM_FALLBACK_MODEL",
     llmFallbackTimeoutLabel: "Fallback timeout (ms)",
@@ -953,7 +944,6 @@ const en: typeof ja = {
     updateDownloaded: "Update downloaded. Restarting…",
     updateNotExe: "Auto-update is only available in the exe version",
     llmModel: "LLM_MODEL (default model)",
-    llmModels: "LLM_MODELS (comma-separated)",
     thinkingEffort: "Thinking Effort (varies per model, e.g. none, low, medium, high, max)",
     thinkingEffortDesc: "LLM reasoning strength. Levels vary per model (GLM-5.2: none/high/max, Flash: none/low/medium/high). Ignored for models that don't support reasoning control.",
     embedModel: "Embedding model",

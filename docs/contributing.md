@@ -32,7 +32,7 @@ cp .env.example .env
 
 # 4. Set your LLM API key (required)
 #    Edit .env and fill in LLM_API_KEY
-#    Optionally set LLM_BASE_URL and LLM_MODEL for your provider
+#    Set LLM_MODEL to your preferred default model (optional)
 
 # 5. Generate an AUTH_SECRET and add it to .env
 bunx auth secret

@@ -1,16 +1,15 @@
 import OpenAI from "openai";
 
+/** Hardcoded UmansAI API base URL. */
+const UMANS_BASE_URL = "https://api.code.umans.ai/v1";
+
 /**
- * OpenAI-compatible client.
- * Switches between UmansAI / OpenAI / local (vLLM, Ollama, etc.) via LLM_BASE_URL.
+ * UmansAI client. Provider is fixed to UmansAI (no longer configurable).
+ * Only LLM_API_KEY needs to be set in .env.
  */
 export function createLLM() {
-  const baseURL = process.env.LLM_BASE_URL;
-  if (!baseURL) {
-    throw new Error("LLM_BASE_URL is not set. Please check your .env file.");
-  }
   return new OpenAI({
-    baseURL,
+    baseURL: UMANS_BASE_URL,
     apiKey: process.env.LLM_API_KEY ?? "missing",
     timeout: 120_000,
     maxRetries: 1,
@@ -42,30 +41,15 @@ export function fallbackTimeoutMs(): number {
   return v > 0 ? v : 10_000;
 }
 
-/** Whether LLM_BASE_URL points to the UmansAPI (Umans mode). */
-export function isUmansProvider(): boolean {
-  const baseURL = process.env.LLM_BASE_URL ?? "";
-  return baseURL.includes("api.code.umans.ai");
-}
-
 /**
  * List of available models.
- *
- * - Umans mode (LLM_BASE_URL includes api.code.umans.ai):
- *   Returns the model list fetched from `/v1/models/info`. On API failure,
- *   falls back to MODEL_REASONING (current hardcoded values).
- * - OAI-compatible mode (OpenAI / vLLM / Ollama, etc.):
- *   Built from the LLM_MODELS env (comma-separated). If unset, only defaultModel().
+ * Returns the model list fetched from `/v1/models/info`. On API failure,
+ * falls back to MODEL_REASONING (hardcoded values).
  */
 export async function availableModels(): Promise<string[]> {
-  if (isUmansProvider()) {
-    const models = await getUmansModels();
-    if (models.length > 0) return models.map((m) => m.id);
-  }
-  const raw = process.env.LLM_MODELS;
-  if (!raw) return [defaultModel()];
-  const models = raw.split(",").map((m) => m.trim()).filter(Boolean);
-  return models.length > 0 ? models : [defaultModel()];
+  const models = await getUmansModels();
+  if (models.length > 0) return models.map((m) => m.id);
+  return [defaultModel()];
 }
 
 /**
@@ -107,18 +91,15 @@ export type UmansModelInfo = {
 let modelsInfoCache: UmansModelInfo[] | null = null;
 let modelsInfoFetchPromise: Promise<UmansModelInfo[]> | null = null;
 
-/** Call to discard the cache on config changes (when LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / LLM_MODELS change). */
+/** Call to discard the cache on config changes (when LLM_API_KEY / LLM_MODEL change). */
 export function resetUmansModelsCache(): void {
   modelsInfoCache = null;
   modelsInfoFetchPromise = null;
 }
-
 /**
  * Fetches and caches model information from the UmansAPI /v1/models/info endpoint.
  * Fetches only once per process; subsequent calls return the cache.
- * On API failure, falls back to values built from MODEL_REASONING (current hardcoded values).
- *
- * Returns an empty array when not in Umans mode (caller handles OAI mode).
+ * On API failure, falls back to values built from MODEL_REASONING (hardcoded emergency fallback).
  */
 export async function getUmansModels(): Promise<UmansModelInfo[]> {
   if (modelsInfoCache) return modelsInfoCache;
@@ -133,13 +114,8 @@ export async function getUmansModels(): Promise<UmansModelInfo[]> {
 }
 
 async function fetchUmansModels(): Promise<UmansModelInfo[]> {
-  const baseURL = process.env.LLM_BASE_URL;
-  if (!baseURL || !isUmansProvider()) {
-    // Not in Umans mode; return empty array (caller handles OAI mode).
-    return [];
-  }
   try {
-    const res = await fetch(`${baseURL}/models/info`, {
+    const res = await fetch(`${UMANS_BASE_URL}/models/info`, {
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -166,7 +142,7 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
       replacement: m.deprecation?.replacement,
     }));
   } catch {
-    // Fallback: build from the current hardcoded MODEL_REASONING.
+    // Fallback: build from the hardcoded MODEL_REASONING.
     return Object.entries(MODEL_REASONING).map(([id, cfg]) => ({
       id,
       displayName: id,
@@ -178,41 +154,35 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
 
 /**
  * Returns the valid reasoning effort levels for the specified model.
- * In Umans mode, prefers API-sourced values; otherwise uses MODEL_REASONING.
+ * Prefers API-sourced values; falls back to MODEL_REASONING on API failure.
  * Returns an empty array if the model is unknown or levels is empty (not controllable).
  */
 export async function getReasoningLevels(model: string): Promise<string[]> {
-  if (isUmansProvider()) {
-    const models = await getUmansModels();
-    const found = models.find((m) => m.id === model);
-    if (found) return found.reasoning.levels;
-  }
+  const models = await getUmansModels();
+  const found = models.find((m) => m.id === model);
+  if (found) return found.reasoning.levels;
   return MODEL_REASONING[model]?.levels ?? [];
 }
 
 /**
  * Returns the default reasoning effort for the specified model.
- * In Umans mode, prefers API-sourced values. Returns null for non-controllable models (empty levels / null defaultLevel).
+ * Prefers API-sourced values. Returns null for non-controllable models (empty levels / null defaultLevel).
  */
 export async function getDefaultReasoningEffort(model: string): Promise<string | null> {
-  if (isUmansProvider()) {
-    const models = await getUmansModels();
-    const found = models.find((m) => m.id === model);
-    if (found) return found.reasoning.defaultLevel;
-  }
+  const models = await getUmansModels();
+  const found = models.find((m) => m.id === model);
+  if (found) return found.reasoning.defaultLevel;
   return MODEL_REASONING[model]?.defaultLevel ?? null;
 }
 
 /**
  * Whether the specified model can fully disable thinking via enable_thinking: false.
- * In Umans mode, prefers the API-sourced can_disable flag.
+ * Prefers the API-sourced can_disable flag.
  */
 export async function canDisableThinking(model: string): Promise<boolean> {
-  if (isUmansProvider()) {
-    const models = await getUmansModels();
-    const found = models.find((m) => m.id === model);
-    if (found) return found.reasoning.canDisable;
-  }
+  const models = await getUmansModels();
+  const found = models.find((m) => m.id === model);
+  if (found) return found.reasoning.canDisable;
   return MODEL_REASONING[model]?.canDisable ?? false;
 }
 
@@ -240,9 +210,8 @@ export async function buildDisableReasoningParams(
   return {};
 }
 
-/** Mapping of model id → display_name. Empty object in OAI mode. */
+/** Mapping of model id → display_name. */
 export async function getModelDisplayNames(): Promise<Record<string, string>> {
-  if (!isUmansProvider()) return {};
   const models = await getUmansModels();
   const map: Record<string, string> = {};
   for (const m of models) map[m.id] = m.displayName;

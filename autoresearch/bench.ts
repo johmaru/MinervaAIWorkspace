@@ -6,8 +6,8 @@
  * emitted `queries[]` as `METRIC <name>=<value>` lines.
  *
  * Invoked by ../autoresearch.sh via tsx so the project's tsconfig `@/` path
- * aliases resolve. LLM_BASE_URL MUST be unset/empty so buildDisableReasoningParams
- * falls back to the static MODEL_REASONING map (no fetch).
+ * LLM_API_KEY is unset so the model-info fetch fails and falls back to
+ * the static MODEL_REASONING map (no network).
  *
  * 2-phase decideSearch: the mock client returns different content on sequential
  * calls — 1st call = judge response (searchLevel only), 2nd call = queryGen

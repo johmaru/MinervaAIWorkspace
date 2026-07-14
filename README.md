@@ -107,7 +107,7 @@ cp .env.example .env
 
 # 2. Set your LLM API key (required)
 #    Edit .env and fill in LLM_API_KEY
-#    Optionally set LLM_BASE_URL and LLM_MODEL for your provider
+#    Set LLM_MODEL to your preferred default model (optional, defaults to umans-glm-5.2)
 
 # 2b. Generate an AUTH_SECRET and add it to .env
 bunx auth secret
@@ -274,10 +274,8 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 
 | Variable                | Description                                                        | Default                                              |
 |-------------------------|--------------------------------------------------------------------|------------------------------------------------------|
-| `LLM_BASE_URL`          | Base URL of the OpenAI-compatible API (Umans mode auto-fetches models when `api.code.umans.ai`) | `https://api.code.umans.ai/v1`                       |
 | `LLM_API_KEY`           | API key (required)                                                 | —                                                    |
 | `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
-| `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
 | `TRANSLATE_TIMEOUT`     | Translation LLM timeout in seconds (increase for long texts or multi-candidate mode) | `30`                                                 |
 | `EMBED_MODEL`           | Embedding model name (`Xenova/*` ONNX model for `local` provider, or `sentence-transformers` model for `http` provider)  | `LiquidAI/LFM2.5-Embedding-350M`                     |
@@ -319,28 +317,14 @@ The Connections feature lets the LLM call Notion tools (search pages, read page 
 5. Open Settings → Connections → "Connect Notion". Authorize via Notion. The connection appears in the settings list.
 6. Per-thread: open the ＋ menu → "Connections" → toggle on the Notion connection. The LLM will auto-invoke Notion tools based on conversation context.
 
-## LLM Provider Modes
+## LLM Provider
 
-UmansChat supports two modes, switched automatically by `LLM_BASE_URL`:
-
-### Umans mode (default)
-
-When `LLM_BASE_URL` points to `api.code.umans.ai` (e.g. `https://api.code.umans.ai/v1`):
+The provider is hardcoded to **UmansAI** (`https://api.code.umans.ai/v1`). Only `LLM_API_KEY` needs to be set in `.env`.
 
 - The model list and reasoning levels are **auto-fetched** from `/v1/models/info` at startup (cached in-process).
 - Models appear in the selector with their **display names** (e.g. `Umans Qwen3.6 35B A3B`).
-- `LLM_MODELS` is **ignored** — the API is the source of truth.
 - On API failure, falls back to the built-in `MODEL_REASONING` table.
-
-### OpenAI-compatible mode
-
-When `LLM_BASE_URL` points elsewhere (OpenAI, vLLM, Ollama, etc.):
-
-- The model list is taken from `LLM_MODELS` (comma-separated, e.g. `gpt-4o,gpt-4o-mini`).
-- Display names are not available — model IDs are shown as-is.
-- Reasoning levels fall back to `MODEL_REASONING` for known Umans models, or empty for others.
-
-Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart is needed when using the Settings GUI.
+- The model selector in Settings is a dropdown populated from the API.
 
 ## Usage
 

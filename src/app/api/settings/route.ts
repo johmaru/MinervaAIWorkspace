@@ -108,14 +108,12 @@ export async function GET(req: Request) {
 
   return Response.json({
     // LLM
-    llmBaseUrl: process.env.LLM_BASE_URL || "",
     // Do not return secrets in plaintext; return only whether they are set.
     // SettingsModal sends llmApiKey only when the user enters a new value;
     // when omitted, it sends undefined to preserve the existing value.
     llmApiKey: "",
     hasLlmApiKey: !!process.env.LLM_API_KEY,
     llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
-    llmModels: process.env.LLM_MODELS || "",
     llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
     llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS) || 10000,
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
@@ -175,7 +173,6 @@ export async function GET(req: Request) {
 
 type SettingsBody = {
   // LLM
-  llmBaseUrl?: string;
   llmApiKey?: string;
   // Default global instruction selection (per-user, saved to DB)
   activeInstructionId?: string | null;
@@ -187,7 +184,6 @@ type SettingsBody = {
   personalStructure?: number;
   personalEmoji?: number;
   llmModel?: string;
-  llmModels?: string;
   llmFallbackModel?: string;
   llmFallbackTimeoutMs?: number;
   thinkingEffort?: string;
@@ -373,12 +369,10 @@ export async function POST(req: Request) {
     }
     const updates: Record<string, string> = {};
     // LLM
-    if (body.llmBaseUrl !== undefined) updates.LLM_BASE_URL = body.llmBaseUrl;
     if (body.llmApiKey !== undefined) updates.LLM_API_KEY = body.llmApiKey;
     if (body.llmModel !== undefined) updates.LLM_MODEL = body.llmModel;
     if (body.llmFallbackModel !== undefined) updates.LLM_FALLBACK_MODEL = body.llmFallbackModel;
     if (body.llmFallbackTimeoutMs !== undefined) updates.LLM_FALLBACK_TIMEOUT_MS = String(body.llmFallbackTimeoutMs);
-    if (body.llmModels !== undefined) updates.LLM_MODELS = body.llmModels;
     if (body.thinkingEffort !== undefined) updates.THINKING_EFFORT = body.thinkingEffort;
     // Embeddings
     if (body.embedModel !== undefined) updates.EMBED_MODEL = body.embedModel;
@@ -427,7 +421,7 @@ export async function POST(req: Request) {
       setConfiguredAuthUrl(body.authUrl);
     }
     // Invalidate in-process cache when LLM-related settings change (no restart needed)
-    const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_TIMEOUT_MS"].some(
+    const llmChanged = ["LLM_API_KEY", "LLM_MODEL", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_TIMEOUT_MS"].some(
       (k) => k in updates,
     );
     if (llmChanged) {

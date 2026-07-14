@@ -89,7 +89,7 @@ export type Dictionary = typeof ja;
 **Strings that are intentionally NOT translated** (kept out of the dictionaries):
 
 - The brand name `UmansChat`.
-- Environment variable names (`LLM_BASE_URL`, `LLM_API_KEY`, …) and their technical values (`none`/`low`/`medium`/`high`/`max`, `socks5://tor:9050`).
+- Environment variable names (`LLM_API_KEY`, `LLM_MODEL`, …) and their technical values (`none`/`low`/`medium`/`high`/`max`, `socks5://tor:9050`).
 - English API validation error strings (intended for developers, not end users).
 - Default titles stored in the database: `"New chat"` / `"New folder"`.
 

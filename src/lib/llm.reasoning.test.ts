@@ -1,23 +1,29 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
   MODEL_REASONING,
   getReasoningLevels,
   getDefaultReasoningEffort,
+  resetUmansModelsCache,
 } from "@/lib/llm";
 
-// To verify in OAI mode (directly referencing MODEL_REASONING),
-// fix LLM_BASE_URL to a non-UmansAPI URL. This makes isUmansProvider() return false,
-// so the hardcoded MODEL_REASONING values are used.
-const ORIGINAL_BASE_URL = process.env.LLM_BASE_URL;
+// These tests verify MODEL_REASONING via the fallback path.
+// getUmansModels() attempts a network fetch; we mock fetch to reject so
+// the hardcoded MODEL_REASONING values are used.
+
+const fetchMock = vi.fn(() =>
+  Promise.reject(new Error("test: force MODEL_REASONING fallback")),
+);
 
 beforeEach(() => {
-  delete process.env.LLM_BASE_URL;
+  fetchMock.mockClear();
+  vi.stubGlobal("fetch", fetchMock);
+  resetUmansModelsCache();
 });
 
 afterEach(() => {
-  if (ORIGINAL_BASE_URL === undefined) delete process.env.LLM_BASE_URL;
-  else process.env.LLM_BASE_URL = ORIGINAL_BASE_URL;
+  vi.unstubAllGlobals();
+  resetUmansModelsCache();
 });
 
 describe("MODEL_REASONING", () => {
@@ -25,7 +31,6 @@ describe("MODEL_REASONING", () => {
     for (const [name, cfg] of Object.entries(MODEL_REASONING)) {
       expect(Array.isArray(cfg.levels)).toBe(true);
       expect(typeof cfg.defaultLevel === "string" || cfg.defaultLevel === null).toBe(true);
-      // void name to satisfy no-unused
       void name;
     }
   });

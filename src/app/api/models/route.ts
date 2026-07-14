@@ -7,8 +7,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/models — Returns the list of available models.
  *
- * - Umans mode: Returns the model list and displayNames from `/v1/models/info`.
- * - OAI-compatible mode: Built from LLM_MODELS env (comma-separated). displayNames is empty.
+ * Returns the model list and displayNames from `/v1/models/info`.
  */
 export async function GET() {
   const user = await getSessionUser();

@@ -347,15 +347,14 @@ So the effective priority cascade for the system prompt body is: **thread.system
 
 ### `createLLM()` (`src/lib/llm.ts:7`)
 
-Constructs an OpenAI SDK client with `baseURL = process.env.LLM_BASE_URL` (throws if unset) and `apiKey = process.env.LLM_API_KEY ?? 'missing'`. This single client backs all chat, search, memory, and skill calls. It's OpenAI-compatible — works with UmansAI, OpenAI, vLLM, Ollama, etc.
+Constructs an OpenAI SDK client with the hardcoded `baseURL = 'https://api.code.umans.ai/v1'` and `apiKey = process.env.LLM_API_KEY ?? 'missing'`. This client backs all chat, search, memory, and skill calls.
 
 ### Model resolution
 
 - `defaultModel()` (`src/lib/llm.ts:18`): `process.env.LLM_MODEL ?? 'umans-glm-5.2'`
 - `defaultSearchModel()` (`src/lib/llm.ts:23`): `process.env.WEB_SEARCH_MODEL || 'umans-qwen3.6-35b-a3b'`
 - `embedModel()` (`src/lib/llm.ts:27`): `process.env.EMBED_MODEL ?? 'text-embedding-3-small'`
-- `isUmansProvider()` (`src/lib/llm.ts:32`): `LLM_BASE_URL.includes('api.code.umans.ai')` — gates Umans-specific behavior (model info fetch, reasoning config).
-- `availableModels()` (`src/lib/llm.ts:46`): in Umans mode, fetches from `/v1/models/info` (cached via `getUmansModels`); otherwise splits `LLM_MODELS` env by comma; falls back to `[defaultModel()]`.
+- `availableModels()` (`src/lib/llm.ts:44`): fetches from `/v1/models/info` (cached via `getUmansModels`); falls back to `[defaultModel()]` on API failure.
 
 ### Reasoning control
 

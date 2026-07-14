@@ -105,7 +105,7 @@ cp .env.example .env
 
 # 2. LLM の API キーを設定（必須）
 #    .env を編集し LLM_API_KEY を入力
-#    必要に応じて LLM_BASE_URL と LLM_MODEL をプロバイダに合わせて設定
+#    LLM_MODEL をデフォルトモデルに設定（省略時は umans-glm-5.2）
 
 # 2b. AUTH_SECRET を生成して .env に追加
 bunx auth secret
@@ -284,10 +284,8 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 
 | 変数                    | 説明                                                              | デフォルト                                           |
 |-------------------------|-------------------------------------------------------------------|------------------------------------------------------|
-| `LLM_BASE_URL`          | OpenAI 互換 API のベース URL（api.code.umans.ai で Umansモード自動取得） | `https://api.code.umans.ai/v1`                       |
 | `LLM_API_KEY`           | API キー（必須）                                                  | —                                                    |
 | `LLM_MODEL`             | デフォルトモデル                                                  | `umans-glm-5.2`                                      |
-| `LLM_MODELS`            | モデルセレクタ用のカンマ区切りモデル一覧（OAI互換モード用。Umansモードでは無視） | —                                                    |
 | `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
 | `TRANSLATE_TIMEOUT`     | 翻訳LLMのタイムアウト（秒）。長文や複数候補モードで増やす        | `30`                                                 |
 | `EMBED_MODEL`           | 埋め込みモデル名（`local` プロバイダでは `Xenova/*` ONNX モデル、`http` プロバイダでは `sentence-transformers` モデル） | `LiquidAI/LFM2.5-Embedding-350M`                           |

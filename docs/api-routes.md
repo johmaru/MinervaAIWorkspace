@@ -551,8 +551,7 @@ Returns the list of available LLM models.
 ```
 
 **Behavior:**
-- **Umans mode:** Fetches model list + display names from `/v1/models/info`.
-- **OAI-compatible mode:** Built from `LLM_MODELS` env (comma-separated); `displayNames` is empty.
+Fetches model list + display names from `/v1/models/info`.
 
 ---
 

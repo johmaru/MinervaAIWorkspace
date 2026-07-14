@@ -101,10 +101,10 @@ beforeEach(() => {
 });
 
 // Phase 2: /api/chat uses DB persistence + real API streaming.
-// Uses .env LLM_BASE_URL / LLM_API_KEY / LLM_MODEL (loaded in vitest.setup.ts).
+// Uses .env LLM_API_KEY / LLM_MODEL (loaded in vitest.setup.ts).
 // Creates a thread per test, cleans up in afterAll.
 
-const hasCreds = Boolean(process.env.LLM_BASE_URL && process.env.LLM_API_KEY);
+const hasCreds = Boolean(process.env.LLM_API_KEY && process.env.LLM_MODEL);
 const itReal = hasCreds ? it : it.skip;
 
 const createdIds: string[] = [];

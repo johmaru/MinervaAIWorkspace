@@ -5,7 +5,6 @@ import { createLLM, defaultModel, embedModel, fallbackModel, fallbackTimeoutMs }
 
 describe("llm client", () => {
   const ORIGINAL = {
-    LLM_BASE_URL: process.env.LLM_BASE_URL,
     LLM_API_KEY: process.env.LLM_API_KEY,
     LLM_MODEL: process.env.LLM_MODEL,
     EMBED_MODEL: process.env.EMBED_MODEL,
@@ -20,21 +19,14 @@ describe("llm client", () => {
     }
   });
 
-  it("createLLM requires LLM_BASE_URL", () => {
-    delete process.env.LLM_BASE_URL;
-    expect(() => createLLM()).toThrow(/LLM_BASE_URL/);
-  });
-
-  it("createLLM reflects baseURL / apiKey", () => {
-    process.env.LLM_BASE_URL = "https://example.test/v1";
+  it("createLLM uses hardcoded UmansAI base URL", () => {
     process.env.LLM_API_KEY = "sk-test";
     const client = createLLM();
-    expect(client.baseURL).toBe("https://example.test/v1");
+    expect(client.baseURL).toBe("https://api.code.umans.ai/v1");
     expect(client.apiKey).toBe("sk-test");
   });
 
   it("createLLM sets timeout and maxRetries", () => {
-    process.env.LLM_BASE_URL = "https://example.test/v1";
     process.env.LLM_API_KEY = "sk-test";
     const client = createLLM();
     expect(client.timeout).toBe(120_000);
@@ -42,7 +34,6 @@ describe("llm client", () => {
   });
 
   it("falls back to 'missing' when apiKey is unset", () => {
-    process.env.LLM_BASE_URL = "https://example.test/v1";
     delete process.env.LLM_API_KEY;
     expect(createLLM().apiKey).toBe("missing");
   });

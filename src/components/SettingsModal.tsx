@@ -14,11 +14,9 @@ type EmbedModelOption = {
 
 type SettingsResponse = {
   // LLM
-  llmBaseUrl: string;
   llmApiKey: string;
   hasLlmApiKey: boolean;
   llmModel: string;
-  llmModels: string;
   llmFallbackModel: string;
   llmFallbackTimeoutMs: number;
   thinkingEffort: string;
@@ -102,6 +100,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [form, setForm] = useState<Partial<SettingsResponse>>({});
+  const [modelList, setModelList] = useState<string[]>([]);
+  const [modelDisplayNames, setModelDisplayNames] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
   const [migrationConfirmed, setMigrationConfirmed] = useState(false);
@@ -167,6 +167,18 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : t("settings.fetchError") });
     }
   }, [t]);
+
+  const fetchModels = useCallback(async () => {
+    try {
+      const res = await clientFetch("/api/models");
+      if (!res.ok) return;
+      const data = (await res.json()) as { models: string[]; displayNames?: Record<string, string> };
+      setModelList(data.models);
+      setModelDisplayNames(data.displayNames ?? {});
+    } catch {
+      // Silent failure: model selector stays as text fallback
+    }
+  }, []);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -259,12 +271,13 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setMigrationConfirmed(false);
       setActiveTab(0);
       void fetchSettings();
+      void fetchModels();
       void fetchTorStatus();
       void fetchConnections();
       void fetchInstructions();
       void fetchUpdateInfo();
     }
-  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions, fetchUpdateInfo]);
+  }, [open, fetchSettings, fetchModels, fetchTorStatus, fetchConnections, fetchInstructions, fetchUpdateInfo]);
 
   const update = useCallback(<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -612,18 +625,6 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block">
-                <span className="block text-xs font-medium text-foreground">{t("settings.llmBaseUrlLabel")}</span>
-                <span className="block text-[10px] text-muted-foreground">{t("settings.llmBaseUrlEnv")}</span>
-              </label>
-              <input
-                type="text"
-                value={form.llmBaseUrl ?? ""}
-                onChange={(e) => update("llmBaseUrl", e.target.value)}
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmApiKeyLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmApiKeyEnv")}</span>
               </label>
@@ -640,24 +641,18 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmModelLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelEnv")}</span>
               </label>
-              <input
-                type="text"
+              <select
                 value={form.llmModel ?? ""}
                 onChange={(e) => update("llmModel", e.target.value)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block">
-                <span className="block text-xs font-medium text-foreground">{t("settings.llmModelsLabel")}</span>
-                <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelsEnv")}</span>
-              </label>
-              <input
-                type="text"
-                value={form.llmModels ?? ""}
-                onChange={(e) => update("llmModels", e.target.value)}
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
+              >
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
+                ))}
+                {!modelList.includes(form.llmModel ?? "") && form.llmModel && (
+                  <option value={form.llmModel}>{modelDisplayNames[form.llmModel] ?? form.llmModel}</option>
+                )}
+              </select>
             </div>
             <div>
               <label className="mb-1 block">

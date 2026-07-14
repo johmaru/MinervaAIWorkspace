@@ -162,7 +162,7 @@ if (process.env[key] === undefined) {
 }
 ```
 
-Vitest does **not** auto-load `.env` like Next.js does. Route Handler tests that call the real API (`api.code.umans.ai`) require `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`, so the project-root `.env` is injected into `process.env` with a minimal parser. Values already set in env are **not** overwritten, so CI can override them.
+Vitest does **not** auto-load `.env` like Next.js does. Route Handler tests that call the real API (`api.code.umans.ai`) require `LLM_API_KEY` / `LLM_MODEL`, so the project-root `.env` is injected into `process.env` with a minimal parser. Values already set in env are **not** overwritten, so CI can override them.
 
 ### 5. Docker host override
 
@@ -293,7 +293,7 @@ beforeEach(() => {
 When mutating `process.env`, snapshot the originals and restore them in `afterEach`:
 
 ```ts
-const ORIGINAL = { LLM_BASE_URL: process.env.LLM_BASE_URL, /* ... */ };
+const ORIGINAL = { LLM_API_KEY: process.env.LLM_API_KEY, /* ... */ };
 
 afterEach(() => {
   for (const [k, v] of Object.entries(ORIGINAL)) {
@@ -567,7 +567,7 @@ Some tests need a **real external API** (LLM, embedder) that may be unavailable 
 At the top of the test file, after mocks and env loading:
 
 ```ts
-const hasCreds = Boolean(process.env.LLM_BASE_URL && process.env.LLM_API_KEY);
+const hasCreds = Boolean(process.env.LLM_API_KEY && process.env.LLM_MODEL);
 const itReal = hasCreds ? it : it.skip;
 ```
 
@@ -602,7 +602,7 @@ const itCli = hasSqlite3Cli ? it : it.skip;
 
 - If a test needs an external API (LLM, embedder) that is unavailable, gate it behind a helper like `itReal()` **or skip with a clear reason**.
 - **Never delete or weaken an assertion to make a test pass.** If a real-API test fails due to a genuine regression, it must fail — do not convert it to `itReal` to hide the failure.
-- `itReal` tests that call the real LLM use the `.env` values loaded by `vitest.setup.ts`. Run them locally with valid `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` set.
+- `itReal` tests that call the real LLM use the `.env` values loaded by `vitest.setup.ts`. Run them locally with valid `LLM_API_KEY` / `LLM_MODEL` set.
 
 ---
 
