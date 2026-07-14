@@ -66,14 +66,36 @@ export async function register(state: FormState, formData: FormData): Promise<Fo
 /**
  * login — Log in with credentials.
  */
+// Rate limiting: 5 failures per email → 15 min lockout (in-memory, resets on restart)
+const loginAttempts = new Map<string, { count: number; lastFail: number }>();
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 15 * 60 * 1000;
+
 export async function login(state: FormState, formData: FormData): Promise<FormState> {
   const email = String(formData.get("email") ?? "").toLowerCase().trim();
   const password = String(formData.get("password") ?? "");
+
+  // Rate limit check
+  const entry = loginAttempts.get(email);
+  if (entry && entry.count >= MAX_ATTEMPTS) {
+    const elapsed = Date.now() - entry.lastFail;
+    if (elapsed < LOCKOUT_MS) {
+      return { error: "auth.tooManyAttempts" };
+    }
+    loginAttempts.delete(email);
+  }
+
   try {
     await signIn("credentials", { email, password, redirect: false });
   } catch {
+    // Record failure
+    const current = loginAttempts.get(email) ?? { count: 0, lastFail: 0 };
+    current.count += 1;
+    current.lastFail = Date.now();
+    loginAttempts.set(email, current);
     return { error: "auth.invalidCredentials" };
   }
+  loginAttempts.delete(email);
   redirect("/");
 }
 

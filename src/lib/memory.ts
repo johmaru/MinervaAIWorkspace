@@ -148,7 +148,7 @@ async function findExistingMemory(
     const [row] = await db
       .select({ id: memories.id })
       .from(memories)
-      .where(and(eq(memories.id, targetId), ...activeMemoryConditions()))
+      .where(and(eq(memories.id, targetId), eq(memories.threadId, threadId), ...activeMemoryConditions()))
       .limit(1);
     if (row) return row;
   }

@@ -89,6 +89,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         .select({ id: users.id })
         .from(users)
         .where(eq(users.email, email));
+      // Security: require Google-verified email before linking to prevent account takeover
+      // (attacker creates Google account with victim's email → OAuth linking without verification)
+      if (!account.email_verified) {
+        logger.warn("auth", "google-email-not-verified", { email });
+        return false;
+      }
       if (existing) {
         // Link Google account to existing user (create accounts row if it doesn't exist)
         const [acct] = await db

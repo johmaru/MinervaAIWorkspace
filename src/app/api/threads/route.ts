@@ -1,7 +1,7 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { defaultModel } from "@/lib/llm";
 import { db } from "@/db";
-import { threads } from "@/db/schema";
+import { threads, mcpServers, connections } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
@@ -128,9 +128,33 @@ export async function PATCH(req: Request) {
   if (body.hyperRounds !== undefined) values.hyperRounds = clampHyperRounds(body.hyperRounds);
   if (body.councilSize !== undefined) values.councilSize = clampCouncilSize(body.councilSize);
   if (body.councilTimeLimit !== undefined) values.councilTimeLimit = clampCouncilTimeLimit(body.councilTimeLimit);
-  if (Array.isArray(body.mcpServerIds)) values.mcpServerIds = body.mcpServerIds;
+  if (Array.isArray(body.mcpServerIds)) {
+    // Validate ownership: all mcpServerIds must belong to the current user
+    if (body.mcpServerIds.length > 0) {
+      const owned = await db
+        .select({ id: mcpServers.id })
+        .from(mcpServers)
+        .where(and(eq(mcpServers.userId, user.id), inArray(mcpServers.id, body.mcpServerIds)));
+      if (owned.length !== body.mcpServerIds.length) {
+        return new Response("One or more MCP servers not found or not owned", { status: 403 });
+      }
+    }
+    values.mcpServerIds = body.mcpServerIds;
+  }
 
-  if (Array.isArray(body.connectionIds)) values.connectionIds = body.connectionIds;
+  if (Array.isArray(body.connectionIds)) {
+    // Validate ownership: all connectionIds must belong to the current user
+    if (body.connectionIds.length > 0) {
+      const ownedConns = await db
+        .select({ id: connections.id })
+        .from(connections)
+        .where(and(eq(connections.userId, user.id), inArray(connections.id, body.connectionIds)));
+      if (ownedConns.length !== body.connectionIds.length) {
+        return new Response("One or more connections not found or not owned", { status: 403 });
+      }
+    }
+    values.connectionIds = body.connectionIds;
+  }
   if (body.globalInstructionId !== undefined) values.globalInstructionId = body.globalInstructionId || null;
   if (body.currentLeafId !== undefined) values.currentLeafId = body.currentLeafId;
   const [row] = await db

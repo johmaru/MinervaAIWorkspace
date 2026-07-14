@@ -52,7 +52,7 @@ search:
 server:
   bind_address: "0.0.0.0"
   port: 8080
-  secret_key: "umanschat-searxng-dev-secret"
+  secret_key: "${SEARXNG_SECRET_KEY}"
   # No IP headers arrive for Docker internal traffic without a reverse proxy.
   # Disable the limiter to eliminate X-Forwarded-For errors.
   limiter: false

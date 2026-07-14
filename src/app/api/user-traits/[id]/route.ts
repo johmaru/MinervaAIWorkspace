@@ -27,7 +27,7 @@ export async function DELETE(
   await db
     .update(userTraits)
     .set({ suppressedAt: new Date(), updatedAt: new Date() })
-    .where(eq(userTraits.id, id));
+    .where(and(eq(userTraits.id, id), eq(userTraits.userId, user.id)));
   return new Response(null, { status: 204 });
 }
 
@@ -82,6 +82,6 @@ export async function PATCH(
     updates.category = body.category;
   }
 
-  await db.update(userTraits).set(updates).where(eq(userTraits.id, id));
+  await db.update(userTraits).set(updates).where(and(eq(userTraits.id, id), eq(userTraits.userId, user.id)));
   return new Response(null, { status: 204 });
 }

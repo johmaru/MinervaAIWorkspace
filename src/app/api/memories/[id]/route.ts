@@ -38,7 +38,7 @@ export async function DELETE(
   await db
     .update(memories)
     .set({ suppressedAt: new Date(), updatedAt: new Date() })
-    .where(eq(memories.id, id));
+    .where(and(eq(memories.id, id), eq(memories.threadId, row.threadId)));
   return new Response(null, { status: 204 });
 }
 
@@ -96,7 +96,7 @@ export async function PATCH(
   const [row] = await db
     .update(memories)
     .set(values)
-    .where(eq(memories.id, id))
+    .where(and(eq(memories.id, id), eq(memories.threadId, owned.threadId)))
     .returning({
       id: memories.id,
       threadId: memories.threadId,
