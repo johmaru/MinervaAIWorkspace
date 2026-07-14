@@ -538,14 +538,27 @@ function ThinkingBlock({ content }: { content: string }) {
 
 function splitThinking(content: string): { thinking: string; answer: string } {
   const parts: string[] = [];
-  const answer = content
-    .replace(/<thinking>([\s\S]*?)<\/thinking>/g, (_, inner: string) => {
+  // Extract closed <thinking>...</thinking> and <think>...</think> blocks.
+  // The backreference \1 ensures opening and closing tags match.
+  let remaining = content.replace(
+    /<(thinking|think)>([\s\S]*?)<\/\1>/g,
+    (_, _tag: string, inner: string) => {
       const trimmed = inner.trim();
       if (trimmed) parts.push(trimmed);
       return "";
-    })
-    .trim();
-  return { thinking: parts.join("\n---\n"), answer };
+    },
+  );
+  // Handle unclosed opening tag (streaming: <think> arrived but </think> hasn't).
+  // Text before the tag becomes answer; everything after is buffered as thinking.
+  remaining = remaining.replace(
+    /([\s\S]*?)<(thinking|think)>([\s\S]*)/,
+    (_, before: string, _tag: string, inner: string) => {
+      const trimmed = inner.trim();
+      if (trimmed) parts.push(trimmed);
+      return before;
+    },
+  );
+  return { thinking: parts.join("\n---\n"), answer: remaining.trim() };
 }
 
 function formatElapsed(ms: number): string {

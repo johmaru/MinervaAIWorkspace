@@ -341,6 +341,39 @@ describe("ChatWindow — message rendering", () => {
     expect(region).toBeInTheDocument();
   });
 
+  it("renders think tag thinking inside a collapsible block (Kimi format)", async () => {
+    const lt = String.fromCharCode(60);
+    const gt = String.fromCharCode(62);
+    const open = lt + "think" + gt;
+    const close = lt + "/think" + gt;
+    mockState.messages = [
+      { id: "a1", role: "assistant", content: open + "Kimiの推論です。" + close + "\n回答です。", parentId: null },
+    ];
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    expect(screen.getByText("回答です。")).toBeInTheDocument();
+    const thinkingBtn = screen.getByRole("button", { name: "思考" });
+    fireEvent.click(thinkingBtn);
+    await waitFor(() => {
+      expect(screen.getByText("Kimiの推論です。")).toBeInTheDocument();
+    });
+  });
+
+  it("buffers unclosed think tag as thinking during streaming (no close tag yet)", async () => {
+    const lt = String.fromCharCode(60);
+    const gt = String.fromCharCode(62);
+    const open = lt + "think" + gt;
+    mockState.messages = [
+      { id: "a1", role: "assistant", content: open + "ストリーミング中の推論…", parentId: null },
+    ];
+    render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    // Answer should be empty (no closing tag, no text after think block)
+    const thinkingBtn = screen.getByRole("button", { name: "思考" });
+    fireEvent.click(thinkingBtn);
+    await waitFor(() => {
+      expect(screen.getByText("ストリーミング中の推論…")).toBeInTheDocument();
+    });
+  });
+
   it("renders dual model details in a collapsible block", async () => {
     mockState.messages = [
       {
