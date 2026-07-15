@@ -101,10 +101,10 @@ beforeEach(() => {
 });
 
 // Phase 2: /api/chat uses DB persistence + real API streaming.
-// Uses .env LLM_BASE_URL / LLM_API_KEY / LLM_MODEL (loaded in vitest.setup.ts).
+// Uses .env LLM_API_KEY / LLM_MODEL (loaded in vitest.setup.ts).
 // Creates a thread per test, cleans up in afterAll.
 
-const hasCreds = Boolean(process.env.LLM_BASE_URL && process.env.LLM_API_KEY);
+const hasCreds = Boolean(process.env.LLM_API_KEY && process.env.LLM_MODEL);
 const itReal = hasCreds ? it : it.skip;
 
 const createdIds: string[] = [];
@@ -872,5 +872,158 @@ describe("POST /api/chat — Hyper Thinking mode", () => {
     const streaming = createCalls.filter((args) => args[0]?.stream).length;
     expect(nonStreaming).toBeGreaterThanOrEqual(3);
     expect(streaming).toBe(1);
+  }, 30_000);
+});
+
+describe("POST /api/chat — TTFT model fallback", () => {
+  const origFallbackModel = process.env.LLM_FALLBACK_MODEL;
+  const origFallbackTimeout = process.env.LLM_FALLBACK_TIMEOUT_MS;
+
+  afterEach(() => {
+    vi.mocked(createLLM).mockReset();
+    if (origFallbackModel === undefined) delete process.env.LLM_FALLBACK_MODEL;
+    else process.env.LLM_FALLBACK_MODEL = origFallbackModel;
+    if (origFallbackTimeout === undefined) delete process.env.LLM_FALLBACK_TIMEOUT_MS;
+    else process.env.LLM_FALLBACK_TIMEOUT_MS = origFallbackTimeout;
+  });
+
+  it("first token timeout → falls back to fallback model", async () => {
+    const id = await createThread();
+    process.env.LLM_FALLBACK_MODEL = "gpt-4o-mini";
+    process.env.LLM_FALLBACK_TIMEOUT_MS = "100";
+
+    // 1回目: signalがabortされるまでチャンクを返さない遅延ストリーム
+    // 2回目: 即座にコンテンツを返すストリーム
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>, opts?: { signal?: AbortSignal }) => {
+            callCount++;
+            if (params.stream) {
+              if (callCount === 1) {
+                // 最初の呼び出し: signalがabortされるまで待機し、AbortErrorを投げる
+                const { promise, resolve } = Promise.withResolvers<void>();
+                const signal = opts?.signal;
+                if (signal) {
+                  if (signal.aborted) resolve();
+                  else signal.addEventListener("abort", () => resolve(), { once: true });
+                }
+                await promise;
+                throw new DOMException("The user aborted a request", "AbortError");
+              }
+              // 2回目: フォールバックモデルで即座にコンテンツを返す
+              return (async function* () {
+                yield { choices: [{ delta: { content: "Fallback response." } }] };
+              })();
+            }
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "テスト", { rapid: true }));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    const statusEvents = events.filter((e) => e.event === "status");
+    expect(statusEvents.some((e) => {
+      const label = e.data.label as string;
+      return label && label.includes("gpt-4o-mini");
+    })).toBe(true);
+
+    // doneイベントのmodelがフォールバックモデル
+    const done = events.filter((e) => e.event === "done");
+    expect(done).toHaveLength(1);
+    expect(done[0].data.model).toBe("gpt-4o-mini");
+
+    // エラーイベントがない
+    expect(events.some((e) => e.event === "error")).toBe(false);
+  }, 30_000);
+
+  it("first token arrives within timeout → no fallback", async () => {
+    const id = await createThread();
+    process.env.LLM_FALLBACK_MODEL = "gpt-4o-mini";
+    process.env.LLM_FALLBACK_TIMEOUT_MS = "30000"; // 十分に長い
+
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>) => {
+            callCount++;
+            if (params.stream) {
+              return (async function* () {
+                yield { choices: [{ delta: { content: "Quick response." } }] };
+              })();
+            }
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "テスト", { rapid: true }));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // フォールバックstatusイベントがない
+    const statusEvents = events.filter((e) => e.event === "status");
+    expect(statusEvents.some((e) => {
+      const label = e.data.label as string;
+      return label && label.includes("gpt-4o-mini");
+    })).toBe(false);
+
+    // doneイベントのmodelがプライマリモデル
+    const done = events.filter((e) => e.event === "done");
+    expect(done).toHaveLength(1);
+    expect(done[0].data.model).not.toBe("gpt-4o-mini");
+
+    // LLM呼び出しは1回のみ（フォールバックしていない）
+    expect(callCount).toBe(1);
+  }, 30_000);
+
+  it("LLM_FALLBACK_MODEL unset → no fallback behavior", async () => {
+    const id = await createThread();
+    delete process.env.LLM_FALLBACK_MODEL;
+
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>) => {
+            callCount++;
+            if (params.stream) {
+              return (async function* () {
+                yield { choices: [{ delta: { content: "Normal response." } }] };
+              })();
+            }
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "テスト", { rapid: true }));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+
+    // フォールバックstatusがない
+    const statusEvents = events.filter((e) => e.event === "status");
+    expect(statusEvents.some((e) => {
+      const label = e.data.label as string;
+      return label && label.includes("fallback");
+    })).toBe(false);
+
+    // doneイベントのmodelがプライマリモデル
+    const done = events.filter((e) => e.event === "done");
+    expect(done).toHaveLength(1);
+
+    // LLM呼び出しは1回のみ
+    expect(callCount).toBe(1);
   }, 30_000);
 });

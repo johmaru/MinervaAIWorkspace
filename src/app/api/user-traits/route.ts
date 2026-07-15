@@ -26,7 +26,7 @@ export async function GET() {
     })
     .from(userTraits)
     .where(and(eq(userTraits.userId, user.id), isNull(userTraits.suppressedAt)))
-    .orderBy(desc(userTraits.confidence), desc(userTraits.updatedAt));
+    .orderBy(desc(userTraits.confidence), desc(userTraits.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

@@ -33,7 +33,7 @@ export async function GET() {
     })
     .from(skills)
     .where(eq(skills.userId, user.id))
-    .orderBy(desc(skills.updatedAt));
+    .orderBy(desc(skills.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

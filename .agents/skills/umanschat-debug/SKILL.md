@@ -212,7 +212,7 @@ docker compose exec -T db psql -U umans -d umanschat -c \
 # Call the LLM API directly from inside the container
 docker compose exec -T app bun -e '
 const OpenAI = (await import("openai")).default;
-const llm = new OpenAI({ baseURL: process.env.LLM_BASE_URL, apiKey: process.env.LLM_API_KEY });
+const llm = new OpenAI({ baseURL: "https://api.code.umans.ai/v1", apiKey: process.env.LLM_API_KEY });
 const completion = await llm.chat.completions.create({
   model: process.env.LLM_MODEL,
   messages: [{ role: "user", content: "Hello" }],
@@ -475,8 +475,6 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ```
 DATABASE_URL=umanschat.db
-LLM_BASE_URL=https://api.code.umans.ai/v1
 LLM_API_KEY=sk-...
 LLM_MODEL=umans-glm-5.2
-LLM_MODELS=umans-glm-5.2,gpt-4o-mini,gpt-4o
 ```

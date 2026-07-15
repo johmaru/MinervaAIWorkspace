@@ -1,9 +1,10 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams } from "@/lib/llm";
+import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, fallbackModel, fallbackTimeoutMs } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions, folders } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
+import { createTodo, listTodos, updateTodo, deleteTodo } from "@/lib/todoStore";
 import type { Locale } from "@/lib/i18n/types";
 import { scrapeUrl, searchWeb } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
@@ -38,6 +39,7 @@ import {
 } from "@/lib/connections";
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 import { buildPersonalizationMessage } from "@/lib/personalization";
+import { appendChatExport } from "@/lib/chatExport";
 import { readWorkspaceFile, writeWorkspaceFile, listWorkspaceDirectory, runWorkspaceCommand } from "@/lib/workspace";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
@@ -147,7 +149,7 @@ export async function POST(req: Request) {
   if ("error" in prepared) return new Response(prepared.error, { status: prepared.status });
 
   const llm = createLLM();
-  const finalModel = body.model ?? thread.model ?? defaultModel();
+  let finalModel = body.model ?? thread.model ?? defaultModel();
   // Resolve global system instruction.
   // Priority: thread override > user default. If both are null, fall back to body.systemPrompt.
   let resolvedGlobalInstruction: string | null = null;
@@ -218,8 +220,16 @@ export async function POST(req: Request) {
     async start(controller) {
       const encoder = new TextEncoder();
       const streamStartedAt = Date.now();
-      const send: StreamSend = (event, data) =>
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      const send: StreamSend = (event, data) => {
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          // Client disconnected (mobile backgrounded, tab closed, network lost).
+          // Swallow the error so LLM generation continues to completion
+          // and the full/partial response is persisted to DB.
+          // The client will re-fetch the thread on return to pick it up.
+        }
+      };
 
       let assistantContent = "";
       let assistantReasoning = "";
@@ -356,6 +366,9 @@ export async function POST(req: Request) {
             onReasoning: (delta) => { assistantReasoning += delta; send("thinking", { delta }); },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
+            onModelFallback: (m) => { finalModel = m; },
           });
         } else if (thread.responseMode === "hyper") {
           send("status", { label: t(locale, "chat.statusHyperPreparing") });
@@ -383,6 +396,9 @@ export async function POST(req: Request) {
             },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
+            onModelFallback: (m) => { finalModel = m; },
           });
         } else if (thread.responseMode === "dual") {
           send("status", { label: t(locale, "chat.statusDualPreparing") });
@@ -410,6 +426,9 @@ export async function POST(req: Request) {
             },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
+            onModelFallback: (m) => { finalModel = m; },
           });
         } else {
           if (body.rapid) {
@@ -427,8 +446,12 @@ export async function POST(req: Request) {
                 assistantReasoning += delta;
                 send("thinking", { delta });
               },
+              send,
               timeRange: body.timeRange,
               locale,
+              userId: user.id,
+              threadId: body.threadId,
+              onModelFallback: (m) => { finalModel = m; },
             });
           } else {
             // Function calling (tool use) probe: determine if the model supports tool use.
@@ -470,6 +493,9 @@ export async function POST(req: Request) {
               connectionRows,
               timeRange: body.timeRange,
               locale,
+              userId: user.id,
+              threadId: body.threadId,
+              onModelFallback: (m) => { finalModel = m; },
             });
           }
         }
@@ -510,6 +536,8 @@ export async function POST(req: Request) {
             },
             timeRange: body.timeRange,
             locale,
+            userId: user.id,
+            threadId: body.threadId,
           });
         }
         const elapsedMs = Date.now() - streamStartedAt;
@@ -541,7 +569,9 @@ export async function POST(req: Request) {
       } catch (err) {
         // Send error event FIRST so the client is never left hanging.
         // If the partial-save DB insert below throws, the error event is already sent.
-        send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") });
+        // send() is already error-safe (swallows enqueue errors),
+        // but wrap defensively to ensure the partial-save below is always reachable.
+        try { send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") }); } catch { /* client already gone */ }
         logger.error("chat", "stream-error", { threadId: body.threadId, error: err instanceof Error ? err.message : String(err) });
         // Save partial assistant content if any was generated before the error
         if (assistantContent) {
@@ -611,6 +641,27 @@ export async function POST(req: Request) {
   after(async () => {
     await streamDone;
     if (!streamResult.assistantContent) return;
+    // Chat export: append user+assistant pair to the configured path.
+    // Runs for all modes (including rapid) — it's a chat record, not memory analysis.
+    // Gated on CHAT_EXPORT_PATH: skip the DB title re-read when export is disabled (the default).
+    if (process.env.CHAT_EXPORT_PATH?.trim()) {
+      try {
+        // Re-read thread title (prepareTurn may have updated it for the first message).
+        const [exportThread] = await db
+          .select({ title: threads.title })
+          .from(threads)
+          .where(eq(threads.id, body.threadId));
+        await appendChatExport({
+          threadTitle: exportThread?.title ?? thread.title,
+          userContent: prepared.content,
+          assistantContent: streamResult.assistantContent,
+        });
+      } catch (err) {
+        logger.error("chat-export", "route callback failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     // Rapid mode: skip memory and skill generation, exit immediately.
     if (body.rapid) return;
     try {
@@ -1537,7 +1588,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "run_command",
-      description: "Execute a shell command in the workspace directory. On Windows, runs via cmd.exe. Use for building, testing, running scripts, git operations, etc. Output (stdout+stderr) is returned. Commands have a 30-second timeout.",
+      description: "Execute a whitelisted shell command in the workspace directory. Allowed: git (read-only: status, log, diff, show, branch, blame, remote, ls-files, etc.), ls, cat, head, tail, grep, rg, find, wc, echo, pwd, tree, file. Blocked: node, npm, bun, python, curl, wget, rm, shells, and all write operations. Output (stdout+stderr) is returned. 30-second timeout.",
       parameters: {
         type: "object",
         properties: {
@@ -1568,6 +1619,69 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "todo_create",
+      description: "Create a new todo item (task) for the user. Use when the user asks to add, create, or schedule a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "The todo title" },
+          description: { type: "string", description: "Optional description or notes" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "Priority level (default: medium)" },
+          due_at: { type: "string", description: "Due date in ISO 8601 format (e.g. 2026-07-15T00:00:00Z)" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todo_list",
+      description: "List the user's todo items. Use when the user asks what tasks they have, or wants to see their todo list.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["pending", "in_progress", "completed", "all"], description: "Filter by status (default: all)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todo_update",
+      description: "Update an existing todo item (change title, description, status, priority, or due date). Use when the user asks to modify, complete, or reschedule a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The todo id" },
+          title: { type: "string", description: "New title" },
+          description: { type: "string", description: "New description" },
+          status: { type: "string", enum: ["pending", "in_progress", "completed"], description: "New status" },
+          priority: { type: "string", enum: ["low", "medium", "high"], description: "New priority" },
+          due_at: { type: "string", description: "New due date in ISO 8601 format, or null to clear" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todo_delete",
+      description: "Delete a todo item. Use when the user asks to remove or delete a task.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The todo id to delete" },
+        },
+        required: ["id"],
+      },
+    },
+  },
 ];
 
 const MAX_TOOL_ROUNDS = 3;
@@ -1585,6 +1699,9 @@ async function streamCompletion({
   connectionRows,
   timeRange,
   locale,
+  userId,
+  threadId,
+  onModelFallback,
 }: {
   llm: OpenAI;
   model: string;
@@ -1598,16 +1715,25 @@ async function streamCompletion({
   connectionRows?: ConnectionRow[];
   timeRange?: "day" | "week" | "month" | "year";
   locale: Locale;
+  userId: string;
+  threadId?: string | null;
+  onModelFallback?: (model: string) => void;
 }) {
   const llmStreamStartedAt = Date.now();
   logger.info("chat", "llm-stream-start", { model });
   const thinkingEffort = process.env.THINKING_EFFORT;
-  const validLevels = await getReasoningLevels(model);
-  const reasoningEffort =
-    thinkingEffort && validLevels.includes(thinkingEffort)
-      ? thinkingEffort
-      : await getDefaultReasoningEffort(model);
-  const disableReasoningParams = await buildDisableReasoningParams(model);
+
+  // TTFT fallback configuration
+  const fbModel = fallbackModel();
+  const fbTimeoutMs = fallbackTimeoutMs();
+  const fallbackEnabled = fbModel !== null && onModelFallback !== undefined;
+
+  // modelToUse may change on fallback. reasoningParams are derived from modelToUse.
+  let modelToUse = model;
+  let reasoningEffort = thinkingEffort && (await getReasoningLevels(modelToUse)).includes(thinkingEffort)
+    ? thinkingEffort
+    : await getDefaultReasoningEffort(modelToUse);
+  let disableReasoningParams = await buildDisableReasoningParams(modelToUse);
 
   const useTools = toolSupport?.supported === true && send !== undefined;
   const searchMaxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
@@ -1618,285 +1744,375 @@ async function streamCompletion({
   // Tool-use mode: when tool_calls are detected during streaming,
   // execute the tools, append results as tool role messages, and re-stream.
   // Up to MAX_TOOL_ROUNDS times. Beyond that, continue answering without tools.
+  let fallbackRetried = false;
+
   while (true) {
-    const useToolsThisRound = useTools && rounds < MAX_TOOL_ROUNDS;
+    const useToolsThisRound = useTools && !fallbackRetried && rounds < MAX_TOOL_ROUNDS;
 
-    const completion = await llm.chat.completions.create({
-      model,
-      messages: currentMessages,
-      stream: true,
-      ...(useToolsThisRound
-        ? disableReasoningParams
-        : reasoningEffort
-          ? { reasoning_effort: reasoningEffort }
+    // TTFT timeout: only on the first round, before any delta has been received.
+    // Once we fall back (or fallback is disabled), no timeout is set.
+    const needsTtftTimeout = fallbackEnabled && !fallbackRetried && rounds === 0;
+    const abortCtl = needsTtftTimeout ? new AbortController() : null;
+    const ttftTimer = needsTtftTimeout
+      ? setTimeout(() => abortCtl!.abort(), fbTimeoutMs!)
+      : null;
+
+    let firstDeltaReceived = false;
+
+    try {
+      const completion = await llm.chat.completions.create({
+        model: modelToUse,
+        messages: currentMessages,
+        stream: true,
+        ...(useToolsThisRound
+          ? disableReasoningParams
+          : reasoningEffort
+            ? { reasoning_effort: reasoningEffort }
+            : {}),
+        ...(useToolsThisRound
+          ? { tools: [...STREAM_TOOLS, ...(extraTools ?? [])], tool_choice: "auto" }
           : {}),
-      ...(useToolsThisRound
-        ? { tools: [...STREAM_TOOLS, ...(extraTools ?? [])], tool_choice: "auto" }
-        : {}),
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+        needsTtftTimeout ? { signal: abortCtl!.signal } : undefined);
 
-    // Accumulate tool_calls deltas during streaming.
-    // In OpenAI's streaming format, tool_calls arrive split across chunks,
-    // so we join them by index.
-    const toolCallAccumulator: Record<
-      number,
-      { id: string; name: string; arguments: string }
-    > = {};
-    let hadToolCalls = false;
+      // Accumulate tool_calls deltas during streaming.
+      // In OpenAI's streaming format, tool_calls arrive split across chunks,
+      // so we join them by index.
+      const toolCallAccumulator: Record<
+        number,
+        { id: string; name: string; arguments: string }
+      > = {};
+      let hadToolCalls = false;
 
-    for await (const chunk of completion) {
-      const choice = chunk.choices?.[0];
-      if (!choice) continue;
-      const reasoningDelta = (
-        choice.delta as Record<string, unknown> as { reasoning_content?: string }
-      ).reasoning_content;
-      if (reasoningDelta) onReasoning(reasoningDelta);
-      const contentDelta = choice.delta?.content;
-      if (contentDelta) onDelta(contentDelta);
-
-      // Accumulate tool_calls delta
-      const deltaToolCalls = (
-        choice.delta as Record<string, unknown> as {
-          tool_calls?: Array<{
-            index: number;
-            id?: string;
-            function?: { name?: string; arguments?: string };
-          }>;
-        }
-      ).tool_calls;
-      if (deltaToolCalls) {
-        hadToolCalls = true;
-        for (const tc of deltaToolCalls) {
-          const existing = toolCallAccumulator[tc.index] ?? {
-            id: "",
-            name: "",
-            arguments: "",
-          };
-          if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name += tc.function.name;
-          if (tc.function?.arguments) existing.arguments += tc.function.arguments;
-          toolCallAccumulator[tc.index] = existing;
-        }
-      }
-    }
-
-    if (!hadToolCalls || !useToolsThisRound) {
-      // No tool calls, or max rounds exceeded → done
-      break;
-    }
-
-    rounds++;
-
-    // Execute tool calls
-    const toolCalls = Object.values(toolCallAccumulator).filter((tc) => tc.name);
-
-    // Add assistant message (including tool_calls) to history
-    currentMessages = [
-      ...currentMessages,
-      {
-        role: "assistant",
-        content: null,
-        tool_calls: toolCalls.map((tc) => ({
-          id: tc.id,
-          type: "function" as const,
-          function: { name: tc.name, arguments: tc.arguments },
-        })),
-      } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam,
-    ];
-
-    const sources: SourceInfo[] = [];
-
-    // Execute each tool call and append the result as a tool role message
-    for (const tc of toolCalls) {
-      let toolContent: string;
-      let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string };
-      try {
-        parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string };
-      } catch {
-        parsedArgs = {};
-      }
-
-      if (tc.name === "scrape_webpage" && parsedArgs.url) {
-        send?.("status", { label: t(locale, "chat.statusToolScrape") });
-        const tTool = Date.now();
-        try {
-        const result = await scrapeUrl(parsedArgs.url);
-        if (result === null) {
-          toolContent = `Failed to scrape ${parsedArgs.url}`;
-        } else {
-          sources.push({
-            url: result.url,
-            title: result.title,
-            snippet: result.content.slice(0, 200),
-          });
-          toolContent = `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`;
-        }
-        } catch {
-          toolContent = `Failed to scrape ${parsedArgs.url}`;
-        }
-        logger.info("search-timing", "tool", { tool: "scrape_webpage", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "search_web" && parsedArgs.query) {
-        send?.("status", { label: t(locale, "chat.statusToolSearch") });
-        const tTool = Date.now();
-        try {
-          const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange, locale === "ja" ? "ja-JP" : "en-US");
-          for (const r of response.results) {
-            sources.push({
-              url: r.url,
-              title: r.scrapeTitle || r.title,
-              snippet: r.snippet,
-            });
+      for await (const chunk of completion) {
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta as Record<string, unknown> | undefined;
+        const reasoningDelta =
+          delta && typeof delta === "object" && "reasoning_content" in delta && typeof delta.reasoning_content === "string"
+            ? delta.reasoning_content
+            : undefined;
+        if (reasoningDelta) {
+          if (!firstDeltaReceived) {
+            firstDeltaReceived = true;
+            clearTimeout(ttftTimer ?? undefined);
           }
-          toolContent = response.results
-            .map(
-              (r) =>
-                `<${r.url}>\n${r.scrapeTitle || r.title}\n${r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : r.snippet}`,
-            )
-            .join("\n\n");
-          if (!toolContent) toolContent = "No results found.";
-        } catch {
-          toolContent = `Search failed for: ${parsedArgs.query}`;
+          onReasoning(reasoningDelta);
         }
-        logger.info("search-timing", "tool", { tool: "search_web", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "search_wikipedia" && parsedArgs.query) {
-        send?.("status", { label: t(locale, "chat.statusWikiLooking") });
-        const tTool = Date.now();
+        const contentDelta = choice.delta?.content;
+        if (contentDelta) {
+          if (!firstDeltaReceived) {
+            firstDeltaReceived = true;
+            clearTimeout(ttftTimer ?? undefined);
+          }
+          onDelta(contentDelta);
+        }
+
+        // Accumulate tool_calls delta
+        const deltaToolCalls =
+          delta && typeof delta === "object" && "tool_calls" in delta && Array.isArray(delta.tool_calls)
+            ? (delta.tool_calls as Array<{
+                index: number;
+                id?: string;
+                function?: { name?: string; arguments?: string };
+              }>)
+            : undefined;
+        if (deltaToolCalls) {
+          hadToolCalls = true;
+          if (!firstDeltaReceived) {
+            firstDeltaReceived = true;
+            clearTimeout(ttftTimer ?? undefined);
+          }
+          for (const tc of deltaToolCalls) {
+            const existing = toolCallAccumulator[tc.index] ?? {
+              id: "",
+              name: "",
+              arguments: "",
+            };
+            if (tc.id) existing.id = tc.id;
+            if (tc.function?.name) existing.name += tc.function.name;
+            if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+            toolCallAccumulator[tc.index] = existing;
+          }
+        }
+      }
+
+      clearTimeout(ttftTimer ?? undefined);
+
+      if (!hadToolCalls || !useToolsThisRound) {
+        // No tool calls, or max rounds exceeded → done
+        break;
+      }
+
+      rounds++;
+
+      // Execute tool calls
+      const toolCalls = Object.values(toolCallAccumulator).filter((tc) => tc.name);
+
+      // Add assistant message (including tool_calls) to history
+      currentMessages = [
+        ...currentMessages,
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function" as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam,
+      ];
+
+      const sources: SourceInfo[] = [];
+
+      // Execute each tool call and append the result as a tool role message
+      for (const tc of toolCalls) {
+        let toolContent: string;
+        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string };
         try {
-          const result = await searchWikipedia(parsedArgs.query);
-          if (result) {
-            sources.push({ url: result.url, title: result.title, snippet: result.description });
-            toolContent = `<${result.url}>\n${result.title}\n${result.description}\n${result.extract}`;
+          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string };
+        } catch {
+          parsedArgs = {};
+        }
+
+        if (tc.name === "scrape_webpage" && parsedArgs.url) {
+          send?.("status", { label: t(locale, "chat.statusToolScrape") });
+          const tTool = Date.now();
+          try {
+          const result = await scrapeUrl(parsedArgs.url);
+          if (result === null) {
+            toolContent = `Failed to scrape ${parsedArgs.url}`;
           } else {
-            toolContent = "No Wikipedia article found.";
+            sources.push({
+              url: result.url,
+              title: result.title,
+              snippet: result.content.slice(0, 200),
+            });
+            toolContent = `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`;
           }
-        } catch {
-          toolContent = `Wikipedia lookup failed for: ${parsedArgs.query}`;
-        }
-        logger.info("search-timing", "tool", { tool: "search_wikipedia", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "read_file" && parsedArgs.path) {
-        send?.("status", { label: t(locale, "chat.statusToolReadFile") });
-        const tTool = Date.now();
-        try {
-          const result = await readWorkspaceFile(parsedArgs.path);
-          toolContent = result;
-        } catch (err) {
-          toolContent = `Failed to read file: ${err instanceof Error ? err.message : String(err)}`;
-        }
-        logger.info("search-timing", "tool", { tool: "read_file", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "write_file" && parsedArgs.path && parsedArgs.content !== undefined) {
-        send?.("status", { label: t(locale, "chat.statusToolWriteFile") });
-        const tTool = Date.now();
-        try {
-          const result = await writeWorkspaceFile(parsedArgs.path, parsedArgs.content);
-          toolContent = result;
-        } catch (err) {
-          toolContent = `Failed to write file: ${err instanceof Error ? err.message : String(err)}`;
-        }
-        logger.info("search-timing", "tool", { tool: "write_file", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "list_directory" && parsedArgs.path) {
-        send?.("status", { label: t(locale, "chat.statusToolListDir") });
-        const tTool = Date.now();
-        try {
-          const result = await listWorkspaceDirectory(parsedArgs.path);
-          toolContent = result;
-        } catch (err) {
-          toolContent = `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`;
-        }
-        logger.info("search-timing", "tool", { tool: "list_directory", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "run_command" && parsedArgs.command) {
-        send?.("status", { label: t(locale, "chat.statusToolRunCommand") });
-        const tTool = Date.now();
-        try {
-          const result = await runWorkspaceCommand(parsedArgs.command);
-          toolContent = result;
-        } catch (err) {
-          toolContent = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
-        }
-        logger.info("search-timing", "tool", { tool: "run_command", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name === "read_logs") {
-        send?.("status", { label: t(locale, "chat.statusToolReadLogs") });
-        const tTool = Date.now();
-        try {
-          const tailLines = typeof parsedArgs.tailLines === "number" ? parsedArgs.tailLines : 200;
-          const minLevel = (parsedArgs.minLevel === "debug" || parsedArgs.minLevel === "info" || parsedArgs.minLevel === "warn" || parsedArgs.minLevel === "error") ? parsedArgs.minLevel : "info";
-          const result = await readProcessLogs(tailLines, minLevel);
-          toolContent = `[source: ${result.source}${result.containerId ? `, container: ${result.containerId}` : ""}${result.truncated ? ", truncated" : ""}]\n${result.lines}`;
-        } catch (err) {
-          toolContent = `Failed to read logs: ${err instanceof Error ? err.message : String(err)}`;
-        }
-        logger.info("search-timing", "tool", { tool: "read_logs", round: rounds, duration: Date.now() - tTool });
-      } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
-        // MCP tool: function name format "{serverName}__{toolName}"
-        const parsed = parseMcpToolFunctionName(tc.name);
-        if (parsed) {
-          const conn = mcpConnections.find((c) => c.serverName === parsed.serverName);
-          if (conn) {
-            send?.("status", { label: t(locale, "chat.statusToolMcp", { server: parsed.serverName, tool: parsed.toolName }) });
-            try {
-              let mcpArgs: Record<string, unknown>;
+          } catch {
+            toolContent = `Failed to scrape ${parsedArgs.url}`;
+          }
+          logger.info("search-timing", "tool", { tool: "scrape_webpage", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "search_web" && parsedArgs.query) {
+          send?.("status", { label: t(locale, "chat.statusToolSearch") });
+          const tTool = Date.now();
+          try {
+            const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange, locale === "ja" ? "ja-JP" : "en-US");
+            for (const r of response.results) {
+              sources.push({
+                url: r.url,
+                title: r.scrapeTitle || r.title,
+                snippet: r.snippet,
+              });
+            }
+            toolContent = response.results
+              .map(
+                (r) =>
+                  `<${r.url}>\n${r.scrapeTitle || r.title}\n${r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : r.snippet}`,
+              )
+              .join("\n\n");
+            if (!toolContent) toolContent = "No results found.";
+          } catch {
+            toolContent = `Search failed for: ${parsedArgs.query}`;
+          }
+          logger.info("search-timing", "tool", { tool: "search_web", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "search_wikipedia" && parsedArgs.query) {
+          send?.("status", { label: t(locale, "chat.statusWikiLooking") });
+          const tTool = Date.now();
+          try {
+            const result = await searchWikipedia(parsedArgs.query);
+            if (result) {
+              sources.push({ url: result.url, title: result.title, snippet: result.description });
+              toolContent = `<${result.url}>\n${result.title}\n${result.description}\n${result.extract}`;
+            } else {
+              toolContent = "No Wikipedia article found.";
+            }
+          } catch {
+            toolContent = `Wikipedia lookup failed for: ${parsedArgs.query}`;
+          }
+          logger.info("search-timing", "tool", { tool: "search_wikipedia", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "read_file" && parsedArgs.path) {
+          send?.("status", { label: t(locale, "chat.statusToolReadFile") });
+          const tTool = Date.now();
+          try {
+            const result = await readWorkspaceFile(parsedArgs.path);
+            toolContent = result;
+          } catch (err) {
+            toolContent = `Failed to read file: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "read_file", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "write_file" && parsedArgs.path && parsedArgs.content !== undefined) {
+          send?.("status", { label: t(locale, "chat.statusToolWriteFile") });
+          const tTool = Date.now();
+          try {
+            const result = await writeWorkspaceFile(parsedArgs.path, parsedArgs.content);
+            toolContent = result;
+          } catch (err) {
+            toolContent = `Failed to write file: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "write_file", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "list_directory" && parsedArgs.path) {
+          send?.("status", { label: t(locale, "chat.statusToolListDir") });
+          const tTool = Date.now();
+          try {
+            const result = await listWorkspaceDirectory(parsedArgs.path);
+            toolContent = result;
+          } catch (err) {
+            toolContent = `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "list_directory", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "run_command" && parsedArgs.command) {
+          send?.("status", { label: t(locale, "chat.statusToolRunCommand") });
+          const tTool = Date.now();
+          try {
+            const result = await runWorkspaceCommand(parsedArgs.command);
+            toolContent = result;
+          } catch (err) {
+            toolContent = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "run_command", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "read_logs") {
+          send?.("status", { label: t(locale, "chat.statusToolReadLogs") });
+          const tTool = Date.now();
+          try {
+            const tailLines = typeof parsedArgs.tailLines === "number" ? parsedArgs.tailLines : 200;
+            const minLevel = (parsedArgs.minLevel === "debug" || parsedArgs.minLevel === "info" || parsedArgs.minLevel === "warn" || parsedArgs.minLevel === "error") ? parsedArgs.minLevel : "info";
+            const result = await readProcessLogs(tailLines, minLevel);
+            toolContent = `[source: ${result.source}${result.containerId ? `, container: ${result.containerId}` : ""}${result.truncated ? ", truncated" : ""}]\n${result.lines}`;
+          } catch (err) {
+            toolContent = `Failed to read logs: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "read_logs", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "todo_create" && parsedArgs.title) {
+          send?.("status", { label: t(locale, "chat.statusToolTodoCreate") });
+          const created = await createTodo(userId, {
+            title: parsedArgs.title,
+            description: parsedArgs.description,
+            priority: parsedArgs.priority === "low" || parsedArgs.priority === "medium" || parsedArgs.priority === "high" ? parsedArgs.priority : undefined,
+            dueAt: parsedArgs.due_at ? new Date(parsedArgs.due_at) : null,
+            threadId: threadId ?? null,
+          });
+          toolContent = JSON.stringify(created);
+        } else if (tc.name === "todo_list") {
+          send?.("status", { label: t(locale, "chat.statusToolTodoList") });
+          const status = parsedArgs.status === "pending" || parsedArgs.status === "in_progress" || parsedArgs.status === "completed" ? parsedArgs.status : undefined;
+          const list = await listTodos(userId, status);
+          toolContent = JSON.stringify(list);
+        } else if (tc.name === "todo_update" && parsedArgs.id) {
+          send?.("status", { label: t(locale, "chat.statusToolTodoUpdate") });
+          const updated = await updateTodo(userId, parsedArgs.id, {
+            title: parsedArgs.title,
+            description: parsedArgs.description,
+            status: parsedArgs.status === "pending" || parsedArgs.status === "in_progress" || parsedArgs.status === "completed" ? parsedArgs.status : undefined,
+            priority: parsedArgs.priority === "low" || parsedArgs.priority === "medium" || parsedArgs.priority === "high" ? parsedArgs.priority : undefined,
+            dueAt: parsedArgs.due_at === null ? null : (parsedArgs.due_at ? new Date(parsedArgs.due_at) : undefined),
+          });
+          toolContent = updated ? JSON.stringify(updated) : "Todo not found";
+        } else if (tc.name === "todo_delete" && parsedArgs.id) {
+          send?.("status", { label: t(locale, "chat.statusToolTodoDelete") });
+          await deleteTodo(userId, parsedArgs.id);
+          toolContent = "Todo deleted";
+        } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
+          // MCP tool: function name format "{serverName}__{toolName}"
+          const parsed = parseMcpToolFunctionName(tc.name);
+          if (parsed) {
+            const conn = mcpConnections.find((c) => c.serverName === parsed.serverName);
+            if (conn) {
+              send?.("status", { label: t(locale, "chat.statusToolMcp", { server: parsed.serverName, tool: parsed.toolName }) });
               try {
-                mcpArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+                let mcpArgs: Record<string, unknown>;
+                try {
+                  mcpArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+                } catch {
+                  mcpArgs = {};
+                }
+                toolContent = await callMcpTool(conn, parsed.toolName, mcpArgs);
               } catch {
-                mcpArgs = {};
+                toolContent = `MCP tool ${tc.name} failed`;
               }
-              toolContent = await callMcpTool(conn, parsed.toolName, mcpArgs);
-            } catch {
-              toolContent = `MCP tool ${tc.name} failed`;
+            } else {
+              toolContent = `MCP server "${parsed.serverName}" not connected`;
             }
           } else {
-            toolContent = `MCP server "${parsed.serverName}" not connected`;
+            toolContent = `Unknown tool: ${tc.name}`;
+          }
+        } else if (tc.name.startsWith("notion_") && connectionRows && connectionRows.length > 0) {
+          // Connection tool: identify provider by "notion_" prefix.
+          // Notion is currently the only provider, so use the first matching connection.
+          const conn = connectionRows[0];
+          send?.("status", { label: t(locale, "chat.statusToolNotion", { tool: tc.name }) });
+          try {
+            let connArgs: Record<string, unknown>;
+            try {
+              connArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+            } catch {
+              connArgs = {};
+            }
+            const result = await dispatchConnectionTool(conn, tc.name, connArgs);
+            toolContent = result.content;
+            // Persist refreshed token to DB if present
+            if (result.newAccessToken && result.newRefreshToken) {
+              try {
+                await db.update(connections)
+                  .set({ accessToken: result.newAccessToken, refreshToken: result.newRefreshToken, updatedAt: new Date() })
+                  .where(eq(connections.id, conn.id));
+              } catch {
+                // Ignore persistence errors — will be refreshed again on next call
+              }
+            }
+          } catch {
+            toolContent = `Connection tool ${tc.name} failed`;
           }
         } else {
           toolContent = `Unknown tool: ${tc.name}`;
         }
-      } else if (tc.name.startsWith("notion_") && connectionRows && connectionRows.length > 0) {
-        // Connection tool: identify provider by "notion_" prefix.
-        // Notion is currently the only provider, so use the first matching connection.
-        const conn = connectionRows[0];
-        send?.("status", { label: t(locale, "chat.statusToolNotion", { tool: tc.name }) });
-        try {
-          let connArgs: Record<string, unknown>;
-          try {
-            connArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
-          } catch {
-            connArgs = {};
-          }
-          const result = await dispatchConnectionTool(conn, tc.name, connArgs);
-          toolContent = result.content;
-          // Persist refreshed token to DB if present
-          if (result.newAccessToken && result.newRefreshToken) {
-            try {
-              await db.update(connections)
-                .set({ accessToken: result.newAccessToken, refreshToken: result.newRefreshToken, updatedAt: new Date() })
-                .where(eq(connections.id, conn.id));
-            } catch {
-              // Ignore persistence errors — will be refreshed again on next call
-            }
-          }
-        } catch {
-          toolContent = `Connection tool ${tc.name} failed`;
-        }
-      } else {
-        toolContent = `Unknown tool: ${tc.name}`;
+
+        currentMessages = [
+          ...currentMessages,
+          {
+            role: "tool",
+            tool_call_id: tc.id,
+            content: toolContent,
+          } as OpenAI.Chat.Completions.ChatCompletionToolMessageParam,
+        ];
       }
 
-      currentMessages = [
-        ...currentMessages,
-        {
-          role: "tool",
-          tool_call_id: tc.id,
-          content: toolContent,
-        } as OpenAI.Chat.Completions.ChatCompletionToolMessageParam,
-      ];
+      if (sources.length > 0) send?.("sources", { sources });
+
+      if (rounds >= MAX_TOOL_ROUNDS) {
+        send?.("status", { label: t(locale, "chat.statusSearchLimit") });
+      }
+
+      // Re-stream (next round)
+    } catch (err) {
+      clearTimeout(ttftTimer ?? undefined);
+      // TTFT timeout: no delta received, abort fired, fallback configured, first round.
+      // Covers both connection-phase abort (create() throws) and stream-phase abort
+      // (for-await throws). firstDeltaReceived is shared across both phases.
+      if (
+        !firstDeltaReceived &&
+        fallbackEnabled &&
+        !fallbackRetried &&
+        rounds === 0 &&
+        err instanceof Error &&
+        (err.name === "AbortError" || err.message.includes("abort"))
+      ) {
+        fallbackRetried = true;
+        modelToUse = fbModel!;
+        // Recompute reasoning params for the fallback model
+        reasoningEffort = thinkingEffort && (await getReasoningLevels(modelToUse)).includes(thinkingEffort)
+          ? thinkingEffort
+          : await getDefaultReasoningEffort(modelToUse);
+        disableReasoningParams = await buildDisableReasoningParams(modelToUse);
+        onModelFallback!(modelToUse);
+        send?.("status", { label: t(locale, "chat.statusModelFallback", { model: modelToUse }) });
+        logger.info("chat", "ttft-fallback", { from: model, to: modelToUse, timeoutMs: fbTimeoutMs });
+        // Reset accumulator state and retry the same round
+        continue;
+      }
+      throw err;
     }
-
-    if (sources.length > 0) send?.("sources", { sources });
-
-    if (rounds >= MAX_TOOL_ROUNDS) {
-      send?.("status", { label: t(locale, "chat.statusSearchLimit") });
-    }
-
-    // Re-stream (next round)
   }
-  logger.info("chat", "llm-stream-end", { model, duration: Date.now() - llmStreamStartedAt });
+  logger.info("chat", "llm-stream-end", { model: modelToUse, duration: Date.now() - llmStreamStartedAt });
 }

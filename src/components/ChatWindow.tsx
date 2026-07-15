@@ -11,6 +11,10 @@ import { clientFetch } from "@/lib/clientFetch";
 import { MotionButton, Accordion } from "@/components/ui/motion";
 import { AnimatePresence, motion } from "motion/react";
 
+const SEND_MODE_STORAGE_KEY = "umanschat-send-mode";
+type SendMode = "enter" | "ctrl-enter";
+
+
 export const ChatWindow = memo(function ChatWindow({
   threadId,
   onCreateThread,
@@ -37,6 +41,26 @@ export const ChatWindow = memo(function ChatWindow({
   const [connOpen, setConnOpen] = useState(false);
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
+  const [sendMode, setSendMode] = useState<SendMode>("ctrl-enter");
+
+  // Restore send mode from localStorage after mount (hydration-safe, same pattern as I18nProvider)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SEND_MODE_STORAGE_KEY);
+      if (stored === "enter" || stored === "ctrl-enter") {
+        setSendMode(stored);
+      }
+    } catch { /* localStorage unavailable */ }
+  }, []);
+
+  const toggleSendMode = useCallback(() => {
+    setSendMode((prev) => {
+      const next = prev === "enter" ? "ctrl-enter" : "enter";
+      try { localStorage.setItem(SEND_MODE_STORAGE_KEY, next); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Sync mcpServerIds / connectionIds on thread switch (rapid is preserved until user interaction)
@@ -178,12 +202,20 @@ export const ChatWindow = memo(function ChatWindow({
   }, [threadId, isLoading, thread, send, onConversationEnded]);
 
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      // Do not send on Enter during IME composition (conflicts with Japanese input confirmation).
-      // isComposing is a React synthetic event, equivalent to native keyCode === 229.
-      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-      e.preventDefault();
-      submit();
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
+    if (sendMode === "enter") {
+      // Enter送信モード: Enter=送信、Shift+Enter=改行（従来）
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        submit();
+      }
+    } else {
+      // Ctrl+Enter送信モード: Ctrl/Cmd+Enter=送信、Enter=改行
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        submit();
+      }
     }
   }
 
@@ -376,6 +408,21 @@ export const ChatWindow = memo(function ChatWindow({
           </div>
           <MotionButton
             type="button"
+            onClick={toggleSendMode}
+            className={`flex h-10 items-center justify-center rounded-2xl px-2 text-xs font-medium transition-all duration-200 ${
+              sendMode === "enter"
+                ? "bg-foreground/15 text-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+            aria-label={sendMode === "enter" ? t("chat.sendModeEnter") : t("chat.sendModeCtrlEnter")}
+            aria-pressed={sendMode === "enter"}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.9 }}
+          >
+            {sendMode === "enter" ? "↵" : "⌃↵"}
+          </MotionButton>
+          <MotionButton
+            type="button"
             onClick={() => setRapid((v) => !v)}
             className={`flex h-10 w-10 items-center justify-center rounded-2xl text-sm transition-all duration-200 disabled:opacity-40 ${
               rapid ? "bg-foreground/15 text-foreground" : "bg-muted hover:bg-muted/80"
@@ -410,7 +457,7 @@ export const ChatWindow = memo(function ChatWindow({
             onKeyDown={onKey}
             rows={1}
             disabled={isCreating}
-            placeholder={t("chat.placeholder")}
+            placeholder={sendMode === "enter" ? t("chat.placeholderEnter") : t("chat.placeholderCtrlEnter")}
             aria-label={t("chat.messageInput")}
             className="min-h-[40px] flex-1 resize-none rounded-2xl bg-muted px-4 py-3 text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20 disabled:opacity-50"
           />
@@ -491,14 +538,27 @@ function ThinkingBlock({ content }: { content: string }) {
 
 function splitThinking(content: string): { thinking: string; answer: string } {
   const parts: string[] = [];
-  const answer = content
-    .replace(/<thinking>([\s\S]*?)<\/thinking>/g, (_, inner: string) => {
+  // Extract closed <thinking>...</thinking> and <think>...</think> blocks.
+  // The backreference \1 ensures opening and closing tags match.
+  let remaining = content.replace(
+    /<(thinking|think)>([\s\S]*?)<\/\1>/g,
+    (_, _tag: string, inner: string) => {
       const trimmed = inner.trim();
       if (trimmed) parts.push(trimmed);
       return "";
-    })
-    .trim();
-  return { thinking: parts.join("\n---\n"), answer };
+    },
+  );
+  // Handle unclosed opening tag (streaming: <think> arrived but </think> hasn't).
+  // Text before the tag becomes answer; everything after is buffered as thinking.
+  remaining = remaining.replace(
+    /([\s\S]*?)<(thinking|think)>([\s\S]*)/,
+    (_, before: string, _tag: string, inner: string) => {
+      const trimmed = inner.trim();
+      if (trimmed) parts.push(trimmed);
+      return before;
+    },
+  );
+  return { thinking: parts.join("\n---\n"), answer: remaining.trim() };
 }
 
 function formatElapsed(ms: number): string {

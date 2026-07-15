@@ -23,7 +23,7 @@ export async function GET() {
     })
     .from(globalInstructions)
     .where(eq(globalInstructions.userId, user.id))
-    .orderBy(desc(globalInstructions.updatedAt));
+    .orderBy(desc(globalInstructions.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

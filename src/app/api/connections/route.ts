@@ -26,7 +26,7 @@ export async function GET() {
     })
     .from(connections)
     .where(eq(connections.userId, user.id))
-    .orderBy(desc(connections.updatedAt));
+    .orderBy(desc(connections.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

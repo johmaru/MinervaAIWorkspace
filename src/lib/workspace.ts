@@ -2,6 +2,7 @@ import { join, resolve, sep, dirname } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { getUserDataRoot } from "@/lib/user-data";
+import { parseCommandTokens, isAllowedCommand } from "@/lib/commandWhitelist";
 
 /**
  * Resolve the workspace root directory.
@@ -66,19 +67,38 @@ export async function listWorkspaceDirectory(relativePath: string): Promise<stri
   });
   return lines.join("\n") || "(empty directory)";
 }
-
 export async function runWorkspaceCommand(command: string): Promise<string> {
+  const tokens = parseCommandTokens(command);
+  if (tokens.length === 0) {
+    return "Error: empty command";
+  }
+
+  const validation = isAllowedCommand(tokens);
+  if (!validation.allowed) {
+    return `Blocked: ${validation.reason}`;
+  }
+
+  const binary = tokens[0];
+  if (!binary) return "Error: empty command";
+  const args = tokens.slice(1);
   const wsRoot = getWorkspaceRoot();
-  const isWindows = process.platform === "win32";
-  // Windows: cmd.exe /c. Future Linux support: bash -c.
-  const shell = isWindows ? "cmd.exe" : "/bin/bash";
-  const args = isWindows ? ["/c", command] : ["-c", command];
+
+  // Minimal env: no secrets leaked to child process
+  const safeEnv: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME ?? "",
+    USERPROFILE: process.env.USERPROFILE ?? "",
+    LANG: process.env.LANG ?? "en_US.UTF-8",
+    TZ: process.env.TZ ?? "Asia/Tokyo",
+    NODE_ENV: process.env.NODE_ENV ?? "production",
+  };
 
   return new Promise<string>((resolvePromise) => {
-    const proc = spawn(shell, args, {
+    const proc = spawn(binary, args, {
       cwd: wsRoot,
       timeout: COMMAND_TIMEOUT_MS,
-      env: { ...process.env },
+      env: safeEnv,
+      shell: false,
     });
     let stdout = "";
     let stderr = "";

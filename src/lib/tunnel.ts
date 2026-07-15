@@ -1,11 +1,8 @@
 /**
  * Cloudflare Tunnel process management.
  *
- * Supports two execution environments:
- *   - Docker Compose: start/stop the cloudflared container via docker compose --profile tunnel up/down
- *   - Standalone exe: start/stop the cloudflared binary as a child process
- *
- * In the exe environment, the cloudflared binary is downloaded to data/cloudflared/.
+ * Uses the cloudflared binary as a child process in both Docker and exe environments.
+ * The binary is downloaded to data/cloudflared/ with SHA256 verification.
  * Security conditions:
  *   - Pinned version (CLOUDFLARED_VERSION)
  *   - SHA256 hash verification (CLOUDFLARED_HASHES) — values confirmed by local computation
@@ -16,8 +13,7 @@
  * macOS is unsupported because .tgz extraction is required (extraction logic would be needed to add it in the future).
  */
 
-import { spawn, exec, type ChildProcess } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -32,7 +28,6 @@ import { platform } from "node:os";
 import { logger } from "@/lib/logger";
 import { getConfiguredAuthUrl } from "@/lib/auth-env";
 
-const execAsync = promisify(exec);
 
 // Pinned version + SHA256 hashes (per platform)
 // Version upgrades require a developer to update these values and rebuild
@@ -65,12 +60,11 @@ function getCloudflaredDir(): string {
 
 /** Determines whether running in a Docker environment */
 export function isDockerEnv(): boolean {
-  return existsSync("/var/run/docker.sock");
+  return process.env.DOCKER_ENV === "true";
 }
 
 /** Checks if the cloudflared binary exists (for exe environment) */
 export function isCloudflaredInstalled(): boolean {
-  if (isDockerEnv()) return true; // Docker environment uses the container image
   const binaryPath = join(getCloudflaredDir(), getBinaryName());
   return existsSync(binaryPath);
 }
@@ -141,9 +135,6 @@ export function httpsDownload(
 
 /** Downloads the cloudflared binary + verifies SHA256 (for exe environment) */
 export async function downloadCloudflared(): Promise<string> {
-  if (isDockerEnv()) {
-    throw new Error("Binary download not needed in Docker environment");
-  }
 
   const dir = getCloudflaredDir();
   const binaryName = getBinaryName();
@@ -180,27 +171,6 @@ export async function downloadCloudflared(): Promise<string> {
   return binaryPath;
 }
 
-/** Docker environment: start the cloudflared container */
-async function startDockerTunnel(token: string): Promise<void> {
-  // --force-recreate ensures the container with the old TUNNEL_TOKEN env var is recreated.
-  // This guarantees the new token is reflected when saving→starting from the GUI.
-  await execAsync(
-    `docker compose --profile tunnel up -d --force-recreate cloudflared`,
-    {
-      cwd: process.cwd(),
-      timeout: 60_000,
-      env: { ...process.env, TUNNEL_TOKEN: token },
-    },
-  );
-}
-
-/** Docker environment: stop the cloudflared container */
-async function stopDockerTunnel(): Promise<void> {
-  await execAsync(`docker compose --profile tunnel stop cloudflared`, {
-    cwd: process.cwd(),
-    timeout: 60_000,
-  });
-}
 
 /** exe environment: cloudflared child process */
 let cloudflaredProcess: ChildProcess | null = null;
@@ -239,27 +209,6 @@ export interface TunnelStatus {
 
 /** Checks whether the tunnel is running */
 export async function isTunnelRunning(): Promise<boolean> {
-  if (isDockerEnv()) {
-    try {
-      const { stdout } = await execAsync(
-        `docker compose --profile tunnel ps cloudflared --format json`,
-        { cwd: process.cwd(), timeout: 10_000 },
-      );
-      const lines = stdout.trim().split("\n");
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj.State === "running") return true;
-        } catch {
-          // Ignore JSON parse failure
-        }
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-  // exe environment: check if the process exists
   return cloudflaredProcess !== null && !cloudflaredProcess.killed;
 }
 
@@ -287,20 +236,12 @@ export async function startTunnel(
     await stopTunnel();
   }
 
-  if (isDockerEnv()) {
-    await startDockerTunnel(token);
-  } else {
-    await startExeTunnel(token);
-  }
+  await startExeTunnel(token);
 }
 
 /** Stops the tunnel */
 export async function stopTunnel(): Promise<void> {
   if (!(await isTunnelRunning())) return; // Already stopped
 
-  if (isDockerEnv()) {
-    await stopDockerTunnel();
-  } else {
-    stopExeTunnel();
-  }
+  stopExeTunnel();
 }

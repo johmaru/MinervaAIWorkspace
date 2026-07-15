@@ -14,11 +14,11 @@ type EmbedModelOption = {
 
 type SettingsResponse = {
   // LLM
-  llmBaseUrl: string;
   llmApiKey: string;
   hasLlmApiKey: boolean;
   llmModel: string;
-  llmModels: string;
+  llmFallbackModel: string;
+  llmFallbackTimeoutMs: number;
   thinkingEffort: string;
   // Embeddings
   embedModel: string;
@@ -68,6 +68,9 @@ type SettingsResponse = {
   translateDefaultMulti: boolean;
   // Primary language for translate characteristics (null = follow UI locale)
   translatePrimaryLang: string | null;
+  translateTimeout: number;
+  // Chat export
+  chatExportPath: string;
 };
 
 type TorConnection = {
@@ -87,7 +90,7 @@ type Props = {
  * App settings modal (opened from the ⚙️ button in the sidebar).
  *
  * All .env settings are editable via GUI:
- * - LLM settings (BASE_URL, API_KEY, MODEL, MODELS, Thinking Effort)
+ * - LLM settings (API_KEY, MODEL, Thinking Effort, Fallback)
  * - Embedding model (migration confirmation on dimension change)
  * - Web search (max results, SCRAPER_URL, SEARXNG_URL)
  * - Tor proxy (TOR_PROXY, SCRAPE_PROXY)
@@ -97,6 +100,9 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [form, setForm] = useState<Partial<SettingsResponse>>({});
+  const [modelList, setModelList] = useState<string[]>([]);
+  const [modelDisplayNames, setModelDisplayNames] = useState<Record<string, string>>({});
+  const [modelReasoningLevels, setModelReasoningLevels] = useState<Record<string, string[]>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
   const [migrationConfirmed, setMigrationConfirmed] = useState(false);
@@ -162,6 +168,19 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : t("settings.fetchError") });
     }
   }, [t]);
+
+  const fetchModels = useCallback(async () => {
+    try {
+      const res = await clientFetch("/api/models");
+      if (!res.ok) return;
+      const data = (await res.json()) as { models: string[]; displayNames?: Record<string, string>; reasoningLevels?: Record<string, string[]> };
+      setModelList(data.models);
+      setModelDisplayNames(data.displayNames ?? {});
+      setModelReasoningLevels(data.reasoningLevels ?? {});
+    } catch {
+      // Silent failure: model selector stays as text fallback
+    }
+  }, []);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -254,12 +273,13 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       setMigrationConfirmed(false);
       setActiveTab(0);
       void fetchSettings();
+      void fetchModels();
       void fetchTorStatus();
       void fetchConnections();
       void fetchInstructions();
       void fetchUpdateInfo();
     }
-  }, [open, fetchSettings, fetchTorStatus, fetchConnections, fetchInstructions, fetchUpdateInfo]);
+  }, [open, fetchSettings, fetchModels, fetchTorStatus, fetchConnections, fetchInstructions, fetchUpdateInfo]);
 
   const update = useCallback(<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -278,6 +298,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     settings !== null &&
     settings.dbVectorDim > 0 &&
     selectedOption.dim !== settings.dbVectorDim;
+
+  const currentReasoningLevels = modelReasoningLevels[form.llmModel ?? ""] ?? ["none", "low", "medium", "high", "max"];
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -607,18 +629,6 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block">
-                <span className="block text-xs font-medium text-foreground">{t("settings.llmBaseUrlLabel")}</span>
-                <span className="block text-[10px] text-muted-foreground">{t("settings.llmBaseUrlEnv")}</span>
-              </label>
-              <input
-                type="text"
-                value={form.llmBaseUrl ?? ""}
-                onChange={(e) => update("llmBaseUrl", e.target.value)}
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmApiKeyLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmApiKeyEnv")}</span>
               </label>
@@ -635,22 +645,44 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmModelLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelEnv")}</span>
               </label>
-              <input
-                type="text"
+              <select
                 value={form.llmModel ?? ""}
                 onChange={(e) => update("llmModel", e.target.value)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
+              >
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
+                ))}
+                {!modelList.includes(form.llmModel ?? "") && form.llmModel && (
+                  <option value={form.llmModel}>{modelDisplayNames[form.llmModel] ?? form.llmModel}</option>
+                )}
+              </select>
             </div>
             <div>
               <label className="mb-1 block">
-                <span className="block text-xs font-medium text-foreground">{t("settings.llmModelsLabel")}</span>
-                <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelsEnv")}</span>
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmFallbackModelLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmFallbackModelEnv")}</span>
+              </label>
+              <select
+                value={form.llmFallbackModel ?? ""}
+                onChange={(e) => update("llmFallbackModel", e.target.value || "")}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="">— (disabled)</option>
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmFallbackTimeoutLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmFallbackTimeoutEnv")}</span>
               </label>
               <input
-                type="text"
-                value={form.llmModels ?? ""}
-                onChange={(e) => update("llmModels", e.target.value)}
+                type="number"
+                value={form.llmFallbackTimeoutMs ?? 10000}
+                onChange={(e) => update("llmFallbackTimeoutMs", Number(e.target.value))}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
@@ -659,18 +691,26 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.thinkingEffort")}</span>
               </label>
               <select
-                value={form.thinkingEffort ?? "medium"}
+                value={currentReasoningLevels.length === 0 ? "" : (form.thinkingEffort ?? "medium")}
                 onChange={(e) => update("thinkingEffort", e.target.value)}
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                disabled={currentReasoningLevels.length === 0}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20 disabled:opacity-50"
               >
-                <option value="none">none</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="max">max</option>
+                {currentReasoningLevels.length === 0 ? (
+                  <option value="" disabled>(not controllable)</option>
+                ) : (
+                  currentReasoningLevels.map((lvl) => (
+                    <option key={lvl} value={lvl}>{lvl}</option>
+                  ))
+                )}
+                {currentReasoningLevels.length > 0 && !currentReasoningLevels.includes(form.thinkingEffort ?? "medium") && form.thinkingEffort && (
+                  <option value={form.thinkingEffort}>{form.thinkingEffort} (stale)</option>
+                )}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                {t("settings.thinkingEffortDesc")}
+                {currentReasoningLevels.length === 0
+                  ? t("settings.thinkingEffortNotControllable")
+                  : t("settings.thinkingEffortDesc")}
               </p>
             </div>
             <div className="sm:col-span-2">
@@ -716,6 +756,20 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <option value="vi">Tiếng Việt</option>
                 <option value="th">ไทย</option>
               </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.translateTimeout")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.translateTimeoutDesc")}</span>
+              </label>
+              <input
+                type="number"
+                min={5}
+                max={300}
+                value={form.translateTimeout ?? 30}
+                onChange={(e) => update("translateTimeout", Math.min(300, Math.max(5, Number(e.target.value) || 30)))}
+                className="mt-1 w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
             </div>
           </div>
 
@@ -829,13 +883,18 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.webSearchModel")}</span>
               </label>
-              <input
-                type="text"
+              <select
                 value={form.webSearchModel ?? "umans-qwen3.6-35b-a3b"}
                 onChange={(e) => update("webSearchModel", e.target.value)}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-                placeholder="umans-qwen3.6-35b-a3b"
-              />
+              >
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
+                ))}
+                {!modelList.includes(form.webSearchModel ?? "") && form.webSearchModel && (
+                  <option value={form.webSearchModel}>{modelDisplayNames[form.webSearchModel] ?? form.webSearchModel}</option>
+                )}
+              </select>
               <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
             </div>
             <div>
@@ -1129,6 +1188,32 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
             <div>
               <span className="block text-[10px] text-muted-foreground">{t("settings.logFilePathLabel")}</span>
               <p className="break-all text-[10px] text-muted-foreground/70">{form.logFilePath}</p>
+            </div>
+          </div>
+          {/* Chat export */}
+          <div className="mt-3 space-y-3 rounded-xl border border-border p-4">
+            <span className="block text-xs font-medium text-foreground">{t("settings.chatExportSectionTitle")}</span>
+            {onOpenHelp && (
+              <button
+                type="button"
+                onClick={() => onOpenHelp("system.chatExport")}
+                className="ml-2 inline-block text-xs text-foreground underline"
+              >
+                {t("help.openInHelp")} →
+              </button>
+            )}
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.chatExportPathLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.chatExportPathHint")}</span>
+              </label>
+              <input
+                type="text"
+                value={form.chatExportPath ?? ""}
+                onChange={(e) => update("chatExportPath", e.target.value)}
+                placeholder={t("settings.chatExportPathPlaceholder")}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
             </div>
           </div>
           </div>

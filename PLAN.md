@@ -20,7 +20,7 @@ Message editing follows the ChatGPT-style branching model. UI is minimal and han
 ## Architecture
 
 ```
-Browser ──> Next.js Route Handlers ──> OpenAI-compatible LLM (env: LLM_BASE_URL)
+Browser ──> Next.js Route Handlers ──> UmansAI LLM (hardcoded provider)
    │             │
    │             v
    │      PostgreSQL + pgvector
@@ -63,7 +63,7 @@ embeddings
 ### Phase 1: Streaming chat ✅
 - Single-thread chat UI (message list + input field)
 - `/api/chat` Route Handler, streaming via SSE
-- OpenAI-compatible client (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` env)
+- UmansAI client (hardcoded provider, `LLM_API_KEY` / `LLM_MODEL` env)
 - Automated tests: Vitest + React Testing Library (includes SSE verification with real API, 30 tests green)
 
 ### Phase 2: Threads + persistence ✅
@@ -80,7 +80,7 @@ embeddings
 - Automated tests: 75 tests green (Markdown 10 tests + ThemeToggle 4 tests added)
 ### Phase 4: System prompt + model ✅
 - Per-thread system prompt editing (collapsible field)
-- Model selector (candidate list via LLM_MODELS env, GET /api/models)
+- Model selector (candidate list via GET /api/models, fetched from /v1/models/info)
 - Added updateThread to useChat (PATCH /api/threads?id=...)
 - Automated tests: 88 tests green (ThreadSettings 9 tests + models API 4 tests added)
 
@@ -155,7 +155,7 @@ embeddings
 - GUI settings modal: all `.env` settings editable via GUI from the ⚙️ button in the sidebar
   - `GET/POST /api/settings`: fetch all settings + save to `.env` + vector column migration on dimension change
   - `SettingsModal` component: 5 sections (LLM / Embedding / Web Search / Tor / DB) with 12 items
-  - LLM settings: BASE_URL, API_KEY, MODEL, MODELS, **Thinking Effort** (low/medium/high)
+  - LLM settings: API_KEY, MODEL, **Thinking Effort** (low/medium/high), Fallback
   - Embedding model: select from 4 candidates, migration confirmation on dimension change
   - Web search: max results count, SCRAPER_URL, SEARXNG_URL
   - Tor proxy: TOR_PROXY, SCRAPE_PROXY (empty = no Tor, socks5://tor:9050 = Tor enabled)
@@ -209,9 +209,8 @@ embeddings
 
 ```
 DATABASE_URL=postgres://...
-LLM_BASE_URL=https://api.openai.com/v1   # or UmansAI / local
 LLM_API_KEY=...
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=umans-glm-5.2
 EMBED_MODEL=text-embedding-3-small
 EMBED_DIM=1536
 SCRAPER_URL=http://localhost:8000       # or http://scraper:8000 in Docker

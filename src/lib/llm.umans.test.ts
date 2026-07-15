@@ -4,7 +4,6 @@ import {
   resetUmansModelsCache,
   getUmansModels,
   getModelDisplayNames,
-  isUmansProvider,
 } from "@/lib/llm";
 
 // Mock fetch
@@ -16,12 +15,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   resetUmansModelsCache();
-});
-
-const ORIGINAL_BASE_URL = process.env.LLM_BASE_URL;
-afterEach(() => {
-  if (ORIGINAL_BASE_URL === undefined) delete process.env.LLM_BASE_URL;
-  else process.env.LLM_BASE_URL = ORIGINAL_BASE_URL;
 });
 
 const SAMPLE_API_RESPONSE = {
@@ -45,30 +38,12 @@ const SAMPLE_API_RESPONSE = {
   },
 };
 
-describe("isUmansProvider", () => {
-  it("returns true when URL contains api.code.umans.ai", () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
-    expect(isUmansProvider()).toBe(true);
-  });
-
-  it("returns false for OpenAI URL", () => {
-    process.env.LLM_BASE_URL = "https://api.openai.com/v1";
-    expect(isUmansProvider()).toBe(false);
-  });
-
-  it("returns false when unset", () => {
-    delete process.env.LLM_BASE_URL;
-    expect(isUmansProvider()).toBe(false);
-  });
-});
-
 describe("getUmansModels", () => {
   beforeEach(() => {
     resetUmansModelsCache();
   });
 
-  it("fetches model info from /v1/models/info in Umans mode", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
+  it("fetches model info from /v1/models/info", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve(SAMPLE_API_RESPONSE),
@@ -88,7 +63,6 @@ describe("getUmansModels", () => {
   });
 
   it("parses replacement for deprecated models", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve(SAMPLE_API_RESPONSE),
@@ -101,7 +75,6 @@ describe("getUmansModels", () => {
   });
 
   it("falls back to id when display_name is missing", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -118,7 +91,6 @@ describe("getUmansModels", () => {
   });
 
   it("falls back to MODEL_REASONING hardcoded values on API failure", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockRejectedValueOnce(new Error("network error"));
 
     const models = await getUmansModels();
@@ -138,22 +110,13 @@ describe("getUmansModels", () => {
   });
 
   it("also falls back on HTTP error", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
 
     const models = await getUmansModels();
     expect(models).toHaveLength(7);
   });
 
-  it("returns empty array when not in Umans mode (no fetch)", async () => {
-    process.env.LLM_BASE_URL = "https://api.openai.com/v1";
-    const models = await getUmansModels();
-    expect(models).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("second call returns cache (fetch only once)", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve(SAMPLE_API_RESPONSE),
@@ -170,8 +133,7 @@ describe("getModelDisplayNames", () => {
     resetUmansModelsCache();
   });
 
-  it("returns id → display_name mapping in Umans mode", async () => {
-    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
+  it("returns id → display_name mapping", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve(SAMPLE_API_RESPONSE),
@@ -180,11 +142,5 @@ describe("getModelDisplayNames", () => {
     const names = await getModelDisplayNames();
     expect(names["umans-glm-5.2"]).toBe("Umans GLM 5.2");
     expect(names["umans-qwen3.6-35b-a3b"]).toBe("Umans Qwen3.6 35B A3B");
-  });
-
-  it("returns empty object in OAI mode", async () => {
-    process.env.LLM_BASE_URL = "https://api.openai.com/v1";
-    const names = await getModelDisplayNames();
-    expect(names).toEqual({});
   });
 });

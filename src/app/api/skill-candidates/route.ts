@@ -38,6 +38,6 @@ export async function GET(req: Request) {
     })
     .from(skillCandidates)
     .where(and(eq(skillCandidates.userId, user.id), eq(skillCandidates.status, status)))
-    .orderBy(desc(skillCandidates.createdAt));
+    .orderBy(desc(skillCandidates.createdAt)).limit(100);
   return Response.json(rows);
 }

@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import { mkdirSync, renameSync, unlinkSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, basename, join } from "node:path";
@@ -36,11 +37,6 @@ mkdirSync(dirname(dbPath), { recursive: true });
  * sqlite3 .recover (a fast no-op for a healthy DB).
  */
 export function openDatabase(dbPath: string): Database.Database {
-  const applyPragmas = (db: Database.Database) => {
-    db.pragma("journal_mode = DELETE");
-    db.pragma("synchronous = NORMAL");
-    db.pragma("foreign_keys = ON");
-  };
 
   // Verify integrity with a read-only probe before reopening in read-write mode.
   // When better-sqlite3 opens a corrupted DB in read-write mode, the constructor
@@ -70,8 +66,37 @@ export function openDatabase(dbPath: string): Database.Database {
 
   // Reopen the healthy DB in read-write mode.
   const instance = new Database(dbPath);
-  applyPragmas(instance);
+  initDatabase(instance);
   return instance;
+}
+
+/**
+ * Initializes a better-sqlite3 Database instance: applies pragmas, loads sqlite-vec,
+ * and runs one-time JSON→BLOB embedding migration if needed.
+ * Called from openDatabase (normal path) and recoverDatabase (healed + fresh paths).
+ */
+function initDatabase(db: Database.Database) {
+  db.pragma("journal_mode = DELETE");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("foreign_keys = ON");
+  sqliteVec.load(db);
+  // One-time data migration: convert legacy JSON text embeddings to Float32 BLOB.
+  // Uses vec_f32() which accepts JSON string input and returns a compact BLOB.
+  // Idempotent: typeof(BLOB) = 'blob', not 'text', so the WHERE clause skips already-converted rows.
+  const tables = ["memories", "todos", "skills", "page_embeddings", "user_traits"];
+  for (const table of tables) {
+    try {
+      const count = db.prepare(
+        `SELECT COUNT(*) as n FROM ${table} WHERE typeof(embedding) = 'text'`
+      ).get() as { n: number };
+      if (count.n > 0) {
+        db.exec(`UPDATE ${table} SET embedding = vec_f32(embedding) WHERE typeof(embedding) = 'text'`);
+        logger.info("db", "migrated embeddings to BLOB", { table, rows: count.n });
+      }
+    } catch {
+      // Table might not exist yet on first launch (pre-migration) — skip.
+    }
+  }
 }
 
 const SQLITE_MAGIC = Buffer.from("SQLite format 3\x00");
@@ -150,18 +175,14 @@ function recoverDatabase(dbPath: string): Database.Database {
   }
   try {
     const healed = new Database(dbPath);
-    healed.pragma("journal_mode = DELETE");
-    healed.pragma("synchronous = NORMAL");
-    healed.pragma("foreign_keys = ON");
+    initDatabase(healed);
     logger.warn("db", "Recovered from corruption", { backup: backupPath });
     return healed;
   } catch {
     // If the recovered file cannot be opened, fall back to a fresh empty DB.
     new Database(dbPath).close();
     const fresh = new Database(dbPath);
-    fresh.pragma("journal_mode = DELETE");
-    fresh.pragma("synchronous = NORMAL");
-    fresh.pragma("foreign_keys = ON");
+    initDatabase(fresh);
     logger.warn("db", "Recovery failed; started fresh DB", { backup: backupPath });
     return fresh;
   }

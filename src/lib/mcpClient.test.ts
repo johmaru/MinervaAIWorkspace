@@ -1,0 +1,140 @@
+// @vitest-environment node
+import { describe, it, expect } from "vitest";
+import { validateMcpStdioCommand } from "./mcpClient";
+
+describe("validateMcpStdioCommand", () => {
+  // --- Allowed commands ---
+
+  it("allows npx", () => {
+    const result = validateMcpStdioCommand("npx", ["-y", "@anthropic/mcp-server"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows node", () => {
+    const result = validateMcpStdioCommand("node", ["server.js"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows python3", () => {
+    const result = validateMcpStdioCommand("python3", ["-m", "mcp_server"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows uvx", () => {
+    const result = validateMcpStdioCommand("uvx", ["mcp-server-fetch"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows bun", () => {
+    const result = validateMcpStdioCommand("bun", ["run", "server.ts"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows path-prefixed binary", () => {
+    const result = validateMcpStdioCommand("/usr/bin/node", ["server.js"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows Windows path-prefixed binary", () => {
+    const result = validateMcpStdioCommand("C:\\Program Files\\nodejs\\node.exe", ["server.js"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  // --- Blocked binaries ---
+
+  it("blocks docker", () => {
+    const result = validateMcpStdioCommand("docker", ["run", "-v", "/:/host", "alpine"]);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("not in the allowed list");
+  });
+
+  it("blocks bash", () => {
+    const result = validateMcpStdioCommand("bash", ["-c", "whoami"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks sh", () => {
+    const result = validateMcpStdioCommand("sh", ["-c", "whoami"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks cmd.exe", () => {
+    const result = validateMcpStdioCommand("cmd.exe", ["/c", "whoami"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks env", () => {
+    const result = validateMcpStdioCommand("env", ["rm", "-rf", "/"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks curl", () => {
+    const result = validateMcpStdioCommand("curl", ["http://evil.com"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks rm", () => {
+    const result = validateMcpStdioCommand("rm", ["-rf", "/"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks powershell", () => {
+    const result = validateMcpStdioCommand("powershell", ["-Command", "whoami"]);
+    expect(result.allowed).toBe(false);
+  });
+
+  // --- Blocked flags ---
+
+  it("blocks node -e (code execution)", () => {
+    const result = validateMcpStdioCommand("node", ["-e", "console.log(1)"]);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("-e");
+  });
+
+  it("blocks python -c (code execution)", () => {
+    const result = validateMcpStdioCommand("python", ["-c", "import os"]);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("-c");
+  });
+
+  it("blocks node --eval", () => {
+    const result = validateMcpStdioCommand("node", ["--eval", "console.log(1)"]);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("--eval");
+  });
+
+  it("blocks node --interactive", () => {
+    const result = validateMcpStdioCommand("node", ["--interactive"]);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("--interactive");
+  });
+
+  // --- Edge cases ---
+
+  it("blocks empty command", () => {
+    const result = validateMcpStdioCommand("", []);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("empty");
+  });
+
+  it("blocks unknown binary", () => {
+    const result = validateMcpStdioCommand("some-unknown-tool", []);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("not in the allowed list");
+  });
+
+  it("allows empty args with allowed binary", () => {
+    const result = validateMcpStdioCommand("node", []);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows -y flag on npx", () => {
+    const result = validateMcpStdioCommand("npx", ["-y", "@anthropic/mcp-server"]);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("allows -m flag on python", () => {
+    const result = validateMcpStdioCommand("python3", ["-m", "http.server"]);
+    expect(result.allowed).toBe(true);
+  });
+});

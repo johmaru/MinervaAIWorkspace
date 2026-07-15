@@ -123,7 +123,7 @@ The first candidate should be the most natural/standard translation. ${contextCl
       max_tokens: isMulti ? 8192 : 4096,
       ...disableParams,
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, {
-      timeout: 30_000,
+      timeout: (Number(process.env.TRANSLATE_TIMEOUT) || 30) * 1000,
       maxRetries: 0,
     });
 

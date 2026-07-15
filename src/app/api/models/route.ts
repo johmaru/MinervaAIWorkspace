@@ -1,4 +1,4 @@
-import { availableModels, defaultModel, getModelDisplayNames } from "@/lib/llm";
+import { availableModels, defaultModel, getModelDisplayNames, getUmansModels } from "@/lib/llm";
 import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
@@ -7,8 +7,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/models — Returns the list of available models.
  *
- * - Umans mode: Returns the model list and displayNames from `/v1/models/info`.
- * - OAI-compatible mode: Built from LLM_MODELS env (comma-separated). displayNames is empty.
+ * Returns the model list, displayNames, and reasoningLevels from `/v1/models/info`.
  */
 export async function GET() {
   const user = await getSessionUser();
@@ -16,5 +15,8 @@ export async function GET() {
   const models = await availableModels();
   const current = defaultModel();
   const displayNames = await getModelDisplayNames();
-  return Response.json({ models, default: current, displayNames });
+  const umansModels = await getUmansModels();
+  const reasoningLevels: Record<string, string[]> = {};
+  for (const m of umansModels) reasoningLevels[m.id] = m.reasoning.levels;
+  return Response.json({ models, default: current, displayNames, reasoningLevels });
 }

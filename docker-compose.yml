@@ -22,21 +22,26 @@ services:
       - ./.env:/app/.env
       # SQLite data persistence: keep data/umanschat.db on the host
       - ./data:/app/data
-      # For starting/stopping the Tor container: mount Docker socket + compose file
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
+      # Chat export: mount a host directory into the container.
+      # Set CHAT_EXPORT_HOST_PATH in .env to a host path (use forward slashes on Windows: C:/Users/...).
+      # When empty, defaults to ./data/chat-export (no special host path).
+      - ${CHAT_EXPORT_HOST_PATH:-./data/chat-export}:/app/chat-export
     env_file:
       - .env
     environment:
       SCRAPER_URL: http://scraper:8000
       SEARXNG_URL: http://searxng:8080
       EMBEDDER_URL: http://embedder:8001
+      DOCKER_ENV: "true"
       # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY / DATABASE_URL are
       # read from the .env file (supports GUI editing)
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_TRUST_HOST: "true"
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Chat export: in-container path is always /app/chat-export when CHAT_EXPORT_HOST_PATH is set.
+      # This overrides the .env value so the app writes to the mounted directory.
+      CHAT_EXPORT_PATH: ${CHAT_EXPORT_HOST_PATH:+/app/chat-export}
     ports:
       - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
 
@@ -108,6 +113,7 @@ services:
       - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
     environment:
       - SEARXNG_BASE_URL=http://searxng:8080
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-umanschat-searxng-dev-secret}
     depends_on:
       - tor
 

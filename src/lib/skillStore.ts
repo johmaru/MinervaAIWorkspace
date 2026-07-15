@@ -1,8 +1,8 @@
-import { eq, like, and } from "drizzle-orm";
+import { eq, like, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { skills, skillUsageEvents } from "@/db/schema";
 import { embedText } from "@/lib/embed";
-import { cosineSimilarity } from "@/lib/vectorSearch";
+import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
 
 /**
@@ -25,10 +25,8 @@ export type ScoredSkill = {
  * Searches for relevant skills by query string and user ID.
  *
  * 1. Vectorize the query via embedText(query, "query")
- * 2. Get all skills for the user
- * 3. Compute cosine similarity client-side
- * 4. Filter by similarity > 0.3
- * 5. Return top-limit by similarity descending
+ * 2. SQL query with vec_distance_cosine (similarity > 0.3 = distance < 0.7)
+ * 3. Return top-limit by similarity descending
  */
 export async function findRelevantSkills(
   query: string,
@@ -37,32 +35,25 @@ export async function findRelevantSkills(
 ): Promise<ScoredSkill[]> {
   const queryVector = await embedText(query, "query");
   if (queryVector.length === 0) return [];
+  const queryBuf = toVecBuffer(queryVector);
 
-  const rows = await db
-    .select({
-      id: skills.id,
-      name: skills.name,
-      content: skills.content,
-      embedding: skills.embedding,
-    })
-    .from(skills)
-    .where(and(eq(skills.userId, userId), eq(skills.status, "active")));
-  if (rows.length === 0) return [];
+  const rows = await db.all(sql`
+    SELECT id, name, content,
+           vec_distance_cosine(embedding, ${queryBuf}) AS distance
+    FROM skills
+    WHERE user_id = ${userId}
+      AND status = 'active'
+      AND vec_distance_cosine(embedding, ${queryBuf}) < 0.7
+    ORDER BY distance
+    LIMIT ${limit}
+  `) as { id: string; name: string; content: string; distance: number }[];
 
-  return rows
-    .map((r) => ({
-      id: r.id,
-      name: r.name,
-      content: r.content,
-      similarity: cosineSimilarity(queryVector, r.embedding),
-    }))
-    .filter((r) => r.similarity > 0.3)
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, limit)
-    .map((r) => ({
-      ...r,
-      similarity: Number(r.similarity.toFixed(3)),
-    }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    content: r.content,
+    similarity: Number(distanceToSimilarity(r.distance).toFixed(3)),
+  }));
 }
 
 /**

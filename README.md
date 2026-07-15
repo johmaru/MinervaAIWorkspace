@@ -29,9 +29,10 @@ Comprehensive documentation for contributors is available in the [`docs/`](./doc
 - **Hyper-Thinking mode** — a single model iteratively refines its answer through 1–5 rounds of self-review, each from a distinct perspective (factual accuracy, logical consistency, completeness, clarity, practical applicability). The final refined answer is streamed; all intermediate drafts and critiques are available in a collapsible trace.
 - **Council mode** — 2–6 panels with distinct AI personas discuss the question, generate initial answers, debate in rounds, and a final model synthesizes the best answer. Configurable panel count and time limit (30–21600s). The full discussion trace is available in a collapsible block.
 - **Workspace tools** — the model can autonomously read/write files, list directories, run shell commands, and read application logs via built-in tools during streaming. Useful for coding assistance, debugging, and file manipulation within the workspace.
+- **Todo list** — per-user task management with a sidebar modal UI (create, edit, complete, delete, filter by status). Todos support priority levels, due dates, and are vector-embedded for future semantic search. The AI can also create, list, update, and delete todos during chat via built-in tools.
 - **Tor proxy** support for anonymous scraping
 - **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`, Flash: `none`/`low`/`medium`/`high`); ignored for models without reasoning control
-- **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service
+- **Embedding model switching** — local ONNX via transformers.js, or an HTTP Python embedder service; vector search via sqlite-vec
 - **Folder organization** for threads
 - **Dark / light / system theme**
 - **EN / JA i18n toggle** (English is the default)
@@ -106,7 +107,7 @@ cp .env.example .env
 
 # 2. Set your LLM API key (required)
 #    Edit .env and fill in LLM_API_KEY
-#    Optionally set LLM_BASE_URL and LLM_MODEL for your provider
+#    Set LLM_MODEL to your preferred default model (optional, defaults to umans-glm-5.2)
 
 # 2b. Generate an AUTH_SECRET and add it to .env
 bunx auth secret
@@ -212,7 +213,7 @@ To expose the app over public HTTPS without port forwarding or a public IP, use 
 
 The tunnel can be started/stopped from the same GUI at any time. `AUTH_URL` is applied dynamically (NextAuth reads it per-request), so the Google OAuth callback URL switches immediately.
 
-### Setup via .env (Docker CLI)
+### Setup via .env
 
 ```bash
 # .env
@@ -220,9 +221,7 @@ TUNNEL_TOKEN=your-token-here
 AUTH_URL=https://your-tunnel.example.com
 ```
 
-```bash
-docker compose --profile tunnel up -d
-```
+The tunnel starts automatically when the app detects `TUNNEL_TOKEN`. No `docker compose --profile tunnel` needed — cloudflared runs as a child process inside the app container.
 
 ### Google OAuth redirect URI
 
@@ -231,8 +230,8 @@ In Google Cloud Console, set the authorized redirect URI to:
 
 ### Docker vs standalone exe
 
-- **Docker Compose**: The cloudflared container is managed via Docker socket (`--force-recreate` on token change).
-- **Standalone exe (Windows x64 only)**: cloudflared binary is downloaded to `data/cloudflared/` on first use. The binary is pinned to a fixed version (`2024.12.2`) with SHA256 verification, HTTPS-only download, and no automatic updates. Version upgrades require a rebuild by the developer.
+- **Docker Compose**: cloudflared runs as a child process inside the app container. The binary is downloaded to `data/cloudflared/` on first use with SHA256 verification.
+- **Standalone exe (Windows x64 only)**: Same as Docker — cloudflared binary is downloaded to `data/cloudflared/` on first use. Pinned to a fixed version (`2024.12.2`) with SHA256 verification, HTTPS-only download, and no automatic updates. Version upgrades require a rebuild by the developer.
 - **Node/Bun on Linux x64**: When running from source on Linux (not the standalone exe), the Linux cloudflared binary is downloaded to `data/cloudflared/` with the same security checks.
 - macOS is not supported (requires `.tgz` extraction, not implemented).
 
@@ -273,11 +272,10 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 
 | Variable                | Description                                                        | Default                                              |
 |-------------------------|--------------------------------------------------------------------|------------------------------------------------------|
-| `LLM_BASE_URL`          | Base URL of the OpenAI-compatible API (Umans mode auto-fetches models when `api.code.umans.ai`) | `https://api.code.umans.ai/v1`                       |
 | `LLM_API_KEY`           | API key (required)                                                 | —                                                    |
 | `LLM_MODEL`             | Default model                                                      | `umans-glm-5.2`                                      |
-| `LLM_MODELS`            | Comma-separated model list (OAI-compat mode only; ignored in Umans mode) | —                                                    |
 | `THINKING_EFFORT`       | Reasoning level (`none`/`low`/`medium`/`high`/`max`, per model)  | `medium`                                             |
+| `TRANSLATE_TIMEOUT`     | Translation LLM timeout in seconds (increase for long texts or multi-candidate mode) | `30`                                                 |
 | `EMBED_MODEL`           | Embedding model name (`Xenova/*` ONNX model for `local` provider, or `sentence-transformers` model for `http` provider)  | `LiquidAI/LFM2.5-Embedding-350M`                     |
 | `EMBED_DIM`             | Embedding dimension (must match `EMBED_MODEL`)                     | `1024`                                               |
 | `EMBED_PROVIDER`        | Embedding backend: `local` (ONNX) or `http` (Python embedder)     | `local`                                              |
@@ -296,6 +294,8 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `LOG_LEVEL`             | Log threshold (`debug`/`info`/`warn`/`error`)                     | `info`                                               |
 | `LOG_FILE_ENABLED`      | Write logs to `data/logs/umanschat.log` (`true`/`false`; auto: exe→`true`, Docker→`false`) | auto                                   |
 | `LOG_FILE_MAX_SIZE`     | Max log file size in bytes before rotation (keeps one `.log.1` backup) | `5242880` (5MB)                                 |
+| `CHAT_EXPORT_PATH`      | Directory to export chat turns as Markdown (`<YYYY>/<MM>/<DD>/<title>.md`; empty = disabled) | —                            |
+| `CHAT_EXPORT_HOST_PATH` | Docker only: host path to mount as the export directory (use forward slashes on Windows: `C:/Users/...`; empty = disabled in Docker) | —                            |
 | `AUTH_SECRET`           | Auth.js JWT encryption secret (required; generate with `bunx auth secret`) | —                                                  |
 | `AUTH_TRUST_HOST`        | Trust the host header behind a reverse proxy (Docker)              | `true`                                               |
 | `REGISTRATION_LOCKED`     | Lock all new account creation (`true`/`false`)                     | `false`                                              |
@@ -315,33 +315,19 @@ The Connections feature lets the LLM call Notion tools (search pages, read page 
 5. Open Settings → Connections → "Connect Notion". Authorize via Notion. The connection appears in the settings list.
 6. Per-thread: open the ＋ menu → "Connections" → toggle on the Notion connection. The LLM will auto-invoke Notion tools based on conversation context.
 
-## LLM Provider Modes
+## LLM Provider
 
-UmansChat supports two modes, switched automatically by `LLM_BASE_URL`:
-
-### Umans mode (default)
-
-When `LLM_BASE_URL` points to `api.code.umans.ai` (e.g. `https://api.code.umans.ai/v1`):
+The provider is hardcoded to **UmansAI** (`https://api.code.umans.ai/v1`). Only `LLM_API_KEY` needs to be set in `.env`.
 
 - The model list and reasoning levels are **auto-fetched** from `/v1/models/info` at startup (cached in-process).
 - Models appear in the selector with their **display names** (e.g. `Umans Qwen3.6 35B A3B`).
-- `LLM_MODELS` is **ignored** — the API is the source of truth.
 - On API failure, falls back to the built-in `MODEL_REASONING` table.
-
-### OpenAI-compatible mode
-
-When `LLM_BASE_URL` points elsewhere (OpenAI, vLLM, Ollama, etc.):
-
-- The model list is taken from `LLM_MODELS` (comma-separated, e.g. `gpt-4o,gpt-4o-mini`).
-- Display names are not available — model IDs are shown as-is.
-- Reasoning levels fall back to `MODEL_REASONING` for known Umans models, or empty for others.
-
-Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart is needed when using the Settings GUI.
+- The model selector in Settings is a dropdown populated from the API.
 
 ## Usage
 
 - **Create a thread** — start typing in the composer; the thread is created on first send and an auto title is generated from your first message.
-- **Send a message** — press `Enter` to send, `Shift+Enter` for a newline. Responses stream token-by-token. Each completed assistant message shows the model name and elapsed response time below the answer.
+- **Send a message** — by default, press `Ctrl+Enter` (or `Cmd+Enter` on Mac) to send and `Enter` for a newline. Click the `⌃↵` toggle in the composer to switch to `Enter`-to-send mode (`Shift+Enter` for newline). Responses stream token-by-token. Each completed assistant message shows the model name and elapsed response time below the answer.
 - **Rapid mode** — click ⚡ in the composer to skip web search, URL scraping, and memory/skill retrieval for faster responses. Stays on for subsequent messages (and across thread switches) until you click ⚡ again. MCP/connections tools and dual-model mode still work normally.
 - **Branching** — use **Regenerate** or **Edit** on any message to create a sibling branch. Navigate between siblings with `< 1/N >`.
 - **Dual-model mode** — open thread settings, switch **Response mode** to **Dual model**, choose Model A/B, and pick **Cross review** or **Debate**. The chat shows the final synthesized answer first; the A/B answers, reviews, or debate turns are available in the collapsible **Dual-model details** block. This mode makes several LLM calls per message, so responses cost more and take longer than normal mode.
@@ -354,6 +340,7 @@ Change `LLM_BASE_URL` in the Settings GUI or `.env` to switch modes. No restart 
 - **Settings** — open the Settings panel to change the LLM provider/model, thinking effort, embedding model, web search count, Tor options, log level, translation default mode (single vs multi-candidate), and translation primary language for characteristics. Changes are written to `.env` and take effect immediately, except embedding-model changes which require a migration (see below).
 - **Global system instructions** — open Settings → AI & Models to create, edit, and delete named system instructions. Select one as your default; it applies to all threads unless a thread overrides it. In thread settings, pick a different instruction per-thread.
 - **Memory Manager** — click the 🧠 button in the sidebar to view all conversation memories (fact/working), search and filter them, edit content/kind/importance, delete (logical — removed from RAG), or manually add new memories. Each memory shows its injection count, last injected time, and last referenced time so you can see which memories are actively shaping the conversation.
+- **Todo list** — click the ✓ button in the sidebar to manage your todos. Create tasks with title, description, priority (low/medium/high), and due date. Filter by All/Pending/Completed. Click the checkbox to toggle completion, the pencil icon to edit, or the trash icon to delete. The AI can also manage todos via chat (e.g. "add a todo to fix the bug by Friday", "what are my pending todos?").
 - **Personalization** — open Settings → Personalization. Pick a style preset (or "None" to disable). Adjust the 4 trait sliders (warmth, energy, structure, emoji; 0-2). Changes apply to all new messages immediately — no restart needed.
 - **Skill Manager** — click 🛠️ in the sidebar. **Active Skills** tab: edit name/content/kind/trigger/tags, archive. **Draft Candidates** tab: review LLM-proposed skills (with confidence score + reason), approve as-is, edit-then-approve, or reject. **Archived** tab: restore archived skills. Skills are matched by cosine similarity to the conversation and injected as context.
 - **Time-range filter** — use the dropdown in the composer (next to ⚡) to limit memory/knowledge/skill retrieval and web search to a recent time window. "None" searches all history.

@@ -150,6 +150,25 @@ export function useChat(threadId: string | null) {
   const [rapid, setRapid] = useState(false);
   const [timeRange, setTimeRange] = useState<"day" | "week" | "month" | "year" | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Track the optimistic assistant ID currently being streamed.
+  // Used by visibility-resync to detect if the server completed while backgrounded.
+  const streamingAssistantIdRef = useRef<string | null>(null);
+  // The real user message ID from the SSE "start" event.
+  // Used to find the assistant response by parentId during polling.
+  const realUserMsgIdRef = useRef<string | null>(null);
+  // WakeLock handle to keep the screen on during streaming (mobile).
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
+  // Polling timer reference for visibility-resync.
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether the user explicitly stopped the stream (vs. background-disconnect).
+  const userStoppedRef = useRef(false);
+  // True when handleResync aborted the fetch — distinguishes background-disconnect
+  // from normal completion in streamChat's finally block.
+  const resyncingRef = useRef(false);
+  // True when the SSE "done" event was received — distinguishes normal
+  // completion from premature disconnect (which returns done:true without
+  // the "done" SSE event).
+  const streamCompletedRef = useRef(false);
 
   // Keep all messages in a byId map (all branch nodes)
   const byIdRef = useRef<Map<string, RawMessage>>(new Map());
@@ -244,9 +263,21 @@ export function useChat(threadId: string | null) {
       abortRef.current?.abort();
     };
   }, [threadId, t]);
-
   const stop = useCallback(() => {
+    userStoppedRef.current = true;
+    resyncingRef.current = false;
     abortRef.current?.abort();
+    // Clear any pending visibility-resync poll immediately.
+    if (pollRef.current) {
+      clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => { /* non-fatal */ });
+      wakeLockRef.current = null;
+    }
+    setIsStreaming(false);
+    streamingAssistantIdRef.current = null;
   }, []);
 
   const clear = useCallback(() => {
@@ -287,9 +318,22 @@ export function useChat(threadId: string | null) {
     setError(null);
     setSources([]);
     setIsStreaming(true);
+    streamingAssistantIdRef.current = assistantId;
+    realUserMsgIdRef.current = null;
+    userStoppedRef.current = false;
+    streamCompletedRef.current = false;
 
     const ac = new AbortController();
     abortRef.current = ac;
+
+    // Request a screen wake lock to prevent the screen from turning off
+    // during streaming on mobile. Non-blocking: if unsupported, silently skip.
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+      navigator.wakeLock.request("screen").then(
+        (lock: { release: () => Promise<void> }) => { wakeLockRef.current = lock; },
+        () => { /* wakeLock denied or unsupported — non-fatal */ },
+      );
+    }
 
     try {
       const res = await clientFetch("/api/chat", {
@@ -309,7 +353,15 @@ export function useChat(threadId: string | null) {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // Stream ended. If we already received the "done" SSE event,
+          // this is normal completion. If not, the mobile OS likely closed
+          // the connection (FIN) when backgrounding — start resync polling.
+          if (!streamCompletedRef.current) {
+            startResyncPoll();
+          }
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
 
         let idx: number;
@@ -321,6 +373,7 @@ export function useChat(threadId: string | null) {
 
           if (event.event === "start" && event.data?.userMessageId) {
             const realId = event.data.userMessageId;
+            realUserMsgIdRef.current = realId;
             if (optimisticUser) {
               const oldMsg = byIdRef.current.get(optimisticUser.id);
               if (oldMsg) {
@@ -458,6 +511,7 @@ export function useChat(threadId: string | null) {
           } else if (event.event === "sources" && event.data?.sources) {
             setSources(event.data.sources);
           } else if (event.event === "done" && event.data?.assistantMessageId) {
+            streamCompletedRef.current = true;
             const realId = event.data.assistantMessageId;
             const oldMsg = byIdRef.current.get(assistantId);
             if (oldMsg) {
@@ -483,13 +537,171 @@ export function useChat(threadId: string | null) {
       if ((err as Error).name === "AbortError") {
         // Stopped: keep partial response as-is
       } else {
-        setError(err instanceof Error ? err.message : t("chat.fetchError"));
+        // Network error (mobile backgrounded, OS killed fetch, etc.).
+        // The server continues generating — start polling to pick up the
+        // result. This fires BEFORE visibilitychange on mobile, so we must
+        // initiate recovery here rather than waiting for the event.
+        startResyncPoll();
       }
     } finally {
+      // If handleResync triggered the abort (background-disconnect), skip
+      // streaming state cleanup — the resync poll owns it now and will
+      // call setIsStreaming(false) / clear refs / release wakeLock when
+      // the server completes or the poll times out.
+      if (resyncingRef.current) {
+        abortRef.current = null;
+        return;
+      }
+
       setIsStreaming(false);
       abortRef.current = null;
+      streamingAssistantIdRef.current = null;
+
+      // Release the screen wake lock if we acquired one.
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => { /* non-fatal */ });
+        wakeLockRef.current = null;
+      }
+      // pollRef cleanup is handled by the visibility-resync effect's own
+      // cleanup function — NOT here. Clearing it here would race with
+      // handleResync's abort() → finally → clear poll sequence.
     }
   }
+
+  /**
+   * Start polling the server for the assistant message that was being
+   * generated when the mobile client lost its SSE connection (screen off,
+   * background tab, OS killing the fetch). The server continues generating
+   * regardless because send() is error-safe — we just need to pick up
+   * the result when it lands in DB.
+   *
+   * Called from two places:
+   * - streamChat's catch block: when the fetch throws a network error
+   *   (fires BEFORE visibilitychange on mobile).
+   * - visibilitychange/pageshow: when returning to the foreground.
+   *
+   * Completion detection: new assistant message whose parentId matches the
+   * real user message ID (from SSE "start" event), or any unknown assistant
+   * message in the server data. NOT currentLeafId (updated early in some flows).
+   */
+  const startResyncPoll = useCallback(() => {
+    if (!threadId) return;
+    if (userStoppedRef.current || resyncingRef.current) return;
+    if (!streamingAssistantIdRef.current) return;
+
+    const optimisticAssistantId = streamingAssistantIdRef.current;
+    const knownUserMsgId = realUserMsgIdRef.current;
+    const knownIds = new Set(byIdRef.current.keys());
+
+    // Mark resyncing so streamChat's finally block skips state cleanup.
+    resyncingRef.current = true;
+
+    const pollOnce = async (): Promise<boolean> => {
+      try {
+        const res = await clientFetch(`/api/threads/${threadId}`);
+        if (!res.ok) return false;
+        const data = (await res.json()) as {
+          thread: Thread;
+          messages: RawMessage[];
+          attachments?: RawAttachment[];
+        };
+
+        const newAssistant = data.messages.find(
+          (m) => m.role === "assistant" && !knownIds.has(m.id),
+        );
+        const assistantByParentId = knownUserMsgId
+          ? data.messages.find(
+              (m) => m.role === "assistant" && m.parentId === knownUserMsgId,
+            )
+          : null;
+        const found = newAssistant ?? assistantByParentId;
+        if (!found) return false;
+        // Server completed — rebuild local state from server data.
+        const byId = new Map<string, RawMessage>();
+        for (const m of data.messages) byId.set(m.id, m);
+        // Remove the optimistic assistant placeholder.
+        byId.delete(optimisticAssistantId);
+        byIdRef.current = byId;
+
+        const attMap = new Map<string, RawAttachment[]>();
+        if (data.attachments) {
+          for (const att of data.attachments) {
+            if (att.messageId) {
+              const existing = attMap.get(att.messageId) ?? [];
+              existing.push(att);
+              attMap.set(att.messageId, existing);
+            }
+          }
+        }
+        attachmentsByMsgIdRef.current = attMap;
+
+        setThread(data.thread);
+        const leafId = data.thread.currentLeafId ?? found.id;
+        setMessages(buildChain(leafId));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const maxAttempts = 40; // 60s max at 1.5s intervals
+    let attempts = 0;
+
+    const tryPoll = async () => {
+      if (userStoppedRef.current) return;
+      const found = await pollOnce();
+      if (found) {
+        resyncingRef.current = false;
+        setIsStreaming(false);
+        streamingAssistantIdRef.current = null;
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release().catch(() => { /* non-fatal */ });
+          wakeLockRef.current = null;
+        }
+        return;
+      }
+      attempts++;
+      if (attempts >= maxAttempts) {
+        resyncingRef.current = false;
+        setIsStreaming(false);
+        streamingAssistantIdRef.current = null;
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release().catch(() => { /* non-fatal */ });
+          wakeLockRef.current = null;
+        }
+        return;
+      }
+      pollRef.current = setTimeout(tryPoll, 1500);
+    };
+
+    void tryPoll();
+  }, [threadId]);
+
+  // Mobile background resync: listen for foreground return.
+  useEffect(() => {
+    if (!threadId) return;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startResyncPoll();
+      }
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) startResyncPoll();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pageshow", onPageShow);
+      if (pollRef.current) {
+        clearTimeout(pollRef.current);
+        pollRef.current = null;
+      }
+      resyncingRef.current = false;
+    };
+  }, [threadId, startResyncPoll]);
 
   const send = useCallback(
     async (

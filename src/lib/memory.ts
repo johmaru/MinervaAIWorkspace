@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { memories, threads, folders, userTraits } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
 import { activeMemoryConditions } from "@/lib/memoryUtils";
-import { cosineSimilarity } from "@/lib/vectorSearch";
+import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
 
 /**
@@ -148,7 +148,7 @@ async function findExistingMemory(
     const [row] = await db
       .select({ id: memories.id })
       .from(memories)
-      .where(and(eq(memories.id, targetId), ...activeMemoryConditions()))
+      .where(and(eq(memories.id, targetId), eq(memories.threadId, threadId), ...activeMemoryConditions()))
       .limit(1);
     if (row) return row;
   }
@@ -289,65 +289,69 @@ async function processProfileTraits(
 
       const contentHash = hashContent(trait.content);
 
-      // Fetch active traits in same category for this user
-      const existingTraits = await db
-        .select({
-          id: userTraits.id,
-          content: userTraits.content,
-          embedding: userTraits.embedding,
-          confidence: userTraits.confidence,
-          evidenceCount: userTraits.evidenceCount,
-          contentHash: userTraits.contentHash,
-        })
+      // 1. Exact dedup via contentHash
+      const [exactDup] = await db
+        .select({ id: userTraits.id })
         .from(userTraits)
         .where(
           and(
             eq(userTraits.userId, userId),
             eq(userTraits.category, trait.category),
             isNull(userTraits.suppressedAt),
+            eq(userTraits.contentHash, contentHash),
           ),
-        );
-
-      // 1. Exact dedup via contentHash
-      const exactDup = existingTraits.find((t) => t.contentHash === contentHash);
+        )
+        .limit(1);
       if (exactDup) continue;
 
-      // 2. Semantic dedup via cosine > 0.85
-      let matched = false;
-      for (const existing of existingTraits) {
-        const sim = cosineSimilarity(vector, existing.embedding);
-        if (sim > 0.85) {
-          // Same trait — increment confidence
-          const newConfidence = Math.min(1.0, existing.confidence + 0.15);
-          const newEvidenceCount = existing.evidenceCount + 1;
-          // Update content if new one is richer
-          const updateContent = trait.content.length > existing.content.length;
-          const newContent = updateContent ? trait.content : existing.content;
-          const newEmbedding = updateContent ? vector : existing.embedding;
-          const newHash = updateContent ? contentHash : existing.contentHash;
-          await db
-            .update(userTraits)
-            .set({
-              confidence: newConfidence,
-              evidenceCount: newEvidenceCount,
-              content: newContent,
-              embedding: newEmbedding,
-              contentHash: newHash,
-              updatedAt: now,
-            })
-            .where(eq(userTraits.id, existing.id));
-          matched = true;
-          break;
-        }
-      }
-      if (matched) continue;
+      // 2. Semantic dedup via vec_distance_cosine < 0.15 (similarity > 0.85)
+      const queryBuf = toVecBuffer(vector);
+      const dedupMatch = await db.all(sql`
+        SELECT id, content, confidence, evidence_count, content_hash,
+               vec_distance_cosine(embedding, ${queryBuf}) AS distance
+        FROM user_traits
+        WHERE user_id = ${userId}
+          AND category = ${trait.category}
+          AND suppressed_at IS NULL
+          AND vec_distance_cosine(embedding, ${queryBuf}) < 0.15
+        ORDER BY distance
+        LIMIT 1
+      `) as { id: string; content: string; confidence: number; evidence_count: number; content_hash: string; distance: number }[];
 
-      // 3. Contradiction detection: cosine > 0.75 but ≤ 0.85
-      for (const existing of existingTraits) {
-        const sim = cosineSimilarity(vector, existing.embedding);
-        if (sim <= 0.75 || sim > 0.85) continue;
+      if (dedupMatch.length > 0) {
+        const existing = dedupMatch[0];
+        const newConfidence = Math.min(1.0, existing.confidence + 0.15);
+        const newEvidenceCount = existing.evidence_count + 1;
+        const updateContent = trait.content.length > existing.content.length;
+        await db
+          .update(userTraits)
+          .set({
+            confidence: newConfidence,
+            evidenceCount: newEvidenceCount,
+            content: updateContent ? trait.content : existing.content,
+            embedding: updateContent ? vector : undefined,
+            contentHash: updateContent ? contentHash : existing.content_hash,
+            updatedAt: now,
+          })
+          .where(eq(userTraits.id, existing.id));
+        continue;
+      }
+
+      // 3. Contradiction detection: 0.15 < distance <= 0.25 (0.75 < similarity <= 0.85)
+      const contradictionCandidates = await db.all(sql`
+        SELECT id, content,
+               vec_distance_cosine(embedding, ${queryBuf}) AS distance
+        FROM user_traits
+        WHERE user_id = ${userId}
+          AND category = ${trait.category}
+          AND suppressed_at IS NULL
+          AND vec_distance_cosine(embedding, ${queryBuf}) BETWEEN 0.15 AND 0.25
+      `) as { id: string; content: string; distance: number }[];
+
+      for (const candidate of contradictionCandidates) {
+        const sim = distanceToSimilarity(candidate.distance);
         const isContradiction = await checkContradiction(
-          existing.content,
+          candidate.content,
           trait.content,
           llm,
           model,
@@ -356,14 +360,13 @@ async function processProfileTraits(
           await db
             .update(userTraits)
             .set({ suppressedAt: now, updatedAt: now })
-            .where(eq(userTraits.id, existing.id));
+            .where(eq(userTraits.id, candidate.id));
           logger.info("memory", "trait contradiction detected, suppressing old trait", {
-            oldTraitId: existing.id,
-            oldContent: existing.content,
+            oldTraitId: candidate.id,
+            oldContent: candidate.content,
             newContent: trait.content,
             similarity: Number(sim.toFixed(3)),
           });
-          // Insert the new trait (don't continue — fall through to insert)
           break;
         }
       }
@@ -600,22 +603,24 @@ export async function generateMemories(
       if (dup) continue;
 
       // ── Contradiction detection ──
-      // Query active memories with embeddings in the same scope, compute cosine
-      // against the new memory's vector, and check candidates with sim > 0.75 via LLM.
+      // Query active memories with distance < 0.25 (similarity > 0.75) via vec_distance_cosine.
+      // Candidates are pre-filtered in SQL — only rows with sim > 0.75 are returned.
       // If a contradiction is found, the old memory is invalidated (validUntil = now).
-      const contradictCandidates = await db
-        .select({
-          id: memories.id,
-          content: memories.content,
-          embedding: memories.embedding,
-        })
-        .from(memories)
-        .where(and(scopeCondition, ...activeMemoryConditions()))
-        .limit(50);
+      const queryBuf = toVecBuffer(vector);
+      const contradictCandidates = await db.all(sql`
+        SELECT id, content,
+               vec_distance_cosine(embedding, ${queryBuf}) AS distance
+        FROM memories
+        WHERE ${scopeCondition}
+          AND suppressed_at IS NULL
+          AND (valid_until IS NULL OR valid_until > ${now.getTime()})
+          AND (expires_at IS NULL OR expires_at > ${now.getTime()})
+          AND vec_distance_cosine(embedding, ${queryBuf}) < 0.25
+        LIMIT 50
+      `) as { id: string; content: string; distance: number }[];
 
       for (const candidate of contradictCandidates) {
-        const sim = cosineSimilarity(vector, candidate.embedding);
-        if (sim <= 0.75) continue;
+        const sim = distanceToSimilarity(candidate.distance);
         const isContradiction = await checkContradiction(
           candidate.content,
           mem.content,

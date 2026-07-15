@@ -34,7 +34,7 @@ export async function GET() {
     .from(memories)
     .innerJoin(threads, eq(memories.threadId, threads.id))
     .where(and(eq(threads.userId, user.id), ...activeMemoryConditions()))
-    .orderBy(desc(memories.updatedAt));
+    .orderBy(desc(memories.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

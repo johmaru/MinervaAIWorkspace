@@ -12,11 +12,11 @@ import { I18nProvider } from "@/components/I18nProvider";
 
 /** A representative settings payload returned by GET /api/settings. */
 const baseSettings = {
-  llmBaseUrl: "http://localhost:11434",
   llmApiKey: "",
   hasLlmApiKey: true,
   llmModel: "umans-glm-5.2",
-  llmModels: "",
+  llmFallbackModel: "",
+  llmFallbackTimeoutMs: 10000,
   thinkingEffort: "medium",
   embedModel: "LiquidAI/LFM2.5-Embedding-350M",
   embedDim: 1024,
@@ -65,6 +65,7 @@ const baseSettings = {
   logFileEnabled: "true",
   logFilePath: "/tmp/umanschat.log",
   translateDefaultMulti: false,
+  translateTimeout: 30,
 };
 
 /**
@@ -117,6 +118,13 @@ function mockFetch(overrides?: {
     }
     if (url === "/api/connections") {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
+    }
+    if (url === "/api/models") {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ models: ["umans-glm-5.2", "umans-coder"], displayNames: { "umans-glm-5.2": "Umans GLM 5.2", "umans-coder": "Umans Coder" }, reasoningLevels: { "umans-glm-5.2": ["none", "high", "max"], "umans-coder": [] } }),
+      });
     }
     if (url === "/api/update") {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
@@ -239,7 +247,7 @@ describe("SettingsModal — embedDirty and Save payload", () => {
     const embedSelect = screen.getByDisplayValue(/LFM2.5/i);
     fireEvent.change(embedSelect, { target: { value: "Xenova/all-MiniLM-L6-v2" } });
     // Also change LLM model so the payload has a non-embed field to save
-    const llmInput = screen.getByDisplayValue("umans-glm-5.2");
+    const llmInput = screen.getByDisplayValue("Umans GLM 5.2");
     fireEvent.change(llmInput, { target: { value: "umans-coder" } });
     // Do NOT check the migration confirmation checkbox
     // Save should be enabled (disabled={saving} only, not gated on migration)
@@ -265,7 +273,7 @@ describe("SettingsModal — embedDirty and Save payload", () => {
     renderModal();
     await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
     // Change LLM model first (update() resets migrationConfirmed, which is fine here)
-    const llmInput = screen.getByDisplayValue("umans-glm-5.2");
+    const llmInput = screen.getByDisplayValue("Umans GLM 5.2");
     fireEvent.change(llmInput, { target: { value: "umans-coder" } });
     // Change embed model to different dim (1024 → 384)
     const embedSelect = screen.getByDisplayValue(/LFM2.5/i);

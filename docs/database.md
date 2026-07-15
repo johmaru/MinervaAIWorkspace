@@ -19,7 +19,7 @@ UmansChat uses **SQLite** via the [`better-sqlite3`](https://github.com/WiseLibs
 - **ORM:** Drizzle — lightweight, type-safe, SQL-first. The schema is defined in TypeScript (`src/db/schema.ts`) and Drizzle generates SQL migrations with `drizzle-kit`.
 - **DB file:** `data/umanschat.db` (a single file on disk; the `data/` directory is created automatically on first launch). Overridable via the `DATABASE_URL` environment variable.
 
-No external database server is required. There is no pgvector extension and no HNSW index — embeddings are stored as JSON text and cosine similarity is computed in application code (see [Embedding storage](#embedding-storage)).
+No external database server is required. Vector search uses sqlite-vec (v0.1.9), a loadable SQLite extension bundled with the app — embeddings are stored as Float32 BLOB and cosine distance is computed via `vec_distance_cosine()` SQL function (see [Embedding storage](#embedding-storage)).
 
 ## Connection setup
 
@@ -168,7 +168,7 @@ Email verification tokens (Auth.js adapter contract). No primary key.
 
 ### `skills`
 
-Per-user reusable procedures/rules, extracted from conversations and stored with embeddings. Searched via client-side cosine similarity and injected into system context. See [Skills System](./skills.md).
+Per-user reusable procedures/rules, extracted from conversations and stored with embeddings. Searched via sqlite-vec `vec_distance_cosine()` and injected into system context. See [Skills System](./skills.md).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -176,7 +176,7 @@ Per-user reusable procedures/rules, extracted from conversations and stored with
 | `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
 | `name` | text NOT NULL | |
 | `content` | text NOT NULL | |
-| `embedding` | text NOT NULL (JSON) | `number[]` — see [Embedding storage](#embedding-storage) |
+| `embedding` | BLOB (Float32) | `number[]` via embeddingColumn customType — see [Embedding storage](#embedding-storage) |
 | `content_hash` | text NOT NULL | change detection |
 | `kind` | text NOT NULL, default `workflow` | enum: `workflow`, `bugfix`, `project_rule`, `tool_usage`, `coding_pattern`, `debugging` |
 | `trigger` | text | natural-language trigger |
@@ -324,7 +324,7 @@ Branching message tree. `parent_id` is NULL for the thread root; edits/regenerat
 
 ### `memories`
 
-Conversation memories (`fact` or `working`). After an assistant response completes, the conversation is summarized/classified via LLM and stored with an embedding. On the next send, client-side cosine search → recency-sorted → top-5 injected into system context (RAG). See [Memory System](./memory.md).
+Conversation memories (`fact` or `working`). After an assistant response completes, the conversation is summarized/classified via LLM and stored with an embedding. On the next send, sqlite-vec cosine search → recency-sorted → top-5 injected into system context (RAG). See [Memory System](./memory.md).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -334,7 +334,7 @@ Conversation memories (`fact` or `working`). After an assistant response complet
 | `kind` | text NOT NULL | enum: `fact`, `working` |
 | `content` | text NOT NULL | |
 | `source_message_ids` | text (JSON) | `string[]` |
-| `embedding` | text NOT NULL (JSON) | `number[]` — see [Embedding storage](#embedding-storage) |
+| `embedding` | BLOB (Float32) | `number[]` via embeddingColumn customType — see [Embedding storage](#embedding-storage) |
 | `content_hash` | text NOT NULL | dedup/change detection |
 | `model` | text NOT NULL | embedding model that produced the vector |
 | `importance` | real NOT NULL, default 0.5 | |
@@ -355,7 +355,7 @@ Unlike `memories`, these are user-scoped (direct `userId` FK, not thread-scoped)
 | `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
 | `category` | text NOT NULL | enum: `demographic`, `interest`, `speech_pattern`, `preference` |
 | `content` | text NOT NULL | |
-| `embedding` | text NOT NULL (JSON) | `number[]` — used for dedup + contradiction, NOT for retrieval |
+| `embedding` | BLOB (Float32) | `number[]` — used for dedup + contradiction, NOT for retrieval |
 | `content_hash` | text NOT NULL | SHA-256, exact dedup |
 | `model` | text NOT NULL | embedding model that produced the vector |
 | `confidence` | real NOT NULL, default 0.5 | increases with repeated evidence (+0.15 per observation, max 1.0) |
@@ -399,14 +399,14 @@ Permanent knowledge from scraped web pages. One row per URL; if `content_hash` m
 
 ### `page_embeddings`
 
-Embedding vectors for `pages` body text. Same dimensionality as `memories.embedding`. Cosine similarity computed in `vectorSearch.ts`.
+Embedding vectors for `pages` body text. Same dimensionality as `memories.embedding`. Cosine distance computed via `vec_distance_cosine()`.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | text PK | UUID |
 | `page_id` | text NOT NULL | FK → `pages.id`, `CASCADE` |
 | `content_hash` | text NOT NULL | invalidates embedding when page content changes |
-| `embedding` | text NOT NULL (JSON) | `number[]` — see [Embedding storage](#embedding-storage) |
+| `embedding` | BLOB (Float32) | `number[]` via embeddingColumn customType — see [Embedding storage](#embedding-storage) |
 | `model` | text NOT NULL | embedding model that produced the vector |
 | `created_at` | integer NOT NULL | timestamp_ms, default now |
 
@@ -520,24 +520,29 @@ The `data/` directory is volume-mounted so the database persists across containe
 
 ## Embedding storage
 
-UmansChat stores embedding vectors as **JSON text arrays**, not as native vector columns:
+UmansChat stores embedding vectors as **Float32 BLOB** via sqlite-vec:
 
 ```ts
-// src/db/schema.ts
-embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
+// src/db/schema.ts — embeddingColumn customType
+// dataType: "text" (SQLite storage class is BLOB for BLOB values in TEXT-affinity columns)
+// toDriver: number[] → Buffer(Float32Array)
+// fromDriver: Buffer → number[]
+const embeddingColumn = (name: string) => customType({ ... })(name);
 ```
 
-SQLite has no native vector type, and UmansChat deliberately avoids extensions like `sqlite-vec` or `pgvector`. Instead:
+sqlite-vec (v0.1.9) is a loadable SQLite extension bundled with the app (npm package `sqlite-vec` with platform-specific prebuilt binaries for Windows x64 and Linux x64). It is loaded in `initDatabase()` via `sqliteVec.load(db)`.
 
-- The column type is `text`, stored as a JSON-serialized array of numbers (e.g. `[0.0123, -0.0456, …]`).
-- The **dimensionality is not enforced at the column level** — any-length array is accepted by SQLite.
-- The expected dimension comes from the `EMBED_DIM` environment variable (default `1024`, matching `LFM2.5-Embedding-350M`). It is used by the **client-side cosine similarity function** in `src/lib/vectorSearch.ts` for validation, not by the database.
-- Cosine similarity is computed in application code by loading candidate vectors and comparing in JS. There is no vector index; candidate sets are pre-filtered by `user_id` / `folder_id` / `kind` via standard SQL indexes before the in-memory comparison.
+- The column DDL is `text`, but BLOB values persist as BLOB (SQLite storage class rule — no ALTER TABLE needed).
+- Cosine distance is computed via `vec_distance_cosine(embedding, ?)` SQL function — a C+SIMD brute-force scan, ~20x faster than the previous JS loop.
+- The **dimensionality is not enforced at the column level** — any-length BLOB is accepted by SQLite. `vec_distance_cosine` errors on dimension mismatch.
+- The expected dimension comes from `EMBED_DIM` (default `1024`, matching `LFM2.5-Embedding-350M`).
+- Candidate sets are pre-filtered by `user_id` / `folder_id` / `kind` via standard SQL indexes before the distance computation.
+- A one-time data migration converts legacy JSON text embeddings to Float32 BLOB on startup (via `vec_f32()` SQL function).
 
 This design means:
 
 - **No DDL is needed when changing `EMBED_DIM`.** Switching embedding models only requires clearing the now-incompatible vector data. The Settings GUI's embedding-model migration (`applyMigration`) deletes all rows from `memories` and `page_embeddings` and re-embeds `skills` (user-created, persistent). See [Memory System](./memory.md) and [Skills System](./skills.md).
-- **No vector extension dependency.** No `pgvector`, no `sqlite-vec`, no HNSW index to maintain or rebuild.
+- **sqlite-vec is bundled, not external.** Prebuilt binaries ship via npm optionalDependencies — no Docker service, no separate process.
 - **Column type is dimension-agnostic.** The same `embedding` column stores 384-, 768-, or 1024-dimensional vectors without a schema change.
 
 ## See also

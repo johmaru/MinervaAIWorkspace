@@ -82,7 +82,7 @@ export function updateEnvContent(
 
 Given the current `.env` file content as a string and a map of `KEY → value` updates, returns a new string with each key updated in place (if it exists) or appended at the end (if it does not). Values are escaped via `escapeEnvValue()` before writing.
 
-The update uses a line-anchored regex (`^KEY=.*$` with the `m` flag) to match only complete key definitions, so partial key name matches (e.g., `LLM_MODEL` matching `LLM_MODELS`) are avoided.
+The update uses a line-anchored regex (`^KEY=.*$` with the `m` flag) to match only complete key definitions, so partial key name matches (e.g., `LLM_MODEL` matching `LLM_FALLBACK_MODEL`) are avoided.
 
 ### `writeEnvUpdates()`
 
@@ -109,7 +109,7 @@ Convenience wrapper that combines the above:
 ```
 Client (Settings modal)
   │
-  │  POST /api/settings  { llmBaseUrl, llmApiKey, embedModel, ... }
+  │  POST /api/settings  { llmApiKey, llmModel, embedModel, ... }
   ▼
 getSessionUser()  ──── 401 if not authenticated
   │
@@ -145,7 +145,6 @@ The handler builds a `Record<string, string>` of only the keys present in the re
 ```typescript
 // src/app/api/settings/route.ts (excerpt)
 const updates: Record<string, string> = {};
-if (body.llmBaseUrl !== undefined) updates.LLM_BASE_URL = body.llmBaseUrl;
 // ... collect all defined fields ...
 envContent = updateEnvContent(envContent, updates);
 writeFileSync(envPath, envContent);
@@ -184,7 +183,7 @@ After writing to `.env` and `process.env`, the handler invalidates in-process ca
 
 | Setting changed | Cache invalidated | Effect |
 |----------------|-------------------|--------|
-| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_MODELS` | `resetUmansModelsCache()` + `resetToolProbeCache()` | LLM client recreated on next request; tool availability re-probed |
+| `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_MODEL`, `LLM_FALLBACK_TIMEOUT_MS` | `resetUmansModelsCache()` + `resetToolProbeCache()` | LLM client recreated on next request; tool availability re-probed |
 | `EMBED_MODEL`, `EMBED_DIM`, `EMBED_PROVIDER` | `resetEmbedPipeline()` | transformers.js / HTTP embedder pipeline recreated on next embed |
 | `SCRAPE_PROXY`, `SCRAPE_TIMEOUT` | POST to scraper `/config` endpoint | Scraper microservice updated at runtime (its container env is fixed at compose startup) |
 
@@ -203,11 +202,11 @@ fetch(`${scraperBase}/config`, {
     scrape_timeout: Number(process.env.SCRAPE_TIMEOUT) || 30,
   }),
 }).catch(() => {
-  // .env / process.env already updated; scraper picks up on next container restart
+  // .env / process.env already updated; scraper picks up on next /config call
 });
 ```
 
-If the scraper is temporarily unreachable, the `.env` and `process.env` values are still persisted — the scraper reads them from `.env` on its next container restart.
+If the scraper is temporarily unreachable, the `.env` and `process.env` values are still persisted — the scraper reads them from `.env` on its next startup or `/config` call.
 
 ## Embedding model migration
 
@@ -318,14 +317,12 @@ If `.env.example` is not found (edge case), the script logs a message and skips:
 
 All variables below are defined in `.env.example`. Values shown are defaults from that file. Variables marked **required** must be set before the app can function; others are optional or have sensible defaults.
 
-### LLM (OpenAI-compatible)
+### LLM (UmansAI — hardcoded provider)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_BASE_URL` | `https://api.code.umans.ai/v1` | Base URL of the OpenAI-compatible API. Set to `api.code.umans.ai` for Umans mode (auto-fetches models). For OAI-compatible mode (OpenAI / vLLM / Ollama), set `LLM_MODELS` manually. |
-| `LLM_API_KEY` | `your-api-key-here` | **Required.** API key for the LLM provider. Never returned in plaintext by the API. |
+| `LLM_API_KEY` | `your-api-key-here` | **Required.** API key for UmansAI. Never returned in plaintext by the API. |
 | `LLM_MODEL` | `umans-glm-5.2` | Default model used for chat completions. |
-| `LLM_MODELS` | *(empty)* | Comma-separated list of available models (OAI-compatible mode). Empty in Umans mode (models auto-fetched). |
 | `THINKING_EFFORT` | `medium` | LLM reasoning strength. Accepts `none`, `low`, `medium`, `high`, `max` (support varies per model). |
 
 ### Embeddings

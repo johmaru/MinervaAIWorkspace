@@ -43,14 +43,16 @@ pipeline (`transformers.js`) and disables web scraping.
 
 ### Design tenets
 
-1. **Self-hosted & self-contained** — no managed database, no vector DB, no external
-   cache layer. The SQLite file *is* the entire persistence layer.
+1. **Self-hosted & self-contained** — no managed database, no external vector DB
+   service, no external cache layer. The SQLite file *is* the entire persistence layer.
+   Vector search uses sqlite-vec, a loadable SQLite extension bundled with the app
+   (not an external service).
 2. **OpenAI-compatible** — the LLM client (`src/lib/llm.ts`) uses the OpenAI SDK with a
    configurable `baseURL`, so any OpenAI-compatible endpoint works (UmansAI, OpenAI, vLLM, Ollama).
 3. **Branching-first** — the message store is a tree, not a flat list. Every edit or
    regenerate creates a sibling node, preserving the full conversation history.
-4. **RAG without a vector DB** — embeddings are stored as JSON arrays in `text` columns;
-   cosine similarity is computed in-process in JavaScript.
+4. **RAG with sqlite-vec** — embeddings are stored as Float32 BLOB; cosine distance
+   is computed via sqlite-vec's `vec_distance_cosine()` SQL function in-process.
 5. **Streaming-first** — chat responses are delivered via Server-Sent Events, with the
    client driving optimistic UI updates before the server responds.
 
@@ -95,8 +97,7 @@ The `app` makes outbound HTTP calls to `embedder` and `scraper`; the `scraper` i
 `searxng`, which optionally routes through `tor`. All four companion services are independently
 optional — the app runs without any of them in local-dev and exe modes.
 
-The Dockerfile is a 3-stage build (deps → build → runner) on `node:22-slim`, and installs the
-Docker CLI in the runner image so the app can manage the Tor container lifecycle at runtime.
+The Dockerfile is a 3-stage build (deps → build → runner) on `node:22-slim`. The runner image installs `ca-certificates`, `curl`, and `sqlite3` only — no Docker CLI or socket mount. The Tor proxy is toggled via the scraper's `/config` HTTP endpoint, and cloudflared runs as a child process.
 
 See [Deployment](./deployment.md) for full Docker, exe, and CI/CD details.
 
@@ -330,48 +331,46 @@ UmansChat uses SQLite via `better-sqlite3` rather than PostgreSQL.
 - **Migrations**: managed by `drizzle-kit migrate`. In Docker, `docker-entrypoint.sh` runs it
   automatically; the standalone exe runs a programmatic migrator in the launcher.
 
-### 2. Embeddings stored as JSON in `text` columns
+### 2. Embeddings stored as Float32 BLOB via sqlite-vec
 
-Instead of a native vector type (pgvector) or a SQLite vector extension (sqlite-vec), all
-embedding vectors are stored as JSON arrays in standard `text` columns:
-
-```typescript
-// src/db/schema.ts
-embedding: text("embedding", { mode: "json" }).$type<number[]>().notNull(),
-```
-
-- **Rationale**: keeps the schema portable across SQLite builds (no loadable-extension
-  requirement), avoids version-coupling to a vector extension, and works identically in
-  Docker, exe, and local-dev. Drizzle's `{ mode: "json" }` auto-parses the array on read.
-- **Trade-off**: no ANN index. Cosine similarity is computed by loading all candidate rows
-  into memory and looping. This is fine for the expected scale (hundreds to low-thousands of
-  memories/skills per user) — the top-30-then-top-5 two-stage filter in `memoryStore.ts` keeps
-  the per-request cost bounded.
-
-### 3. Client-side (in-process) cosine similarity
-
-`cosineSimilarity()` in `src/lib/vectorSearch.ts` is a plain JavaScript loop — no native
-extension, no SQL function:
+Embedding vectors are stored as Float32 BLOB using the `embeddingColumn` customType in
+`src/db/schema.ts`. The column DDL is `text`, but BLOB values persist as BLOB (SQLite
+storage class rule — no ALTER TABLE needed). sqlite-vec (v0.1.9) is loaded at startup
+via `sqliteVec.load(db)` in `initDatabase()`.
 
 ```typescript
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
-  let dot = 0, magA = 0, magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(magA) * Math.sqrt(magB);
-  if (denom === 0) return 0;
-  return dot / denom;
-}
+// src/db/schema.ts — embeddingColumn customType
+// toDriver: number[] → Buffer(Float32Array)
+// fromDriver: Buffer → number[] (with legacy JSON text fallback)
 ```
 
-- **Rationale**: with embeddings in JSON columns, similarity *must* be computed in JS — SQLite
-  can't operate on a JSON array element-wise in SQL. The same function is used for memories,
-  skills, and page embeddings. All retrieval paths load candidates, compute cosine in a loop,
-  filter by `similarity > 0.3`, and rank.
+- **Rationale**: ~20x faster than the previous JS loop (C+SIMD brute-force scan via
+  `vec_distance_cosine()` SQL function), 44% storage reduction vs JSON text, and no
+  external service (prebuilt binaries bundled via npm).
+- **Trade-off**: stable sqlite-vec (v0.1.9) is flat/exact KNN (no ANN index).
+  Performance is O(N×dim) but with a much lower constant factor than JS. The top-30-then-top-5
+  two-stage filter in `memoryStore.ts` keeps the per-request cost bounded.
+- A one-time data migration converts legacy JSON text embeddings to Float32 BLOB on startup.
+
+### 3. In-process vector search via sqlite-vec
+
+`vec_distance_cosine(embedding, ?)` SQL function computes cosine distance (1 - similarity)
+in C via sqlite-vec. The query vector is passed as a Float32Array Buffer via `toVecBuffer()`
+from `src/lib/vectorSearch.ts`. Candidate sets are pre-filtered by `user_id` / `folder_id` /
+`kind` via standard SQL indexes before the distance computation.
+
+```sql
+SELECT id, content, vec_distance_cosine(embedding, ?) AS distance
+FROM memories
+WHERE user_id = ?
+  AND vec_distance_cosine(embedding, ?) < 0.7  -- similarity > 0.3
+ORDER BY distance
+LIMIT 30
+```
+
+- **Rationale**: computing distance in SQLite avoids loading all candidate embeddings into
+  JS memory (156MB at 20K rows → 0MB — only result rows cross the JS boundary).
+- `cosineSimilarity()` JS function is kept in `vectorSearch.ts` as a fallback for tests.
 - **Embedding dimension** is configurable via `EMBED_DIM` (default `1024`). When it changes,
   the settings endpoint clears `memories` and `page_embeddings` and re-embeds `skills`
   (user-created, persistent) — see [Settings & Environment](./settings-env.md).

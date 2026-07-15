@@ -29,6 +29,8 @@ vi.mock("@/db/schema", () => ({
 }));
 
 vi.mock("@/lib/vectorSearch", () => ({
+  toVecBuffer: vi.fn().mockReturnValue(Buffer.from(new Float32Array([0]).buffer)),
+  distanceToSimilarity: vi.fn().mockReturnValue(0.5),
   cosineSimilarity: vi.fn().mockReturnValue(0),
 }));
 

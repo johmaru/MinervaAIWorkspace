@@ -23,7 +23,7 @@ if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("/app/data/")
 
 // Vitest does not auto-load .env like Next.js does.
 // Route Handler tests that call the real API (api.code.umans.ai)
-// require LLM_BASE_URL / LLM_API_KEY / LLM_MODEL, so inject the
+// require LLM_API_KEY / LLM_MODEL, so inject the
 // project root .env into process.env with a minimal parser.
 // Values already set in env are not overwritten (so CI can override them).
 try {

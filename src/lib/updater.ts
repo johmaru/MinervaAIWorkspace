@@ -147,6 +147,30 @@ export async function downloadUpdate(
   // Download
   mkdirSync(updatesDir, { recursive: true });
   await httpsDownload(downloadUrl, zipPath);
+  // Verify SHA256 checksum (mandatory): download .sha256 from the same release
+  const sha256Url = downloadUrl.replace(/\.zip$/, ".sha256");
+  let expectedHash: string;
+  try {
+    const shaResponse = await fetch(sha256Url, { redirect: "follow" });
+    if (!shaResponse.ok) {
+      throw new Error(`Checksum file not found (HTTP ${shaResponse.status})`);
+    }
+    const shaText = await shaResponse.text();
+    expectedHash = shaText.trim().split(/\s+/)[0].toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(expectedHash)) {
+      throw new Error(`Invalid checksum format: ${expectedHash}`);
+    }
+  } catch (err) {
+    rmSync(zipPath, { force: true });
+    throw new Error(`SHA256 verification failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const { createHash } = await import("node:crypto");
+  const fileBuffer = readFileSync(zipPath);
+  const actualHash = createHash("sha256").update(fileBuffer).digest("hex");
+  if (actualHash !== expectedHash) {
+    rmSync(zipPath, { force: true });
+    throw new Error(`SHA256 mismatch: expected ${expectedHash}, got ${actualHash}`);
+  }
 
   // Extract using PowerShell Expand-Archive (available on all Windows 10+ systems
   // with PowerShell 5.1+, which is preinstalled on all target machines).

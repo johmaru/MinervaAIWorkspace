@@ -17,7 +17,7 @@ function isValidScope(v: unknown): v is MemoryScope {
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
-  const rows = await db.select().from(folders).where(eq(folders.userId, user.id)).orderBy(desc(folders.updatedAt));
+  const rows = await db.select().from(folders).where(eq(folders.userId, user.id)).orderBy(desc(folders.updatedAt)).limit(100);
   return Response.json(rows);
 }
 

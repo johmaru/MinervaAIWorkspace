@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { db } from "@/db";
 import { eq } from "drizzle-orm";
-import { users, memories, pageEmbeddings, skills } from "@/db/schema";
+import { users, memories, pageEmbeddings, skills, todos } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
@@ -108,14 +108,14 @@ export async function GET(req: Request) {
 
   return Response.json({
     // LLM
-    llmBaseUrl: process.env.LLM_BASE_URL || "",
     // Do not return secrets in plaintext; return only whether they are set.
     // SettingsModal sends llmApiKey only when the user enters a new value;
     // when omitted, it sends undefined to preserve the existing value.
     llmApiKey: "",
     hasLlmApiKey: !!process.env.LLM_API_KEY,
     llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
-    llmModels: process.env.LLM_MODELS || "",
+    llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
+    llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS) || 10000,
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
     // Embeddings
     embedModel: process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M",
@@ -161,16 +161,18 @@ export async function GET(req: Request) {
     translatePrimaryLang: userRow?.translatePrimaryLang ?? null,
     personalEmoji: userRow?.personalEmoji ?? 1,
     translateDefaultMulti: process.env.TRANSLATE_DEFAULT_MULTI === "true",
+    translateTimeout: Number(process.env.TRANSLATE_TIMEOUT) || 30,
     // Logging
     logLevel: process.env.LOG_LEVEL || "info",
-    logFileEnabled: process.env.LOG_FILE_ENABLED || (existsSync("/var/run/docker.sock") ? "false" : "true"),
+    logFileEnabled: process.env.LOG_FILE_ENABLED || "true",
     logFilePath: getLogFilePath(),
+    // Chat export
+    chatExportPath: process.env.CHAT_EXPORT_PATH || "",
   });
 }
 
 type SettingsBody = {
   // LLM
-  llmBaseUrl?: string;
   llmApiKey?: string;
   // Default global instruction selection (per-user, saved to DB)
   activeInstructionId?: string | null;
@@ -182,7 +184,8 @@ type SettingsBody = {
   personalStructure?: number;
   personalEmoji?: number;
   llmModel?: string;
-  llmModels?: string;
+  llmFallbackModel?: string;
+  llmFallbackTimeoutMs?: number;
   thinkingEffort?: string;
   // Embeddings
   embedModel?: string;
@@ -213,9 +216,12 @@ type SettingsBody = {
   allowedRegistrationIps?: string;
   // Translate default mode
   translateDefaultMulti?: boolean;
+  translateTimeout?: number;
   // Logging
   logLevel?: string;
   logFileEnabled?: string;
+  // Chat export
+  chatExportPath?: string;
   applyMigration?: boolean;
 };
 
@@ -252,6 +258,9 @@ export async function POST(req: Request) {
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
+  if (body.translateTimeout !== undefined && (body.translateTimeout < 5 || body.translateTimeout > 300)) {
+    return new Response("translateTimeout must be 5-300 (seconds)", { status: 400 });
+  }
 
   // Personalization validation
   if (
@@ -271,7 +280,8 @@ export async function POST(req: Request) {
 
   // Determine the new dimension
   const newDim = body.embedDim ?? dbVectorDim;
-  // In SQLite, embeddings are stored as text (JSON arrays), so no column DDL is needed for dimension changes.
+  // Embeddings are stored as Float32 BLOB (sqlite-vec). No DDL is needed for dimension changes
+  // (BLOB storage class persists in TEXT-affinity columns without ALTER TABLE).
   // However, different models' vector spaces are incompatible, so when the dimension changes,
   // all existing embedding data must be deleted.
   const needsMigration = body.embedDim !== undefined && body.embedDim !== dbVectorDim;
@@ -287,10 +297,9 @@ export async function POST(req: Request) {
       { status: 409 },
     );
   }
-
   let pipelineResetForMigration = false;
   if (needsMigration && body.applyMigration) {
-    // The embedding column is text (JSON), so no DDL is needed. Since the dimension changes,
+    // Embeddings are stored as Float32 BLOB. No DDL is needed. Since the dimension changes,
     // delete all existing vector data (vectors from different model spaces are incompatible).
     // memories and page_embeddings can be regenerated from conversations, so they are deleted.
     // skills are user-created persistent prompts, so they are not deleted but re-embedded.
@@ -310,6 +319,12 @@ export async function POST(req: Request) {
     for (const skill of allSkills) {
       const vector = await embedText(skill.content, "document");
       await db.update(skills).set({ embedding: vector }).where(eq(skills.id, skill.id));
+    }
+    const allTodos = await db.select({ id: todos.id, title: todos.title, description: todos.description }).from(todos);
+    for (const todo of allTodos) {
+      const embedContent = `${todo.title}${todo.description ? "\n" + todo.description : ""}`;
+      const vector = await embedText(embedContent, "document");
+      await db.update(todos).set({ embedding: vector }).where(eq(todos.id, todo.id));
     }
   }
 
@@ -354,10 +369,10 @@ export async function POST(req: Request) {
     }
     const updates: Record<string, string> = {};
     // LLM
-    if (body.llmBaseUrl !== undefined) updates.LLM_BASE_URL = body.llmBaseUrl;
     if (body.llmApiKey !== undefined) updates.LLM_API_KEY = body.llmApiKey;
     if (body.llmModel !== undefined) updates.LLM_MODEL = body.llmModel;
-    if (body.llmModels !== undefined) updates.LLM_MODELS = body.llmModels;
+    if (body.llmFallbackModel !== undefined) updates.LLM_FALLBACK_MODEL = body.llmFallbackModel;
+    if (body.llmFallbackTimeoutMs !== undefined) updates.LLM_FALLBACK_TIMEOUT_MS = String(body.llmFallbackTimeoutMs);
     if (body.thinkingEffort !== undefined) updates.THINKING_EFFORT = body.thinkingEffort;
     // Embeddings
     if (body.embedModel !== undefined) updates.EMBED_MODEL = body.embedModel;
@@ -365,30 +380,59 @@ export async function POST(req: Request) {
     if (body.embedProvider !== undefined) updates.EMBED_PROVIDER = body.embedProvider;
     if (body.webSearchMaxResults !== undefined) updates.WEB_SEARCH_MAX_RESULTS = String(body.webSearchMaxResults);
     if (body.webSearchMaxRounds !== undefined) updates.WEB_SEARCH_MAX_ROUNDS = String(body.webSearchMaxRounds);
-    if (body.scraperUrl !== undefined) updates.SCRAPER_URL = body.scraperUrl;
-    if (body.searxngUrl !== undefined) updates.SEARXNG_URL = body.searxngUrl;
+    // URL fields: validate scheme to prevent SSRF
+    if (body.scraperUrl !== undefined) {
+      try { const u = new URL(body.scraperUrl); if (!["http:", "https:"].includes(u.protocol)) throw new Error(); updates.SCRAPER_URL = body.scraperUrl; }
+      catch { return new Response("Invalid scraperUrl: must be http(s) URL", { status: 400 }); }
+    }
+    if (body.searxngUrl !== undefined) {
+      try { const u = new URL(body.searxngUrl); if (!["http:", "https:"].includes(u.protocol)) throw new Error(); updates.SEARXNG_URL = body.searxngUrl; }
+      catch { return new Response("Invalid searxngUrl: must be http(s) URL", { status: 400 }); }
+    }
     if (body.webSearchModel !== undefined) updates.WEB_SEARCH_MODEL = body.webSearchModel;
-    // Tor proxy
-    if (body.torProxy !== undefined) updates.TOR_PROXY = body.torProxy;
-    if (body.scrapeProxy !== undefined) updates.SCRAPE_PROXY = body.scrapeProxy;
-    // Database
-    if (body.databaseUrl !== undefined) updates.DATABASE_URL = body.databaseUrl;
+    // Proxy fields: validate scheme
+    if (body.torProxy !== undefined && body.torProxy !== "") {
+      if (!/^(socks5|http|https):\/\//.test(body.torProxy)) return new Response("Invalid torProxy: must be socks5/http(s) URL", { status: 400 });
+      updates.TOR_PROXY = body.torProxy;
+    }
+    if (body.torProxy === "") updates.TOR_PROXY = "";
+    if (body.scrapeProxy !== undefined && body.scrapeProxy !== "") {
+      if (!/^(socks5|http|https):\/\//.test(body.scrapeProxy)) return new Response("Invalid scrapeProxy: must be socks5/http(s) URL", { status: 400 });
+      updates.SCRAPE_PROXY = body.scrapeProxy;
+    }
+    if (body.scrapeProxy === "") updates.SCRAPE_PROXY = "";
+    // Database URL: reject remote DB protocols (prevent DB hijacking)
+    if (body.databaseUrl !== undefined) {
+      if (/^(https?:|postgres:|postgresql:|mysql:|mongodb:|redis:|mssql:)/i.test(body.databaseUrl)) {
+        return new Response("Invalid databaseUrl: remote database protocols not allowed", { status: 400 });
+      }
+      updates.DATABASE_URL = body.databaseUrl;
+    }
     // Runtime environment
     if (body.hostOs !== undefined) updates.HOST_OS = body.hostOs;
     if (body.tz !== undefined) updates.TZ = body.tz;
     // Notion OAuth
     if (body.notionClientId !== undefined) updates.NOTION_CLIENT_ID = body.notionClientId;
     if (body.notionClientSecret !== undefined) updates.NOTION_CLIENT_SECRET = body.notionClientSecret;
-    if (body.authUrl !== undefined) updates.AUTH_URL = body.authUrl;
+    if (body.authUrl !== undefined) {
+      try { const u = new URL(body.authUrl); if (!["http:", "https:"].includes(u.protocol)) throw new Error(); updates.AUTH_URL = body.authUrl; }
+      catch { return new Response("Invalid authUrl: must be http(s) URL", { status: 400 }); }
+    }
     // Cloudflare Tunnel — do not update token when empty string (preserve existing value)
     if (body.tunnelToken !== undefined && body.tunnelToken !== "") updates.TUNNEL_TOKEN = body.tunnelToken;
     // Security
     if (body.registrationLocked !== undefined) updates.REGISTRATION_LOCKED = body.registrationLocked ? "true" : "false";
     if (body.allowedRegistrationIps !== undefined) updates.ALLOWED_REGISTRATION_IPS = body.allowedRegistrationIps;
     if (body.translateDefaultMulti !== undefined) updates.TRANSLATE_DEFAULT_MULTI = body.translateDefaultMulti ? "true" : "false";
+    if (body.translateTimeout !== undefined) updates.TRANSLATE_TIMEOUT = String(body.translateTimeout);
     // Logging
     if (body.logLevel !== undefined) updates.LOG_LEVEL = body.logLevel;
     if (body.logFileEnabled !== undefined) updates.LOG_FILE_ENABLED = body.logFileEnabled;
+    // Chat export path: prevent path traversal
+    if (body.chatExportPath !== undefined) {
+      if (body.chatExportPath.includes("..")) return new Response("Invalid chatExportPath: path traversal not allowed", { status: 400 });
+      updates.CHAT_EXPORT_PATH = body.chatExportPath;
+    }
     envContent = updateEnvContent(envContent, updates);
 
     writeFileSync(envPath, envContent);
@@ -404,7 +448,7 @@ export async function POST(req: Request) {
       setConfiguredAuthUrl(body.authUrl);
     }
     // Invalidate in-process cache when LLM-related settings change (no restart needed)
-    const llmChanged = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODELS"].some(
+    const llmChanged = ["LLM_API_KEY", "LLM_MODEL", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_TIMEOUT_MS"].some(
       (k) => k in updates,
     );
     if (llmChanged) {

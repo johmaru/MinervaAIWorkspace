@@ -45,7 +45,7 @@ let testLogDir: string | null = null;
 
 /** Determines whether running in a Docker environment. Inlined to avoid circular dependency with tunnel.ts. */
 function isDockerEnv(): boolean {
-  return existsSync("/var/run/docker.sock");
+  return process.env.DOCKER_ENV === "true";
 }
 
 /**
@@ -79,9 +79,8 @@ function getMinLevel(): number {
 
 function isFileEnabled(): boolean {
   const env = process.env.LOG_FILE_ENABLED;
-  if (env === "true") return true;
   if (env === "false") return false;
-  return !isDockerEnv(); // auto-default: exe→true, Docker→false
+  return true; // Always enabled: Docker (no socket) and exe both need file logs
 }
 
 function getMaxFileSize(): number {
