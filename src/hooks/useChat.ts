@@ -358,7 +358,6 @@ export function useChat(threadId: string | null) {
           // this is normal completion. If not, the mobile OS likely closed
           // the connection (FIN) when backgrounding — start resync polling.
           if (!streamCompletedRef.current) {
-            console.log("[resync] stream ended via done:true without done event, starting poll");
             startResyncPoll();
           }
           break;
@@ -535,14 +534,6 @@ export function useChat(threadId: string | null) {
         }
       }
     } catch (err) {
-      console.log("[resync] catch block", {
-        errorName: (err as Error).name,
-        message: err instanceof Error ? err.message : String(err),
-        streamCompleted: streamCompletedRef.current,
-        resyncing: resyncingRef.current,
-        userStopped: userStoppedRef.current,
-        hasAssistantId: !!streamingAssistantIdRef.current,
-      });
       if ((err as Error).name === "AbortError") {
         // Stopped: keep partial response as-is
       } else {
@@ -594,30 +585,9 @@ export function useChat(threadId: string | null) {
    * message in the server data. NOT currentLeafId (updated early in some flows).
    */
   const startResyncPoll = useCallback(() => {
-    if (!threadId) {
-      console.log("[resync] startResyncPoll rejected: no threadId");
-      return;
-    }
-    // Don't start if user explicitly stopped, or already polling.
-    if (userStoppedRef.current) {
-      console.log("[resync] startResyncPoll rejected: user stopped");
-      return;
-    }
-    if (resyncingRef.current) {
-      console.log("[resync] startResyncPoll rejected: already resyncing");
-      return;
-    }
-    // Don't start if we don't have an active streaming assistant.
-    if (!streamingAssistantIdRef.current) {
-      console.log("[resync] startResyncPoll rejected: no streamingAssistantId");
-      return;
-    }
-
-    console.log("[resync] startResyncPoll STARTED", {
-      threadId,
-      assistantId: streamingAssistantIdRef.current,
-      knownUserMsgId: realUserMsgIdRef.current,
-    });
+    if (!threadId) return;
+    if (userStoppedRef.current || resyncingRef.current) return;
+    if (!streamingAssistantIdRef.current) return;
 
     const optimisticAssistantId = streamingAssistantIdRef.current;
     const knownUserMsgId = realUserMsgIdRef.current;
@@ -645,18 +615,7 @@ export function useChat(threadId: string | null) {
             )
           : null;
         const found = newAssistant ?? assistantByParentId;
-        if (!found) {
-          console.log("[resync] pollOnce: no assistant message found yet", {
-            messageCount: data.messages.length,
-            knownIdsSize: knownIds.size,
-          });
-          return false;
-        }
-        console.log("[resync] pollOnce found assistant", {
-          id: found.id,
-          parentId: found.parentId,
-          contentLength: found.content.length,
-        });
+        if (!found) return false;
         // Server completed — rebuild local state from server data.
         const byId = new Map<string, RawMessage>();
         for (const m of data.messages) byId.set(m.id, m);
@@ -691,7 +650,6 @@ export function useChat(threadId: string | null) {
     const tryPoll = async () => {
       if (userStoppedRef.current) return;
       const found = await pollOnce();
-      console.log("[resync] poll attempt", { attempt: attempts + 1, found });
       if (found) {
         resyncingRef.current = false;
         setIsStreaming(false);
