@@ -220,8 +220,16 @@ export async function POST(req: Request) {
     async start(controller) {
       const encoder = new TextEncoder();
       const streamStartedAt = Date.now();
-      const send: StreamSend = (event, data) =>
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+      const send: StreamSend = (event, data) => {
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          // Client disconnected (mobile backgrounded, tab closed, network lost).
+          // Swallow the error so LLM generation continues to completion
+          // and the full/partial response is persisted to DB.
+          // The client will re-fetch the thread on return to pick it up.
+        }
+      };
 
       let assistantContent = "";
       let assistantReasoning = "";
@@ -561,7 +569,9 @@ export async function POST(req: Request) {
       } catch (err) {
         // Send error event FIRST so the client is never left hanging.
         // If the partial-save DB insert below throws, the error event is already sent.
-        send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") });
+        // send() is already error-safe (swallows enqueue errors),
+        // but wrap defensively to ensure the partial-save below is always reachable.
+        try { send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") }); } catch { /* client already gone */ }
         logger.error("chat", "stream-error", { threadId: body.threadId, error: err instanceof Error ? err.message : String(err) });
         // Save partial assistant content if any was generated before the error
         if (assistantContent) {
