@@ -523,7 +523,11 @@ export function useChat(threadId: string | null) {
       if ((err as Error).name === "AbortError") {
         // Stopped: keep partial response as-is
       } else {
-        setError(err instanceof Error ? err.message : t("chat.fetchError"));
+        // Network error (mobile backgrounded, OS killed fetch, etc.).
+        // The server continues generating — start polling to pick up the
+        // result. This fires BEFORE visibilitychange on mobile, so we must
+        // initiate recovery here rather than waiting for the event.
+        startResyncPoll();
       }
     } finally {
       // If handleResync triggered the abort (background-disconnect), skip
@@ -551,153 +555,132 @@ export function useChat(threadId: string | null) {
   }
 
   /**
-   * Mobile background resync: when the page returns to the foreground during
-   * streaming, the SSE fetch may have been killed by the OS. Abort the stale
-   * fetch, re-fetch the thread, and poll until the assistant message appears.
+   * Start polling the server for the assistant message that was being
+   * generated when the mobile client lost its SSE connection (screen off,
+   * background tab, OS killing the fetch). The server continues generating
+   * regardless because send() is error-safe — we just need to pick up
+   * the result when it lands in DB.
    *
-   * Completion detection: look for a new assistant message whose parentId
-   * matches the real user message ID (from the SSE "start" event), or any
-   * assistant message in the server data that isn't in our local byId map.
-   * We do NOT use currentLeafId — it's updated to the user message early
-   * in some flows and would give false "completed" signals.
+   * Called from two places:
+   * - streamChat's catch block: when the fetch throws a network error
+   *   (fires BEFORE visibilitychange on mobile).
+   * - visibilitychange/pageshow: when returning to the foreground.
+   *
+   * Completion detection: new assistant message whose parentId matches the
+   * real user message ID (from SSE "start" event), or any unknown assistant
+   * message in the server data. NOT currentLeafId (updated early in some flows).
    */
-  useEffect(() => {
+  const startResyncPoll = useCallback(() => {
     if (!threadId) return;
+    // Don't start if user explicitly stopped, or already polling.
+    if (userStoppedRef.current || resyncingRef.current) return;
+    // Don't start if we don't have an active streaming assistant.
+    if (!streamingAssistantIdRef.current) return;
 
-    const handleResync = () => {
-      // Only resync if we're actively streaming, user didn't stop, and we're
-      // not already polling from a prior resync (iOS fires rapidly on tab switch).
-      if (!streamingAssistantIdRef.current || userStoppedRef.current || resyncingRef.current) return;
+    const optimisticAssistantId = streamingAssistantIdRef.current;
+    const knownUserMsgId = realUserMsgIdRef.current;
+    const knownIds = new Set(byIdRef.current.keys());
 
-      // Capture refs BEFORE aborting — abort triggers streamChat's finally block
-      // which clears streamingAssistantIdRef.current.
-      const optimisticAssistantId = streamingAssistantIdRef.current;
-      const knownUserMsgId = realUserMsgIdRef.current;
+    // Mark resyncing so streamChat's finally block skips state cleanup.
+    resyncingRef.current = true;
 
-      // Collect message IDs we already know about (optimistic IDs included).
-      const knownIds = new Set(byIdRef.current.keys());
+    const pollOnce = async (): Promise<boolean> => {
+      try {
+        const res = await clientFetch(`/api/threads/${threadId}`);
+        if (!res.ok) return false;
+        const data = (await res.json()) as {
+          thread: Thread;
+          messages: RawMessage[];
+          attachments?: RawAttachment[];
+        };
 
-      // Set resyncing flag BEFORE abort — the streamChat finally block checks
-      // this to skip setIsStreaming(false) and ref cleanup (poll owns those now).
-      resyncingRef.current = true;
-      // Abort the stale fetch — the OS likely killed it when backgrounding.
-      // The server continues generating regardless (send() is error-safe).
-      abortRef.current?.abort();
+        const newAssistant = data.messages.find(
+          (m) => m.role === "assistant" && !knownIds.has(m.id),
+        );
+        const assistantByParentId = knownUserMsgId
+          ? data.messages.find(
+              (m) => m.role === "assistant" && m.parentId === knownUserMsgId,
+            )
+          : null;
+        const found = newAssistant ?? assistantByParentId;
+        if (!found) return false;
 
-      const pollOnce = async (): Promise<boolean> => {
-        try {
-          const res = await clientFetch(`/api/threads/${threadId}`);
-          if (!res.ok) return false;
-          const data = (await res.json()) as {
-            thread: Thread;
-            messages: RawMessage[];
-            attachments?: RawAttachment[];
-          };
+        // Server completed — rebuild local state from server data.
+        const byId = new Map<string, RawMessage>();
+        for (const m of data.messages) byId.set(m.id, m);
+        // Remove the optimistic assistant placeholder.
+        byId.delete(optimisticAssistantId);
+        byIdRef.current = byId;
 
-          // Look for a new assistant message we haven't seen before.
-          const newAssistant = data.messages.find(
-            (m) => m.role === "assistant" && !knownIds.has(m.id),
-          );
-
-          // Also check: if we know the real user message ID, look for an
-          // assistant message whose parentId matches it.
-          const assistantByParentId = knownUserMsgId
-            ? data.messages.find(
-                (m) => m.role === "assistant" && m.parentId === knownUserMsgId,
-              )
-            : null;
-
-          const found = newAssistant ?? assistantByParentId;
-          if (!found) return false;
-
-          // Server completed — rebuild local state from server data.
-          const byId = new Map<string, RawMessage>();
-          for (const m of data.messages) byId.set(m.id, m);
-
-          // Preserve optimistic user message if server hasn't created it yet
-          // (shouldn't happen since prepareTurn inserts it, but defensive).
-          const optimisticUser = byIdRef.current.get(optimisticAssistantId);
-          // Remove the optimistic assistant placeholder.
-          byId.delete(optimisticAssistantId);
-
-          byIdRef.current = byId;
-
-          // Rebuild attachments map.
-          const attMap = new Map<string, RawAttachment[]>();
-          if (data.attachments) {
-            for (const att of data.attachments) {
-              if (att.messageId) {
-                const existing = attMap.get(att.messageId) ?? [];
-                existing.push(att);
-                attMap.set(att.messageId, existing);
-              }
+        const attMap = new Map<string, RawAttachment[]>();
+        if (data.attachments) {
+          for (const att of data.attachments) {
+            if (att.messageId) {
+              const existing = attMap.get(att.messageId) ?? [];
+              existing.push(att);
+              attMap.set(att.messageId, existing);
             }
           }
-          attachmentsByMsgIdRef.current = attMap;
-
-          setThread(data.thread);
-          const leafId = data.thread.currentLeafId ?? found.id;
-          setMessages(buildChain(leafId));
-
-          // Suppress unused variable warning — optimisticUser is used for
-          // debugging if needed, but the server data is authoritative.
-          void optimisticUser;
-
-          return true;
-        } catch {
-          return false;
         }
-      };
+        attachmentsByMsgIdRef.current = attMap;
 
-      // Try immediately, then poll every 1.5s until the assistant message appears.
-      const maxAttempts = 40; // 60s max at 1.5s intervals
-      let attempts = 0;
-      const tryPoll = async () => {
-        if (userStoppedRef.current) return;
-        const found = await pollOnce();
-        if (found) {
-          resyncingRef.current = false;
-          setIsStreaming(false);
-          streamingAssistantIdRef.current = null;
-          // Release wakeLock — streaming is effectively done.
-          if (wakeLockRef.current) {
-            wakeLockRef.current.release().catch(() => { /* non-fatal */ });
-            wakeLockRef.current = null;
-          }
-          return;
-        }
-        attempts++;
-        if (attempts >= maxAttempts) {
-          resyncingRef.current = false;
-          setIsStreaming(false);
-          streamingAssistantIdRef.current = null;
-          if (wakeLockRef.current) {
-            wakeLockRef.current.release().catch(() => { /* non-fatal */ });
-            wakeLockRef.current = null;
-          }
-          return;
-        }
-        pollRef.current = setTimeout(tryPoll, 1500);
-      };
-
-      void tryPoll();
-    };
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        handleResync();
+        setThread(data.thread);
+        const leafId = data.thread.currentLeafId ?? found.id;
+        setMessages(buildChain(leafId));
+        return true;
+      } catch {
+        return false;
       }
     };
 
+    const maxAttempts = 40; // 60s max at 1.5s intervals
+    let attempts = 0;
+
+    const tryPoll = async () => {
+      if (userStoppedRef.current) return;
+      const found = await pollOnce();
+      if (found) {
+        resyncingRef.current = false;
+        setIsStreaming(false);
+        streamingAssistantIdRef.current = null;
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release().catch(() => { /* non-fatal */ });
+          wakeLockRef.current = null;
+        }
+        return;
+      }
+      attempts++;
+      if (attempts >= maxAttempts) {
+        resyncingRef.current = false;
+        setIsStreaming(false);
+        streamingAssistantIdRef.current = null;
+        if (wakeLockRef.current) {
+          wakeLockRef.current.release().catch(() => { /* non-fatal */ });
+          wakeLockRef.current = null;
+        }
+        return;
+      }
+      pollRef.current = setTimeout(tryPoll, 1500);
+    };
+
+    void tryPoll();
+  }, [threadId]);
+
+  // Mobile background resync: listen for foreground return.
+  useEffect(() => {
+    if (!threadId) return;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startResyncPoll();
+      }
+    };
     const onPageShow = (e: PageTransitionEvent) => {
-      // Safari BFCache: pageshow fires when returning from BFCache.
-      // Only resync if the page was persisted (not a fresh load).
-      if (e.persisted) handleResync();
+      if (e.persisted) startResyncPoll();
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pageshow", onPageShow);
-
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pageshow", onPageShow);
@@ -705,10 +688,9 @@ export function useChat(threadId: string | null) {
         clearTimeout(pollRef.current);
         pollRef.current = null;
       }
-      // Reset resyncing so the next thread's streamChat finally block isn't skipped.
       resyncingRef.current = false;
     };
-  }, [threadId]);
+  }, [threadId, startResyncPoll]);
 
   const send = useCallback(
     async (
