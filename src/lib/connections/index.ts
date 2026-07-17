@@ -7,6 +7,8 @@ import { GITHUB_TOOLS, dispatchGithubTool } from "./github";
 import { GMAIL_TOOLS, dispatchGmailTool } from "./gmail";
 import { GDRIVE_TOOLS, dispatchGdriveTool } from "./google-drive";
 import { GCAL_TOOLS, dispatchGcalTool } from "./google-calendar";
+import { OUTLOOK_TOOLS, dispatchOutlookTool } from "./outlook";
+import { OUTCAL_TOOLS, dispatchOutcalTool } from "./outlook-calendar";
 
 /**
  * Connection management module.
@@ -66,6 +68,10 @@ export function getConnectionTools(
       return GDRIVE_TOOLS;
     case "google_calendar":
       return GCAL_TOOLS;
+    case "outlook":
+      return OUTLOOK_TOOLS;
+    case "outlook_calendar":
+      return OUTCAL_TOOLS;
     default:
       return [];
   }
@@ -147,6 +153,10 @@ export async function dispatchConnectionTool(
       return dispatchGdriveTool(conn, toolName, args);
     case "google_calendar":
       return dispatchGcalTool(conn, toolName, args);
+    case "outlook":
+      return dispatchOutlookTool(conn, toolName, args);
+    case "outlook_calendar":
+      return dispatchOutcalTool(conn, toolName, args);
     default:
       return { content: `Unknown provider: ${conn.provider}` };
   }
