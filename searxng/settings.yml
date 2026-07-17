@@ -37,12 +37,18 @@ use_default_settings:
 # mojeek / bing / duckduckgo web default to disabled=true, so we override
 # them here with disabled: false.
 engines:
+  # Weight tips: higher weight = more influence on SearXNG's score merge.
+  # Bing tends to be strongest for general web; DDG web is a good diversifier;
+  # Mojeek is privacy-oriented but sometimes thinner on JP news.
   - name: mojeek
     disabled: false
+    weight: 0.8
   - name: bing
     disabled: false
+    weight: 1.3
   - name: duckduckgo web
     disabled: false
+    weight: 1.0
 
 search:
   formats:

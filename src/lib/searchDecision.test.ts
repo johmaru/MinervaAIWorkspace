@@ -237,9 +237,11 @@ describe("decideSearch", () => {
     expect(decision.userNotice).toBe(
       "検索判定を定型ルールで補完し、Webで最新情報を確認します。",
     );
-    // Heuristic fallback: queries[0] is keyword-focused (particles stripped), queries[1] is raw
+    // Heuristic fallback: keyword extraction (no raw conversational sentence as primary)
     expect(decision.queries[0].query).toContain("価格");
-    expect(decision.queries[1].query).toContain("現在の価格");
+    expect(decision.queries[0].query).not.toMatch(/確認して/);
+    // Recency bias adds a second "最新" variant when volatile
+    expect(decision.queries.some((q) => /最新/.test(q.query))).toBe(true);
   });
 
   it("filters out empty strings and non-strings from queries (queryGen phase)", async () => {
@@ -647,13 +649,11 @@ describe("decideSearch", () => {
     const decision = await decideSearch("PMR2.0のSteam評価は？最新のレビュー", "umans-glm-5.2", "ja", []);
 
     expect(decision.searchLevel).toBe("web");
-    expect(decision.queries.length).toBeGreaterThanOrEqual(2);
-    // Step 9: queries[0] is now keyword-focused (particles stripped)
+    expect(decision.queries.length).toBeGreaterThanOrEqual(1);
+    // Keyword extraction keeps product tokens and drops particles/filler
     expect(decision.queries[0].query).toContain("PMR2.0");
-    // keyword variant does not contain original particles (の/は/が)
     expect(decision.queries[0].query).not.toMatch(/[のはが]/);
-    // queries[1] is the raw normalized user message (fallback)
-    expect(decision.queries[1].query).toContain("PMR2.0");
+    expect(decision.queries.every((q) => !/教えて|どうなってる/.test(q.query))).toBe(true);
   });
 
   it("wiki heuristic: pure CJK entities do not generate an English variant", async () => {

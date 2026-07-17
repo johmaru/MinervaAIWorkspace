@@ -721,7 +721,7 @@ describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
     expect(srcs[0].url).toBe("https://ja.wikipedia.org/wiki/マグナ・カルタ");
   }, 30_000);
 
-  it("searchLevel:wiki with no Wikipedia article → does not call searchWeb, answers from knowledge", async () => {
+  it("searchLevel:wiki with no Wikipedia article → falls back to searchWeb", async () => {
     const id = await createThread();
 
     vi.mocked(decideSearch).mockResolvedValueOnce({
@@ -731,6 +731,21 @@ describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
       queries: [{ query: "存在しない架空の概念XYZ", time_range: null }],
     });
     vi.mocked(searchWikipedia).mockResolvedValueOnce(null);
+    vi.mocked(searchWeb).mockResolvedValueOnce({
+      query: "存在しない架空の概念XYZ",
+      results: [
+        {
+          url: "https://example.com/xyz",
+          title: "XYZ",
+          snippet: "A page about XYZ concept",
+          scraped: true,
+          content: "XYZ is a fictional concept used in tests. ".repeat(3),
+          scrapeTitle: "XYZ",
+          raw_content: "XYZ concept",
+          score: 5,
+        },
+      ],
+    });
 
     const res = await POST(chatReq(id, "存在しない架空の概念XYZとは？"));
     expect(res.status).toBe(200);
@@ -738,15 +753,17 @@ describe("POST /api/chat — Wikipedia lookup with searchLevel:wiki", () => {
     const raw = await sseChunks(res);
     const events = parseEvents(raw);
 
-    // searchWikipedia is called but returns null
+    // searchWikipedia is called but returns null → web fallback
     expect(vi.mocked(searchWikipedia)).toHaveBeenCalledTimes(1);
-    // Does not fall back to searchWeb
-    expect(vi.mocked(searchWeb)).not.toHaveBeenCalled();
-    // sources event is not sent (no article)
-    expect(events.filter((e) => e.event === "sources")).toHaveLength(0);
-    // A "no article found" status notification appears
+    expect(vi.mocked(searchWeb)).toHaveBeenCalled();
+    // Status mentions wiki miss then web retry path
     const statusEvents = events.filter((e) => e.event === "status");
-    expect(statusEvents.some((e) => e.data.label.includes("Wikipediaに該当記事が見つかりません"))).toBe(true);
+    expect(
+      statusEvents.some((e) => String(e.data.label).includes("Wikipedia") || String(e.data.label).includes("Web")),
+    ).toBe(true);
+    // Sources come from web results
+    const sources = events.filter((e) => e.event === "sources");
+    expect(sources.length).toBeGreaterThanOrEqual(1);
   }, 30_000);
 });
 

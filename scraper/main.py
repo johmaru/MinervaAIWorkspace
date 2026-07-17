@@ -130,8 +130,11 @@ class SearchRequest(BaseModel):
     max_results: int = 5
     time_range: str | None = None  # "day" | "week" | "month" | "year" | None
     language: str | None = None  # BCP47 tag e.g. "ja-JP", "en-US". None = auto-locale.
+    # SearXNG categories (comma-separated allowed by API; we accept a single known value)
+    categories: str | None = None  # "news" | "science" | "it" | "general" | None
 
 ALLOWED_TIME_RANGES = {"day", "week", "month", "year"}
+ALLOWED_CATEGORIES = {"general", "news", "science", "it", "images", "videos", "map", "music", "files", "social media"}
 
 
 def _normalize_result_url(url: str) -> str:
@@ -193,6 +196,13 @@ async def search(req: SearchRequest):
 
     searxng_url = os.environ.get("SEARXNG_URL", "http://searxng:8080")
     time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
+    categories = None
+    if req.categories:
+        # Accept a single category or comma-separated list; filter to allowlist
+        parts = [p.strip().lower() for p in req.categories.split(",") if p.strip()]
+        valid = [p for p in parts if p in ALLOWED_CATEGORIES and p != "general"]
+        if valid:
+            categories = ",".join(valid)
 
     async def _fetch_page(client: httpx.AsyncClient, page_params: dict) -> list[dict]:
         """Query SearXNG with pagination, fetching SAFE_LIMIT results at a time.
@@ -237,6 +247,8 @@ async def search(req: SearchRequest):
                 params["time_range"] = time_range
             if req.language:
                 params["language"] = req.language
+            if categories:
+                params["categories"] = categories
 
             results = await _fetch_page(client, params)
 
@@ -247,6 +259,17 @@ async def search(req: SearchRequest):
                     results = await _fetch_page(client, retry_params)
                 except Exception:
                     pass  # On retry failure, leave results empty
+
+            # Retry without categories when category-scoped search is empty
+            if not results and categories:
+                retry_params = {k: v for k, v in params.items() if k != "categories"}
+                # keep time_range off if previous retry already dropped it and still empty
+                if time_range and "time_range" not in retry_params:
+                    pass
+                try:
+                    results = await _fetch_page(client, retry_params)
+                except Exception:
+                    pass
         # Score-rank + URL-dedupe before scraping so we spend scrape budget on unique, relevant hits
         results = rank_and_dedupe_results(results, req.max_results)
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results={len(results)}", flush=True)

@@ -378,6 +378,46 @@ class TestSearchTimeRange:
         assert "engines" not in params
 
 
+class TestSearchCategories:
+    """Verify that categories is passed through to SearXNG (httpx is mocked)."""
+
+    def test_news_category_passed(self, client):
+        results_resp = MagicMock()
+        results_resp.status_code = 200
+        results_resp.json.return_value = {
+            "results": [{"url": "https://example.com/n", "title": "N", "content": "c", "score": 1}]
+        }
+        mock_get = AsyncMock(return_value=results_resp)
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", AsyncMock(return_value={})
+        ):
+            resp = client.post(
+                "/search",
+                json={"query": "test", "max_results": 3, "categories": "news"},
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args_list[0].kwargs.get("params", {})
+        assert params.get("categories") == "news"
+
+    def test_general_category_omitted(self, client):
+        results_resp = MagicMock()
+        results_resp.status_code = 200
+        results_resp.json.return_value = {
+            "results": [{"url": "https://example.com/n", "title": "N", "content": "c", "score": 1}]
+        }
+        mock_get = AsyncMock(return_value=results_resp)
+        with patch("httpx.AsyncClient.get", mock_get), patch(
+            "main.scrape_url_safe", AsyncMock(return_value={})
+        ):
+            resp = client.post(
+                "/search",
+                json={"query": "test", "max_results": 3, "categories": "general"},
+            )
+        assert resp.status_code == 200
+        params = mock_get.call_args_list[0].kwargs.get("params", {})
+        assert "categories" not in params
+
+
 class TestSearchLanguage:
     """Verify that the language param is passed through to the SearXNG request params (httpx is mocked)."""
 

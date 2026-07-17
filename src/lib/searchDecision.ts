@@ -2,13 +2,16 @@ import type OpenAI from "openai";
 import { createLLM, buildDisableReasoningParams } from "@/lib/llm";
 import type { Locale } from "@/lib/i18n/types";
 import { t } from "@/lib/i18n";
+import { extractHeuristicKeywords, parseSearchCategory, type SearchCategory } from "@/lib/searchQuality";
 
 /**
- * A single search query with an optional time range for SearXNG.
+ * A single search query with an optional time range / category for SearXNG.
  */
 export type SearchQuery = {
   query: string;
   time_range: "day" | "week" | "month" | "year" | null;
+  /** SearXNG category; null/general = default engine mix */
+  category?: SearchCategory;
 };
 
 /**
@@ -82,19 +85,21 @@ CRITICAL RULES:
   Example: user asks "今日のAIニュース" with date 2026-07-11
   → query: AI ニュース 2026年7月11日
 - time_range: "day" for today's news, "week" for recent, "month" for this month, null for stable info.
+- category: "news" for current events/news, "science" for research/papers, "it" for software/tech,
+  "general" or null otherwise. Prefer "news" when time_range is day/week for news-like questions.
 - Match the user's language for queries (Japanese queries for Japanese users).
 - If the user's language is not English, add one English query.
 
 For "web": generate 3 queries, each with a distinct role:
-1. Keyword-focused with date if applicable (e.g. AI ニュース 2026年7月11日, time_range: "day")
+1. Keyword-focused with date if applicable (e.g. AI ニュース 2026年7月11日, time_range: "day", category: "news")
 2. Broader keyword variant OR site:-scoped variant (e.g. AI 最新ニュース or "PMR 2.0" review site:store.steampowered.com, time_range: "week")
 3. English variant (e.g. AI news July 2026, time_range: "week")
 
 For "wiki": generate 1-2 queries (entity name in user's language + English if non-English).
-Wiki queries always have time_range: null.
+Wiki queries always have time_range: null and category: null.
 
 Return JSON:
-{"queries": [{"query": string, "time_range": "day"|"week"|"month"|"year"|null}]}`;
+{"queries": [{"query": string, "time_range": "day"|"week"|"month"|"year"|null, "category": "general"|"news"|"science"|"it"|null}]}`;
 
 
 const EXPLICIT_SEARCH_PATTERN =
@@ -125,6 +130,18 @@ const NO_SEARCH_PATTERN =
 /** Wraps a list of query strings into SearchQuery[] with time_range: null. */
 function withTimeRangeNull(queries: string[]): SearchQuery[] {
   return queries.filter((q) => q.trim().length > 0).map((q) => ({ query: q, time_range: null }));
+}
+
+/**
+ * Infer a simple category for heuristic web queries from the user message.
+ */
+function heuristicCategory(message: string): SearchCategory {
+  if (/(ニュース|news|速報|headline)/i.test(message)) return "news";
+  if (/(論文|arxiv|research|study|science|科学)/i.test(message)) return "science";
+  if (/(api|github|library|framework|sdk|npm|package|プログラミング|software|docs)/i.test(message)) {
+    return "it";
+  }
+  return null;
 }
 
 function buildUserNotice(userMessage: string, fallback: boolean, locale: Locale): string {
@@ -181,28 +198,47 @@ function buildHeuristicDecision(userMessage: string, locale: Locale): SearchDeci
     return null;
   }
 
-  // Step 9: Improve heuristic fallback query quality.
-  // queries[0]: keyword-focused variant — strip common Japanese particles/filler so
-  //   SearXNG gets keyword-style input instead of the raw conversational sentence.
-  // queries[1]: the original normalized user message (direct intent, as fallback).
-  const baseKeywords = normalized
-    .replace(/[のはがをにでとって？?！!]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Heuristic web queries: noun/token extraction (not raw conversational sentence).
+  // queries[0]: extracted keywords (+ volatility cue when present)
+  // queries[1]: keywords + "最新" for recency bias when the message looks volatile
+  const keywords = extractHeuristicKeywords(normalized);
   const volatilityMatch = normalized.match(VOLATILE_INFO_PATTERN);
   const volatilityKeyword = volatilityMatch?.[0] ?? "";
-  const keywordQuery = [baseKeywords, volatilityKeyword, "最新"]
-    .filter((p) => p.length > 0)
-    .join(" ");
+  const primary = [keywords, volatilityKeyword].filter((p) => p.length > 0).join(" ").trim() || keywords;
+  const category = heuristicCategory(normalized);
+  const wantsRecency =
+    EXPLICIT_SEARCH_PATTERN.test(normalized) || VOLATILE_INFO_PATTERN.test(normalized);
+  const timeRange: SearchQuery["time_range"] = wantsRecency
+    ? /(今日|today|latest|ニュース|news)/i.test(normalized)
+      ? "day"
+      : "week"
+    : null;
+
+  const makeQ = (query: string, tr: SearchQuery["time_range"]): SearchQuery => {
+    const q: SearchQuery = { query, time_range: tr };
+    if (category) q.category = category;
+    return q;
+  };
+  const queries: SearchQuery[] = [makeQ(primary || normalized, timeRange)];
+  if (wantsRecency && primary) {
+    const withLatest = /最新|latest/i.test(primary) ? primary : `${primary} 最新`;
+    if (withLatest !== primary) {
+      queries.push(makeQ(withLatest, timeRange ?? "week"));
+    }
+  }
+  // English-ish ASCII tokens as a secondary query when the message is mostly CJK
+  if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(normalized)) {
+    const ascii = (primary.match(/[A-Za-z][A-Za-z0-9.\-]*/g) ?? []).join(" ");
+    if (ascii.length >= 3 && !queries.some((q) => q.query === ascii)) {
+      queries.push(makeQ(ascii, timeRange));
+    }
+  }
 
   return {
     searchLevel: "web",
     reason: "heuristic: user requested current or volatile information",
     userNotice: buildUserNotice(normalized, true, locale),
-    queries: [
-      { query: keywordQuery, time_range: null },
-      { query: normalized, time_range: null },
-    ],
+    queries,
   };
 }
 
@@ -255,7 +291,15 @@ function parseQueries(raw: string | null | undefined): SearchQuery[] | null {
         if (typeof q === "string" && q.trim().length > 0) {
           const tr = item.time_range;
           const timeRange = validTimeRanges.has(tr) ? tr : null;
-          queries.push({ query: q.trim(), time_range: timeRange as SearchQuery["time_range"] });
+          const category = parseSearchCategory(
+            "category" in item ? (item as { category?: unknown }).category : null,
+          );
+          const entry: SearchQuery = {
+            query: q.trim(),
+            time_range: timeRange as SearchQuery["time_range"],
+          };
+          if (category) entry.category = category;
+          queries.push(entry);
         }
       } else if (typeof item === "string" && item.trim().length > 0) {
         // Backward compat: bare string queries
@@ -407,7 +451,7 @@ export async function decideSearch(
       searchLevel,
       reason: judgeReason || "query gen fallback",
       userNotice: recomputedNotice,
-      queries: [{ query: userMessage, time_range: null }],
+      queries: [{ query: extractHeuristicKeywords(userMessage) || userMessage, time_range: null }],
     };
   }
 

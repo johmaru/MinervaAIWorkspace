@@ -123,20 +123,31 @@ export type SourceInfo = {
 /**
  * Calls the microservice's /search endpoint (SearXNG search → scrape top URLs).
  * Timeout is 60s: SearXNG search(20s) + 5 parallel scrapes(30s) + margin.
+ *
+ * @param category Optional SearXNG category (`news` / `science` / `it` / `general`).
  */
 export async function searchWeb(
   query: string,
   maxResults = 5,
   timeRange?: "day" | "week" | "month" | "year",
   language?: string,
+  category?: string | null,
 ): Promise<WebSearchResponse> {
   if (!process.env.SCRAPER_URL) return { query, results: [] };
   const t0 = Date.now();
   const base = process.env.SCRAPER_URL || "http://localhost:8000";
+  const categories =
+    category && category !== "general" ? category : null;
   const res = await fetch(`${base}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, max_results: maxResults, time_range: timeRange ?? null, language: language ?? null }),
+    body: JSON.stringify({
+      query,
+      max_results: maxResults,
+      time_range: timeRange ?? null,
+      language: language ?? null,
+      categories,
+    }),
     signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {

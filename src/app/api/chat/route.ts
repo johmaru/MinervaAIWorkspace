@@ -9,7 +9,14 @@ import type { Locale } from "@/lib/i18n/types";
 import { scrapeUrl, searchWeb, detectSearchLanguage, dedupeAndRankSearchResults } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
 import { extractUrls } from "@/lib/urlExtract";
-import { decideSearch } from "@/lib/searchDecision";
+import { decideSearch, type SearchQuery } from "@/lib/searchDecision";
+import {
+  applyDomainQualityFilter,
+  formatSearchResultsForContext,
+  isThinSearchResults,
+  rewriteQueryForRetry,
+  sliceContentAroundQuery,
+} from "@/lib/searchQuality";
 import { searchWikipedia } from "@/lib/wikipedia";
 import type { WikipediaResult } from "@/lib/wikipedia";
 import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
@@ -876,7 +883,10 @@ async function buildSearchContext({
   }
 
   // wiki level: lightweight lookup via Wikipedia REST API (no SearXNG/scraper).
-  // If no article is found, answer from training data (does not fall back to full web search).
+  // On miss, fall through to the web search path with the same queries.
+  let webQueries: SearchQuery[] = decision.queries;
+  let webStatusLabel = decision.userNotice ?? t(locale, "chat.statusSearchFallback");
+
   if (decision.searchLevel === "wiki") {
     const tWiki = Date.now();
     const wikiResults = await Promise.all(
@@ -884,104 +894,152 @@ async function buildSearchContext({
     );
     const valid = wikiResults.filter((r): r is WikipediaResult => r !== null);
     logger.info("search-timing", "wikipedia lookup", { duration: Date.now() - tWiki, found: valid.length });
-    if (valid.length === 0) {
-      send("status", { label: t(locale, "chat.statusWikiMiss") });
-      logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "wiki miss" });
+    if (valid.length > 0) {
+      send("sources", { sources: valid.map((r) => ({ url: r.url, title: r.title, snippet: r.description })) });
+      const contextContent = valid
+        .map((r) => `Title: ${r.title}\nDescription: ${r.description}\nURL: ${r.url}\nExtract: ${r.extract}`)
+        .join("\n\n");
+      logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "wiki hit" });
       return {
         role: "system",
-        content: "Wikipedia lookup was attempted but no article was found. Answer from your training data and acknowledge the limitation.",
+        content: `Wikipedia lookup has been completed. Use this to answer the user's question directly. Do NOT attempt to search or scrape again.\n\nWikipedia results:\n${contextContent}`,
       };
     }
-    send("sources", { sources: valid.map((r) => ({ url: r.url, title: r.title, snippet: r.description })) });
-    const contextContent = valid
-      .map((r) => `Title: ${r.title}\nDescription: ${r.description}\nURL: ${r.url}\nExtract: ${r.extract}`)
-      .join("\n\n");
-    logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "wiki hit" });
-    return {
-      role: "system",
-      content: `Wikipedia lookup has been completed. Use this to answer the user's question directly. Do NOT attempt to search or scrape again.\n\nWikipedia results:\n${contextContent}`,
-    };
+    // Wiki miss → web fallback (do not stop at training data)
+    send("status", { label: t(locale, "chat.statusWikiMissWeb") });
+    webStatusLabel = t(locale, "chat.statusWikiMissWeb");
+    webQueries = decision.queries.map((sq) => ({
+      query: sq.query,
+      time_range: null,
+      category: null,
+    }));
+    logger.info("search-timing", "wikipedia miss → web fallback", { queries: webQueries.length });
+  } else {
+    send("status", { label: webStatusLabel });
   }
-
-
-  send("status", { label: decision.userNotice ?? t(locale, "chat.statusSearchFallback") });
 
   const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
   const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 3));
-  const allSources: SourceInfo[] = [];
-  const allResults: { url: string; title: string; snippet: string; content: string; score?: number; scraped?: boolean }[] = [];
+  const searchQueries = webQueries.slice(0, maxRounds);
 
-  const searchQueries = decision.queries.slice(0, maxRounds);
-  // Execute queries in parallel to reduce latency (serial would take up to maxRounds times longer)
-  const tParallel = Date.now();
-  const queryResults = await Promise.all(
-    searchQueries.map(async (sq, qi) => {
-      const tQuery = Date.now();
-      // Per-query time_range takes precedence over the global UI timeRange toggle.
-      // If sq.time_range is null, fall back to the global toggle.
-      const effectiveTimeRange = sq.time_range ?? timeRange;
-      // Language follows the query text (not UI locale) so English keyword variants
-      // are not forced through ja-JP when the UI is Japanese.
-      const queryLanguage = detectSearchLanguage(sq.query);
-      try {
-        const response = await searchWeb(sq.query, maxResults, effectiveTimeRange, queryLanguage);
-        logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: response.results.length, language: queryLanguage });
-        return response;
-      } catch {
-        logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: 0, error: true });
-        return null;
+  type RankedHit = {
+    url: string;
+    title: string;
+    snippet: string;
+    content: string;
+    score?: number;
+    scraped?: boolean;
+  };
+
+  const collectHits = async (
+    queries: SearchQuery[],
+    opts: { dropTimeRange?: boolean; dropCategory?: boolean; rewrite?: boolean } = {},
+  ): Promise<RankedHit[]> => {
+    const tParallel = Date.now();
+    const queryResults = await Promise.all(
+      queries.map(async (sq, qi) => {
+        const tQuery = Date.now();
+        const qText = opts.rewrite ? rewriteQueryForRetry(sq.query) : sq.query;
+        const effectiveTimeRange = opts.dropTimeRange ? undefined : (sq.time_range ?? timeRange);
+        const category = opts.dropCategory ? null : (sq.category ?? null);
+        const queryLanguage = detectSearchLanguage(qText);
+        try {
+          const response = await searchWeb(
+            qText,
+            maxResults,
+            effectiveTimeRange,
+            queryLanguage,
+            category,
+          );
+          logger.info("search-timing", "query", {
+            index: qi + 1,
+            total: queries.length,
+            duration: Date.now() - tQuery,
+            results: response.results.length,
+            language: queryLanguage,
+            category: category ?? "general",
+            rewrite: !!opts.rewrite,
+          });
+          return { query: qText, response };
+        } catch {
+          logger.info("search-timing", "query", {
+            index: qi + 1,
+            total: queries.length,
+            duration: Date.now() - tQuery,
+            results: 0,
+            error: true,
+          });
+          return null;
+        }
+      }),
+    );
+    logger.info("search-timing", "all queries parallel", {
+      duration: Date.now() - tParallel,
+      count: queries.length,
+      rewrite: !!opts.rewrite,
+    });
+
+    const hits: RankedHit[] = [];
+    for (const item of queryResults) {
+      if (!item) continue;
+      const { query: qText, response } = item;
+      for (const r of response.results.slice(0, maxResults)) {
+        const rawBody = r.scraped ? r.content : r.raw_content || r.snippet;
+        hits.push({
+          url: r.url,
+          title: r.scrapeTitle || r.title,
+          snippet: r.snippet,
+          content: sliceContentAroundQuery(rawBody || "", qText, SEARCH_RESULT_CONTENT_SLICE),
+          score: r.score,
+          scraped: r.scraped,
+        });
       }
-    }),
-  );
-  logger.info("search-timing", "all queries parallel", { duration: Date.now() - tParallel, count: searchQueries.length });
-  for (const response of queryResults) {
-    if (!response) continue;
-    for (const r of response.results.slice(0, maxResults)) {
-      allResults.push({
-        url: r.url,
-        title: r.scrapeTitle || r.title,
-        snippet: r.snippet,
-        content: r.scraped
-          ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)
-          : r.raw_content || r.snippet,
-        score: r.score,
-        scraped: r.scraped,
-      });
+    }
+    // URL dedupe + score rank, then domain quality / diversity
+    return applyDomainQualityFilter(dedupeAndRankSearchResults(hits));
+  };
+
+  let ranked = await collectHits(searchQueries);
+
+  // Adaptive re-query: when results are empty or have almost no usable body text,
+  // retry once with broader queries (no time_range/category, stripped site:/quotes).
+  if (isThinSearchResults(ranked) && searchQueries.length > 0) {
+    send("status", { label: t(locale, "chat.statusSearchRetry") });
+    logger.info("search-timing", "adaptive re-query", { reason: "thin results", prior: ranked.length });
+    const retryHits = await collectHits(searchQueries, {
+      dropTimeRange: true,
+      dropCategory: true,
+      rewrite: true,
+    });
+    if (!isThinSearchResults(retryHits) || retryHits.length > ranked.length) {
+      ranked = retryHits;
     }
   }
 
-  // Cross-query URL dedupe + score ranking (multiple queries often hit the same page)
-  const ranked = dedupeAndRankSearchResults(allResults);
-  allResults.length = 0;
-  allResults.push(...ranked);
-  for (const r of ranked) {
-    allSources.push({ url: r.url, title: r.title, snippet: r.snippet });
-  }
+  const allSources: SourceInfo[] = ranked.map((r) => ({
+    url: r.url,
+    title: r.title,
+    snippet: r.snippet,
+  }));
 
   if (allSources.length > 0) send("sources", { sources: allSources });
-  if (allResults.length === 0) {
+  if (ranked.length === 0) {
     send("status", { label: t(locale, "chat.statusWebEmpty") });
     // This message only reaches non-tool-supporting models (tool-supporting models
     // have searchContextMessage excluded in effectiveMessages and search autonomously).
-    // Communicate the search failure and have the model answer from training data,
-    // making it explicit that information could not be retrieved.
-    // Returning null would be treated as search not executed, also losing failure awareness.
     logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal, result: "no results" });
     return {
       role: "system",
       content: "Web search was attempted but returned no results. Answer from your training data and acknowledge that you could not retrieve current information.",
     };
   }
-  // Summarization step is deprecated: raw search results are embedded directly into the system message.
-  // Each result's content is sliced by SEARCH_RESULT_CONTENT_SLICE, so even raw JSON is short enough.
-  // score/scraped are ranking-only metadata and are not forwarded to the model.
-  const tSummarize = Date.now();
-  const contextContent = JSON.stringify(
-    allResults.map(({ url, title, snippet, content }) => ({ url, title, snippet, content })),
-    null,
-    2,
+
+  // Progressive compression when many results so the model is not flooded with noise.
+  const tFormat = Date.now();
+  const contextContent = formatSearchResultsForContext(
+    ranked.map(({ url, title, snippet, content }) => ({ url, title, snippet, content })),
   );
-  logger.info("search-timing", "skip-summarize", { duration: Date.now() - tSummarize, chars: contextContent.length });
+  logger.info("search-timing", "format-context", { duration: Date.now() - tFormat, chars: contextContent.length, results: ranked.length });
 
   logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal });
   return {
@@ -1921,7 +1979,9 @@ async function streamCompletion({
               timeRange,
               detectSearchLanguage(parsedArgs.query),
             );
-            const rankedToolResults = dedupeAndRankSearchResults(response.results);
+            const rankedToolResults = applyDomainQualityFilter(
+              dedupeAndRankSearchResults(response.results),
+            );
             for (const r of rankedToolResults) {
               sources.push({
                 url: r.url,
@@ -1930,10 +1990,12 @@ async function streamCompletion({
               });
             }
             toolContent = rankedToolResults
-              .map(
-                (r) =>
-                  `<${r.url}>\n${r.scrapeTitle || r.title}\n${r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : r.snippet}`,
-              )
+              .map((r) => {
+                const body = r.scraped
+                  ? sliceContentAroundQuery(r.content, parsedArgs.query, SEARCH_RESULT_CONTENT_SLICE)
+                  : r.snippet;
+                return `<${r.url}>\n${r.scrapeTitle || r.title}\n${body}`;
+              })
               .join("\n\n");
             if (!toolContent) toolContent = "No results found.";
           } catch {
