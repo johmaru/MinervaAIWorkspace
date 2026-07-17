@@ -1,10 +1,11 @@
 # Sandbox Architecture Design — AI-Driven Isolated Execution
 
-> **Status**: Conceptual / Pre-implementation  
+> **Status**: Conceptual / Pre-implementation（v0.4 実装 plan あり）  
 > **Target**: v0.4 experimental, v0.5+ phased rollout  
 > **Created**: 2026-07-15  
 > **Last rewritten**: 2026-07-17（構造整理・Open Questions / 統合接点の追加）  
-> **Decisions log**: §12.1（確定済み）、未決は §12.2
+> **Decisions log**: §12.1（確定済み）、未決は §12.2  
+> **Implementation plan (v0.4)**: [2026-07-17-sandbox-v0.4.md](../plans/2026-07-17-sandbox-v0.4.md)
 
 ## 1. Overview
 
