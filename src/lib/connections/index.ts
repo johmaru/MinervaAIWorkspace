@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { connections } from "@/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { callNotionApi } from "./notion";
+import { GITHUB_TOOLS, dispatchGithubTool } from "./github";
 
 /**
  * Connection management module.
@@ -17,13 +18,10 @@ import { callNotionApi } from "./notion";
  * 3. Use a tool name prefix (notion_, google_, github_) to avoid collisions
  */
 
-export type ConnectionRow = {
-  id: string;
-  provider: string;
-  accessToken: string;
-  refreshToken: string;
-  workspaceName: string | null;
-};
+export type { ConnectionRow, DispatchResult } from "./types";
+import type { ConnectionRow, DispatchResult } from "./types";
+export type { ProviderId } from "./provider-map";
+export { resolveProviderFromToolName } from "./provider-map";
 
 /**
  * Loads the connection rows corresponding to the given connection IDs.
@@ -39,6 +37,8 @@ export async function loadConnections(
       provider: connections.provider,
       accessToken: connections.accessToken,
       refreshToken: connections.refreshToken,
+      scopes: connections.scopes,
+      expiresAt: connections.expiresAt,
       workspaceName: connections.workspaceName,
     })
     .from(connections)
@@ -52,10 +52,14 @@ export async function loadConnections(
 export function getConnectionTools(
   conn: ConnectionRow,
 ): OpenAI.Chat.Completions.ChatCompletionTool[] {
-  if (conn.provider === "notion") {
-    return NOTION_TOOLS;
+  switch (conn.provider) {
+    case "notion":
+      return NOTION_TOOLS;
+    case "github":
+      return GITHUB_TOOLS;
+    default:
+      return [];
   }
-  return [];
 }
 
 const NOTION_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
@@ -122,18 +126,22 @@ export async function dispatchConnectionTool(
   conn: ConnectionRow,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<{ content: string; newAccessToken?: string; newRefreshToken?: string }> {
-  if (conn.provider === "notion") {
-    return dispatchNotionTool(conn, toolName, args);
+): Promise<DispatchResult> {
+  switch (conn.provider) {
+    case "notion":
+      return dispatchNotionTool(conn, toolName, args);
+    case "github":
+      return dispatchGithubTool(conn, toolName, args);
+    default:
+      return { content: `Unknown provider: ${conn.provider}` };
   }
-  return { content: `Unknown provider: ${conn.provider}` };
 }
 
 async function dispatchNotionTool(
   conn: ConnectionRow,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<{ content: string; newAccessToken?: string; newRefreshToken?: string }> {
+): Promise<DispatchResult> {
   if (toolName === "notion_search") {
     const query = String(args.query ?? "");
     const result = await callNotionApi(

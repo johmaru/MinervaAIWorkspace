@@ -242,9 +242,24 @@ export const mcpServers = sqliteTable("mcp_servers", {
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  provider: text("provider", { enum: ["notion"] }).notNull(),
+  provider: text("provider", {
+    enum: [
+      "notion",
+      "gmail",
+      "google_drive",
+      "google_calendar",
+      "github",
+      "outlook",
+      "outlook_calendar",
+    ],
+  }).notNull(),
   accessToken: text("access_token").notNull(),
-  refreshToken: text("refresh_token").notNull(),
+  // nullable: GitHub OAuth App tokens have no refresh token; Google/Microsoft may.
+  refreshToken: text("refresh_token"),
+  // space-separated granted scopes (nullable; legacy Notion rows have none)
+  scopes: text("scopes"),
+  // access-token expiry (nullable; GitHub OAuth App tokens don't expire)
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
   workspaceName: text("workspace_name"),
   workspaceIcon: text("workspace_icon"),
   botId: text("bot_id"),

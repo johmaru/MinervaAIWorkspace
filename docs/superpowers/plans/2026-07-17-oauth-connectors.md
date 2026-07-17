@@ -791,31 +791,61 @@ Ask user before `git push` unless they already authorized push.
 
 ### Google
 
-- Auth URL:  
-- Token URL:  
-- Scopes confirmed:  
-- Gmail endpoints used:  
-- Drive endpoints used:  
-- Calendar endpoints used:  
-- Notes:  
+- Auth URL: `https://accounts.google.com/o/oauth2/v2/auth`
+- Token URL: `https://oauth2.googleapis.com/token` (same URL for code-exchange AND refresh; form-urlencoded)
+- Authorize params: `client_id`, `redirect_uri`, `response_type=code`, `scope` (space-sep), `state`, `access_type=offline`, `prompt=consent`
+- Token response: `access_token`, `expires_in` (seconds, ~3600), `refresh_token` (first consent only), `scope` (granted subset), `token_type=Bearer`
+- Refresh: persist new `refresh_token` if returned (rotation possible)
+- Scopes confirmed:
+  - Gmail: `https://www.googleapis.com/auth/gmail.readonly`
+  - Drive: `https://www.googleapis.com/auth/drive.readonly`
+  - Calendar read: `https://www.googleapis.com/auth/calendar.readonly`
+  - Calendar events r/w: `https://www.googleapis.com/auth/calendar.events`
+- Gmail endpoints (base `https://gmail.googleapis.com/gmail/v1`, userId=`me`):
+  - `GET /users/me/messages?q=&maxResults=` → `{messages:[{id,threadId}], nextPageToken}`
+  - `GET /users/me/messages/{id}?format=metadata` (metadataHeaders limit)
+  - `GET /users/me/labels`
+- Drive endpoints (base `https://www.googleapis.com/drive/v3`):
+  - `GET /files?q=&pageSize=&fields=`
+  - `GET /files/{fileId}` (metadata; `alt=media` for binary)
+  - `GET /files/{fileId}/export?mimeType=` (Docs→`text/plain`, Sheets→`text/csv`, Slides→`text/plain`; REST param is `mimeType` not `exportMimeType`; max 10MB)
+- Calendar endpoints (base `https://www.googleapis.com/calendar/v3`):
+  - `GET /users/me/calendarList`
+  - `GET /calendars/{calendarId}/events?timeMin=&timeMax=&singleEvents=true&orderBy=startTime`
+  - `POST /calendars/{calendarId}/events` (body: start, end, summary, description; query: `sendUpdates=none`)
+- Notes: `prompt=consent` forces consent screen every time — use only on initial connect. refresh_token returned only first consent unless prompt=consent re-forces. `calendar.events` (not `.readonly`) for create-event. Gmail `q=` needs `gmail.readonly` (not `metadata`). Verified 2026-07-17 vs developers.google.com.
 
 ### GitHub
 
-- Auth URL:  
-- Token URL:  
-- Scopes confirmed:  
-- REST endpoints used:  
-- Headers:  
-- Notes:  
+- Auth URL: `https://github.com/login/oauth/authorize`
+- Token URL: `https://github.com/login/oauth/access_token` (POST, MUST send `Accept: application/json` header — default is form-encoded)
+- Scopes confirmed: `read:user` (public profile), `repo` (full r/w public+private repos). Space-delimited in authorize.
+- REST endpoints used (base `https://api.github.com`):
+  - `GET /search/repositories?q=&per_page=`
+  - `GET /repos/{owner}/{repo}/issues?state=open|closed|all&per_page=`
+  - `GET /repos/{owner}/{repo}/contents/{path}?ref=` — **slashes in {path} MUST be `%2F`-encoded**; else 404. Use `encodeURIComponent` per segment then join with `%2F`.
+  - `GET /search/code?q=` — requires auth, 10 req/min, `repo` scope for private repos
+  - `GET /user` — authenticated user profile (login, name, avatar_url, email)
+- Headers: `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28` (default, supported through 2028; `2026-03-10` is newer), `User-Agent: UmansChat` (REQUIRED — omission rejected, invalid → 403)
+- Token response (with Accept: application/json): `access_token` (prefix `gho_`), `token_type` (lowercase `bearer`), `scope` (comma-sep). No `expires_in`, no `refresh_token`.
+- Notes: **OAuth Apps do NOT support refresh tokens.** Tokens are long-lived until revoked. Handle 401/403 as re-auth needed (no refresh flow). PKCE (`code_challenge`/`code_challenge_method=S256`) strongly recommended by GitHub — add for security. Rate limit: 5000/hr auth, 30/min search, 10/min code search. `read:user` sufficient for /user public profile display. Verified 2026-07-17 vs docs.github.com.
 
 ### Microsoft
 
-- Auth URL:  
-- Token URL:  
-- Tenant default:  
-- Graph endpoints used:  
-- Scopes confirmed:  
-- Notes:  
+- Auth URL: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize` (tenant = `MICROSOFT_TENANT_ID` or `common`)
+- Token URL: `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` (same URL for code-exchange AND refresh; form-urlencoded)
+- Tenant default: `common` (works for multi-tenant personal+work accounts); also `organizations`, `consumers`, or specific GUID
+- Authorize params: `client_id`, `redirect_uri`, `response_type=code`, `scope` (space-sep), `state`. `response_mode=query` is the default — can omit. `prompt=select_account` optional.
+- Token exchange body: `client_id`, `client_secret`, `code`, `redirect_uri`, `grant_type=authorization_code`, `scope`
+- Refresh body: `client_id`, `client_secret`, `refresh_token`, `grant_type=refresh_token`, `scope` (`scope` optional, `redirect_uri` NOT required on refresh)
+- Token response: `access_token`, `refresh_token`, `expires_in` (seconds), `scope` (granted), `token_type=Bearer`
+- Scopes confirmed: `offline_access` (REQUIRED for refresh tokens), `User.Read`, `Mail.Read`, `Calendars.Read`, `Calendars.ReadWrite`. Short names default to `https://graph.microsoft.com/<Scope>`.
+- Graph endpoints used (base `https://graph.microsoft.com/v1.0`):
+  - Mail: `GET /me/messages?$search="query"` (KQL syntax, sorted by sent date; NO ConsistencyLevel header needed for messages), `GET /me/messages/{id}`, `GET /me/mailFolders`
+  - Calendar: `GET /me/calendars`, `GET /me/calendarView?startDateTime=&endDateTime=` (calendarView not events; start+end required), `GET /me/calendars/{id}/calendarView?startDateTime=&endDateTime=`, `POST /me/events`, `POST /me/calendars/{id}/events`
+  - Profile: `GET /me` (displayName, mail, userPrincipalName; needs User.Read)
+- Headers: `Authorization: Bearer <token>`. `ConsistencyLevel: eventual` only needed for directory objects (users/groups), NOT for messages.
+- Notes: Single app registration + one client_id/secret serves BOTH outlook mail and calendar — different scopes at authorize time via dynamic/incremental consent. `offline_access` must always be included to get refresh tokens. Refresh token lifetime ~90 days. Verified 2026-07-17 vs learn.microsoft.com.
 
 ---
 

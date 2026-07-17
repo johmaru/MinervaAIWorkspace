@@ -144,6 +144,19 @@ export async function GET(req: Request) {
     // Do not return secrets in plaintext; return only whether they are set.
     notionClientSecret: "",
     hasNotionClientSecret: !!process.env.NOTION_CLIENT_SECRET,
+    // GitHub OAuth (Connections)
+    githubConnectionsClientId: process.env.GITHUB_CONNECTIONS_CLIENT_ID || "",
+    githubConnectionsClientSecret: "",
+    hasGithubConnectionsClientSecret: !!process.env.GITHUB_CONNECTIONS_CLIENT_SECRET,
+    // Google Connections OAuth (separate from login GOOGLE_CLIENT_*)
+    googleConnectionsClientId: process.env.GOOGLE_CONNECTIONS_CLIENT_ID || "",
+    googleConnectionsClientSecret: "",
+    hasGoogleConnectionsClientSecret: !!process.env.GOOGLE_CONNECTIONS_CLIENT_SECRET,
+    // Microsoft OAuth (Outlook mail + calendar)
+    microsoftClientId: process.env.MICROSOFT_CLIENT_ID || "",
+    microsoftClientSecret: "",
+    hasMicrosoftClientSecret: !!process.env.MICROSOFT_CLIENT_SECRET,
+    microsoftTenantId: process.env.MICROSOFT_TENANT_ID || "common",
     authUrl: getConfiguredAuthUrl(),
     // Cloudflare Tunnel — do not return token in plaintext; return only whether it is set
     tunnelToken: "",
@@ -208,6 +221,16 @@ type SettingsBody = {
   // Notion OAuth
   notionClientId?: string;
   notionClientSecret?: string;
+  // GitHub OAuth (Connections)
+  githubConnectionsClientId?: string;
+  githubConnectionsClientSecret?: string;
+  // Google Connections OAuth
+  googleConnectionsClientId?: string;
+  googleConnectionsClientSecret?: string;
+  // Microsoft OAuth
+  microsoftClientId?: string;
+  microsoftClientSecret?: string;
+  microsoftTenantId?: string;
   authUrl?: string;
   // Cloudflare Tunnel
   tunnelToken?: string;
@@ -414,6 +437,16 @@ export async function POST(req: Request) {
     // Notion OAuth
     if (body.notionClientId !== undefined) updates.NOTION_CLIENT_ID = body.notionClientId;
     if (body.notionClientSecret !== undefined) updates.NOTION_CLIENT_SECRET = body.notionClientSecret;
+    // GitHub OAuth (Connections)
+    if (body.githubConnectionsClientId !== undefined) updates.GITHUB_CONNECTIONS_CLIENT_ID = body.githubConnectionsClientId;
+    if (body.githubConnectionsClientSecret !== undefined) updates.GITHUB_CONNECTIONS_CLIENT_SECRET = body.githubConnectionsClientSecret;
+    // Google Connections OAuth
+    if (body.googleConnectionsClientId !== undefined) updates.GOOGLE_CONNECTIONS_CLIENT_ID = body.googleConnectionsClientId;
+    if (body.googleConnectionsClientSecret !== undefined) updates.GOOGLE_CONNECTIONS_CLIENT_SECRET = body.googleConnectionsClientSecret;
+    // Microsoft OAuth
+    if (body.microsoftClientId !== undefined) updates.MICROSOFT_CLIENT_ID = body.microsoftClientId;
+    if (body.microsoftClientSecret !== undefined) updates.MICROSOFT_CLIENT_SECRET = body.microsoftClientSecret;
+    if (body.microsoftTenantId !== undefined) updates.MICROSOFT_TENANT_ID = body.microsoftTenantId;
     if (body.authUrl !== undefined) {
       try { const u = new URL(body.authUrl); if (!["http:", "https:"].includes(u.protocol)) throw new Error(); updates.AUTH_URL = body.authUrl; }
       catch { return new Response("Invalid authUrl: must be http(s) URL", { status: 400 }); }

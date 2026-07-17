@@ -42,6 +42,7 @@ import {
   loadConnections,
   getConnectionTools,
   dispatchConnectionTool,
+  resolveProviderFromToolName,
   type ConnectionRow,
 } from "@/lib/connections";
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
@@ -2144,32 +2145,47 @@ async function streamCompletion({
           } else {
             toolContent = `Unknown tool: ${tc.name}`;
           }
-        } else if (tc.name.startsWith("notion_") && connectionRows && connectionRows.length > 0) {
-          // Connection tool: identify provider by "notion_" prefix.
-          // Notion is currently the only provider, so use the first matching connection.
-          const conn = connectionRows[0];
-          send?.("status", { label: t(locale, "chat.statusToolNotion", { tool: tc.name }) });
-          try {
-            let connArgs: Record<string, unknown>;
-            try {
-              connArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
-            } catch {
-              connArgs = {};
-            }
-            const result = await dispatchConnectionTool(conn, tc.name, connArgs);
-            toolContent = result.content;
-            // Persist refreshed token to DB if present
-            if (result.newAccessToken && result.newRefreshToken) {
+        } else if (connectionRows && connectionRows.length > 0) {
+          // Connection tool: resolve provider by tool-name prefix (notion_, gmail_, etc.)
+          // and find the matching enabled connection for that provider.
+          const provider = resolveProviderFromToolName(tc.name);
+          if (!provider) {
+            toolContent = `Unknown tool: ${tc.name}`;
+          } else {
+            const conn = connectionRows.find((c) => c.provider === provider);
+            if (!conn) {
+              toolContent = `No active connection for provider: ${provider}`;
+            } else {
+              send?.("status", { label: t(locale, "chat.statusToolConnection", { tool: tc.name }) });
               try {
-                await db.update(connections)
-                  .set({ accessToken: result.newAccessToken, refreshToken: result.newRefreshToken, updatedAt: new Date() })
-                  .where(eq(connections.id, conn.id));
+                let connArgs: Record<string, unknown>;
+                try {
+                  connArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+                } catch {
+                  connArgs = {};
+                }
+                const result = await dispatchConnectionTool(conn, tc.name, connArgs);
+                toolContent = result.content;
+                // Persist refreshed token: access-only allowed; refresh + expiry when present.
+                if (result.newAccessToken) {
+                  try {
+                    const updates: Record<string, unknown> = {
+                      accessToken: result.newAccessToken,
+                      updatedAt: new Date(),
+                    };
+                    if (result.newRefreshToken) updates.refreshToken = result.newRefreshToken;
+                    if (result.newExpiresAt) updates.expiresAt = result.newExpiresAt;
+                    await db.update(connections)
+                      .set(updates)
+                      .where(eq(connections.id, conn.id));
+                  } catch {
+                    // Ignore persistence errors — will be refreshed again on next call
+                  }
+                }
               } catch {
-                // Ignore persistence errors — will be refreshed again on next call
+                toolContent = `Connection tool ${tc.name} failed`;
               }
             }
-          } catch {
-            toolContent = `Connection tool ${tc.name} failed`;
           }
         } else {
           toolContent = `Unknown tool: ${tc.name}`;

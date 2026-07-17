@@ -93,7 +93,7 @@ export async function refreshNotionToken(
  */
 export async function callNotionApi(
   accessToken: string,
-  refreshToken: string,
+  refreshToken: string | null,
   method: string,
   path: string,
   body?: Record<string, unknown>,
@@ -116,6 +116,9 @@ export async function callNotionApi(
 
   // 401 → refresh and retry
   if (res.status === 401) {
+    if (!refreshToken) {
+      return { ok: false, error: "Access token expired and no refresh token available" };
+    }
     try {
       const refreshed = await refreshNotionToken(refreshToken);
       res = await doFetch(refreshed.access_token);

@@ -45,6 +45,19 @@ type SettingsResponse = {
   notionClientId: string;
   notionClientSecret: string;
   hasNotionClientSecret: boolean;
+  // GitHub OAuth (Connections)
+  githubConnectionsClientId: string;
+  githubConnectionsClientSecret: string;
+  hasGithubConnectionsClientSecret: boolean;
+  // Google Connections OAuth
+  googleConnectionsClientId: string;
+  googleConnectionsClientSecret: string;
+  hasGoogleConnectionsClientSecret: boolean;
+  // Microsoft OAuth
+  microsoftClientId: string;
+  microsoftClientSecret: string;
+  hasMicrosoftClientSecret: boolean;
+  microsoftTenantId: string;
   authUrl: string;
   // Cloudflare Tunnel
   tunnelToken: string;
@@ -1235,38 +1248,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   {t("help.openInHelp")} →
                 </button>
               )}
-              <a href="https://www.notion.so/developers" target="_blank" rel="noopener noreferrer" className="mt-1 ml-2 inline-block text-xs text-muted-foreground underline">
-                Notion Developers ↗
-              </a>
             </div>
-            {/* Notion OAuth settings */}
-            <div>
-              <label className="mb-1 block">
-                <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_ID</span>
-                <span className="block text-[10px] text-muted-foreground">{t("settings.notionClientIdHint")}</span>
-              </label>
-              <input
-                type="text"
-                value={form.notionClientId ?? ""}
-                onChange={(e) => update("notionClientId", e.target.value)}
-                placeholder="00000000-0000-0000-0000-000000000000"
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block">
-                <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_SECRET</span>
-                <span className="block text-[10px] text-muted-foreground">{t("settings.notionClientSecretHint")}</span>
-              </label>
-              <input
-                type="password"
-                value={form.notionClientSecret ?? ""}
-                onChange={(e) => update("notionClientSecret", e.target.value)}
-                placeholder={settings?.hasNotionClientSecret ? t("settings.placeholderUpdate") : "secret_..."}
-                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              />
-            </div>
-            {/* "Connect to Notion" button becomes available after saving */}
+            {/* Active connections list (all providers) */}
             {connections.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("settings.noConnections")}</p>
             ) : (
@@ -1274,22 +1257,194 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <div key={conn.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-3">
                   {conn.workspaceIcon && <img src={conn.workspaceIcon} alt="" className="h-5 w-5 rounded" />}
                   <div className="flex-1">
-                    <p className="text-sm font-medium">{conn.workspaceName ?? "Notion"}</p>
+                    <p className="text-sm font-medium">{conn.workspaceName ?? conn.provider}</p>
                     <p className="text-xs text-muted-foreground">{conn.ownerEmail ?? conn.ownerName}</p>
                   </div>
+                  <span className="text-[10px] text-muted-foreground">{conn.provider}</span>
                   <button type="button" onClick={() => void handleDisconnect(conn.id)} className="text-xs text-muted-foreground hover:text-foreground">
                     {t("settings.disconnect")}
                   </button>
                 </div>
               ))
             )}
-            {form.notionClientId ? (
-              <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
-                {t("settings.connectNotion")}
-              </a>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
-            )}
+            {/* Notion OAuth settings */}
+            <div className="mt-4 rounded-xl border border-border p-3 space-y-3">
+              <p className="text-xs font-medium text-foreground">Notion</p>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_ID</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.notionClientIdHint")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.notionClientId ?? ""}
+                  onChange={(e) => update("notionClientId", e.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">NOTION_CLIENT_SECRET</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.notionClientSecretHint")}</span>
+                </label>
+                <input
+                  type="password"
+                  value={form.notionClientSecret ?? ""}
+                  onChange={(e) => update("notionClientSecret", e.target.value)}
+                  placeholder={settings?.hasNotionClientSecret ? t("settings.placeholderUpdate") : "secret_..."}
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              {form.notionClientId ? (
+                <a href="/api/connections/notion/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                  {t("settings.connectNotion")}
+                </a>
+              ) : (
+                <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+              )}
+            </div>
+            {/* GitHub OAuth settings */}
+            <div className="rounded-xl border border-border p-3 space-y-3">
+              <p className="text-xs font-medium text-foreground">GitHub</p>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">GITHUB_CONNECTIONS_CLIENT_ID</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.githubClientIdHint")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.githubConnectionsClientId ?? ""}
+                  onChange={(e) => update("githubConnectionsClientId", e.target.value)}
+                  placeholder="Iv1.1234567890abcdef"
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">GITHUB_CONNECTIONS_CLIENT_SECRET</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.githubClientSecretHint")}</span>
+                </label>
+                <input
+                  type="password"
+                  value={form.githubConnectionsClientSecret ?? ""}
+                  onChange={(e) => update("githubConnectionsClientSecret", e.target.value)}
+                  placeholder={settings?.hasGithubConnectionsClientSecret ? t("settings.placeholderUpdate") : "secret_..."}
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              {form.githubConnectionsClientId ? (
+                <a href="/api/connections/github/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                  {t("settings.connectGithub")}
+                </a>
+              ) : (
+                <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+              )}
+            </div>
+            {/* Google Connections OAuth settings (shared: Gmail + Drive + Calendar) */}
+            <div className="rounded-xl border border-border p-3 space-y-3">
+              <p className="text-xs font-medium text-foreground">Google (Gmail / Drive / Calendar)</p>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">GOOGLE_CONNECTIONS_CLIENT_ID</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.googleConnectionsClientIdHint")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.googleConnectionsClientId ?? ""}
+                  onChange={(e) => update("googleConnectionsClientId", e.target.value)}
+                  placeholder="123456789-abcdef.apps.googleusercontent.com"
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">GOOGLE_CONNECTIONS_CLIENT_SECRET</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.googleConnectionsClientSecretHint")}</span>
+                </label>
+                <input
+                  type="password"
+                  value={form.googleConnectionsClientSecret ?? ""}
+                  onChange={(e) => update("googleConnectionsClientSecret", e.target.value)}
+                  placeholder={settings?.hasGoogleConnectionsClientSecret ? t("settings.placeholderUpdate") : "GOCSPX-..."}
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {form.googleConnectionsClientId ? (
+                  <>
+                    <a href="/api/connections/gmail/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                      {t("settings.connectGmail")}
+                    </a>
+                    <a href="/api/connections/google_drive/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                      {t("settings.connectGoogleDrive")}
+                    </a>
+                    <a href="/api/connections/google_calendar/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                      {t("settings.connectGoogleCalendar")}
+                    </a>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+                )}
+              </div>
+            </div>
+            {/* Microsoft OAuth settings (shared: Outlook Mail + Calendar) */}
+            <div className="rounded-xl border border-border p-3 space-y-3">
+              <p className="text-xs font-medium text-foreground">Microsoft (Outlook Mail / Calendar)</p>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">MICROSOFT_CLIENT_ID</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.microsoftClientIdHint")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.microsoftClientId ?? ""}
+                  onChange={(e) => update("microsoftClientId", e.target.value)}
+                  placeholder="12345678-1234-1234-1234-123456789012"
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">MICROSOFT_CLIENT_SECRET</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.microsoftClientSecretHint")}</span>
+                </label>
+                <input
+                  type="password"
+                  value={form.microsoftClientSecret ?? ""}
+                  onChange={(e) => update("microsoftClientSecret", e.target.value)}
+                  placeholder={settings?.hasMicrosoftClientSecret ? t("settings.placeholderUpdate") : "secret_..."}
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block">
+                  <span className="block text-xs font-medium text-foreground">MICROSOFT_TENANT_ID</span>
+                  <span className="block text-[10px] text-muted-foreground">{t("settings.microsoftTenantIdHint")}</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.microsoftTenantId ?? ""}
+                  onChange={(e) => update("microsoftTenantId", e.target.value)}
+                  placeholder="common"
+                  className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {form.microsoftClientId ? (
+                  <>
+                    <a href="/api/connections/outlook/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                      {t("settings.connectOutlook")}
+                    </a>
+                    <a href="/api/connections/outlook_calendar/authorize" className="inline-block rounded-xl bg-foreground px-3 py-1.5 text-xs text-background hover:opacity-90">
+                      {t("settings.connectOutlookCalendar")}
+                    </a>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("settings.saveFirst")}</p>
+                )}
+              </div>
+            </div>
           </div>
           </div>
           )}
