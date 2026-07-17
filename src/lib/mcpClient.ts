@@ -56,16 +56,20 @@ export function validateMcpStdioCommand(
 
 /**
  * Normalized shape of MCP server config.
- * Compatible with DB mcpServers rows (has id/name/transport/url/command/args/env).
+ * Compatible with DB mcpServers rows (has id/name/transport/url/command/args/env/headers).
+ * transport="http": Streamable HTTP with SSE fallback.
+ * transport="sse": legacy SSE only (no Streamable attempt).
+ * transport="stdio": local child process.
  */
 export type McpServerConfig = {
   id: string;
   name: string;
-  transport: "http" | "stdio";
+  transport: "http" | "sse" | "stdio";
   url: string | null;
   command: string | null;
   args: string[] | null;
   env: Record<string, string> | null;
+  headers: Record<string, string> | null;
 };
 
 /**
@@ -117,33 +121,67 @@ export function parseMcpToolFunctionName(
 
 /**
  * Connects to a single MCP server.
- * transport="http": tries Streamable HTTP, falls back to SSE on failure.
+ * transport="http": tries Streamable HTTP (with headers), falls back to SSE on failure.
+ *                   On fallback, a NEW Client is used (never reuse a failed Client).
+ * transport="sse":  legacy SSE only (no Streamable attempt).
  * transport="stdio": spawns a child process.
  * Returns null on connection failure; the caller skips it.
+ *
+ * Headers (Authorization, API keys, etc.) are passed via SDK requestInit for both
+ * StreamableHTTP and SSE transports — verified in Phase 0: requestInit.headers
+ * covers the SSE EventSource GET and the POST message path.
+ * Never log header values — only log hasHeaders: boolean.
  */
 export async function connectMcpServer(
   config: McpServerConfig,
 ): Promise<McpConnection | null> {
-  const client = new Client(
-    { name: "umanschat-mcp-client", version: "1.0.0" },
-    { capabilities: {} },
-  );
+  const hasHeaders = !!config.headers && Object.keys(config.headers).length > 0;
+  const requestInit = hasHeaders
+    ? { headers: config.headers as Record<string, string> }
+    : undefined;
 
   try {
-    if (config.transport === "http") {
+    if (config.transport === "http" || config.transport === "sse") {
       if (!config.url) {
-        logger.error("mcp", "http server has no url, skipping", { server: config.name });
+        logger.error("mcp", "remote server has no url, skipping", { server: config.name, transport: config.transport });
         return null;
       }
       const url = new URL(config.url);
-      // Prefer Streamable HTTP. Servers supporting only legacy SSE are handled via fallback.
-      try {
-        const transport = new StreamableHTTPClientTransport(url);
+
+      if (config.transport === "sse") {
+        // Legacy SSE only — single path, no Streamable attempt.
+        const client = new Client(
+          { name: "umanschat-mcp-client", version: "1.0.0" },
+          { capabilities: {} },
+        );
+        const transport = new SSEClientTransport(url, { requestInit });
         await client.connect(transport);
+        logger.info("mcp", "connected", { server: config.name, transport: "sse", hasHeaders });
+        return { client, serverId: config.id, serverName: config.name };
+      }
+
+      // transport === "http": prefer Streamable HTTP, fall back to SSE on failure.
+      // Use a NEW Client per attempt — reusing a failed Client is unstable (gap #3).
+      const httpTransport = new StreamableHTTPClientTransport(url, { requestInit });
+      try {
+        const client = new Client(
+          { name: "umanschat-mcp-client", version: "1.0.0" },
+          { capabilities: {} },
+        );
+        await client.connect(httpTransport);
+        logger.info("mcp", "connected", { server: config.name, transport: "http", hasHeaders });
+        return { client, serverId: config.id, serverName: config.name };
       } catch (httpErr) {
-        logger.warn("mcp", "StreamableHTTP failed, falling back to SSE", { server: config.name, error: httpErr instanceof Error ? httpErr.message : String(httpErr) });
-        const sseTransport = new SSEClientTransport(url);
-        await client.connect(sseTransport);
+        logger.warn("mcp", "StreamableHTTP failed, falling back to SSE", { server: config.name, hasHeaders, error: httpErr instanceof Error ? httpErr.message : String(httpErr) });
+        // Fresh Client for the SSE fallback — never reuse the failed one.
+        const sseClient = new Client(
+          { name: "umanschat-mcp-client", version: "1.0.0" },
+          { capabilities: {} },
+        );
+        const sseTransport = new SSEClientTransport(url, { requestInit });
+        await sseClient.connect(sseTransport);
+        logger.info("mcp", "connected via SSE fallback", { server: config.name, transport: "http→sse", hasHeaders });
+        return { client: sseClient, serverId: config.id, serverName: config.name };
       }
     } else if (config.transport === "stdio") {
       if (!config.command) {
@@ -163,18 +201,22 @@ export async function connectMcpServer(
         USERPROFILE: process.env.USERPROFILE ?? "",
         LANG: process.env.LANG ?? "en_US.UTF-8",
       };
+      const client = new Client(
+        { name: "umanschat-mcp-client", version: "1.0.0" },
+        { capabilities: {} },
+      );
       const transport = new StdioClientTransport({
         command: config.command,
         args: stdioArgs,
         env: { ...safeEnv, ...(config.env ?? {}) },
       });
       await client.connect(transport);
+      logger.info("mcp", "connected", { server: config.name, transport: "stdio" });
+      return { client, serverId: config.id, serverName: config.name };
     } else {
       logger.error("mcp", "unknown transport", { transport: config.transport, server: config.name });
       return null;
     }
-    logger.info("mcp", "connected", { server: config.name, transport: config.transport });
-    return { client, serverId: config.id, serverName: config.name };
   } catch (err) {
     logger.error("mcp", "connection failed", { server: config.name, error: err instanceof Error ? err.message : String(err) });
     return null;

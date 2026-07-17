@@ -311,6 +311,7 @@ export async function POST(req: Request) {
                 command: mcpServers.command,
                 args: mcpServers.args,
                 env: mcpServers.env,
+                headers: mcpServers.headers,
               })
               .from(mcpServers)
               .where(and(eq(mcpServers.userId, user.id), inArray(mcpServers.id, activeMcpServerIds)));

@@ -208,19 +208,24 @@ export const skillUsageEvents = sqliteTable("skill_usage_events", {
 /**
  * mcpServers — per-user MCP (Model Context Protocol) server connection definitions.
  *
- * When transport="http", uses url (Streamable HTTP / SSE auto-fallback).
+ * When transport="http", uses url (Streamable HTTP with SSE fallback).
+ * When transport="sse", uses url (legacy SSE only — no Streamable attempt).
  * When transport="stdio", launches a local process via command + args + env.
- * Enabled/disabled per thread (threads.mcpServerIds holds an array of ids).
+ * Headers (optional) apply to http/sse transports only; ignored for stdio.
  */
 export const mcpServers = sqliteTable("mcp_servers", {
   id: text("id").primaryKey().$defaultFn(() => randomUUID()),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  transport: text("transport", { enum: ["http", "stdio"] }).notNull(),
+  transport: text("transport", { enum: ["http", "sse", "stdio"] }).notNull(),
   url: text("url"),
   command: text("command"),
   args: text("args", { mode: "json" }).$type<string[]>(),
   env: text("env", { mode: "json" }).$type<Record<string, string>>(),
+  // Optional HTTP headers for remote transports (http/sse). JSON object string.
+  // Stored as text JSON; secrets — never returned in GET list (hasHeaders only).
+  // Ignored for stdio (must be null).
+  headers: text("headers", { mode: "json" }).$type<Record<string, string> | null>(),
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),
 });

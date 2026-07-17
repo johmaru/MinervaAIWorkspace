@@ -238,11 +238,12 @@ Per-user MCP (Model Context Protocol) server connection definitions. Enabled/dis
 | `id` | text PK | UUID |
 | `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
 | `name` | text NOT NULL | |
-| `transport` | text NOT NULL | enum: `http`, `stdio` |
-| `url` | text | for `http` (Streamable HTTP / SSE fallback) |
+| `transport` | text NOT NULL | enum: `http`, `sse`, `stdio` |
+| `url` | text | for `http` (Streamable HTTP / SSE fallback) and `sse` (legacy SSE only) |
 | `command` | text | for `stdio` |
 | `args` | text (JSON) | `string[]` for `stdio` |
 | `env` | text (JSON) | `Record<string, string>` for `stdio` |
+| `headers` | text (JSON) | `Record<string, string> \| null` — optional HTTP headers for `http`/`sse` (Bearer/API-key). Secrets — never returned in GET list (`hasHeaders` only). Ignored for `stdio` (null). |
 | `created_at` | integer NOT NULL | timestamp_ms, default now |
 | `updated_at` | integer NOT NULL | timestamp_ms, default now |
 

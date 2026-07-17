@@ -17,7 +17,7 @@ All routes live under `src/app/api/`. Each route file exports `runtime` and `dyn
 | `src/app/api/memories/` | `route.ts`, `[id]/route.ts` |
 | `src/app/api/skills/` | `route.ts`, `[id]/route.ts` |
 | `src/app/api/skill-candidates/` | `route.ts`, `[id]/route.ts` |
-| `src/app/api/mcp-servers/` | `route.ts`, `[id]/route.ts` |
+| `src/app/api/mcp-servers/` | `route.ts`, `[id]/route.ts`, `test/route.ts` |
 | `src/app/api/connections/` | `route.ts`, `notion/authorize/route.ts`, `notion/callback/route.ts` |
 | `src/app/api/tunnel/` | `route.ts` |
 | `src/app/api/tor/` | `route.ts` |
@@ -1001,18 +1001,19 @@ MCP (Model Context Protocol) server registration. MCP servers provide external t
 | Body | None |
 | Response | `McpServer[]` (newest first) |
 
-**Response shape:**
+**Response shape:** Headers are never returned raw — only `hasHeaders: boolean` is exposed (secret masking).
 
 ```typescript
 [
   {
     id: string;
     name: string;
-    transport: "http" | "stdio";
+    transport: "http" | "sse" | "stdio";
     url: string | null;
     command: string | null;
     args: string[] | null;
     env: Record<string, string> | null;
+    hasHeaders: boolean;            // true if headers column is non-empty (raw values not returned)
     createdAt: string;
     updatedAt: string;
   }
@@ -1031,19 +1032,33 @@ MCP (Model Context Protocol) server registration. MCP servers provide external t
 
 ```typescript
 {
-  name: string;                  // required
-  transport: "http" | "stdio";   // required
-  url?: string;                  // required when transport="http"
-  command?: string;              // required when transport="stdio"
-  args?: string[];              // stdio only
-  env?: Record<string, string>; // stdio only
+  name: string;                          // required
+  transport: "http" | "sse" | "stdio";   // required
+  url?: string;                          // required when transport="http" or "sse" (SSRF-guarded)
+  command?: string;                      // required when transport="stdio"
+  args?: string[];                       // stdio only
+  env?: Record<string, string>;           // stdio only
+  headers?: Record<string, string>;       // http/sse only; normalized (trimmed, max 20, max 4 KiB/value)
 }
 ```
 
 **Behavior:**
-- `transport="http"` requires `url`.
+- `transport="http"` requires `url` (SSRF-guarded via `assertMcpRemoteUrl`).
+- `transport="sse"` requires `url` (SSRF-guarded).
 - `transport="stdio"` requires `command`.
+- `headers` only applies to `http`/`sse`; forced `null` for `stdio`.
 - `url`/`command`/`args`/`env` are set to `null` when not applicable to the transport type.
+
+### `POST /api/mcp-servers/test` — Test MCP server connection
+
+| Property | Value |
+|----------|-------|
+| Auth | Required |
+| Body | `TestBody` (same shape as Create, `id` optional) |
+| Response | `{ ok, transportUsed, tools }` or `{ ok: false, error }` (200) |
+
+Probes a server connection: connects, lists tools, closes the client. Timeout: 15s.
+When `id` is provided, saved headers are merged with body headers (body takes precedence).
 
 ### `PATCH /api/mcp-servers/[id]` — Update MCP server
 
@@ -1059,14 +1074,16 @@ MCP (Model Context Protocol) server registration. MCP servers provide external t
 ```typescript
 {
   name?: string;
+  transport?: "http" | "sse" | "stdio";  // can now be changed
   url?: string | null;
   command?: string | null;
   args?: string[] | null;
   env?: Record<string, string> | null;
+  headers?: Record<string, string> | null;
 }
 ```
 
-Note: `transport` cannot be changed after creation.
+Note: `transport` can now be changed. When switching to `stdio`, `url`/`headers` are cleared. When switching to `http`/`sse`, `command`/`args`/`env` are cleared and `url` is SSRF-guarded.
 
 ### `DELETE /api/mcp-servers/[id]` — Delete MCP server
 
@@ -1075,7 +1092,6 @@ Note: `transport` cannot be changed after creation.
 | Auth | Required |
 | Params | `id` (path) |
 | Response | 204 (no content) or 404 |
-
 ---
 
 ## Connections

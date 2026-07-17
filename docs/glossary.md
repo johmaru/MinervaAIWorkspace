@@ -223,6 +223,17 @@ A Model Context Protocol server configured by the user. Enabled per-thread via
 `thread.mcpServerIds`. The connection manager (`src/lib/mcpClient.ts`) handles
 lifecycle.
 
+**Transports:**
+- `http` — Streamable HTTP with SSE fallback (default for remote servers).
+- `sse` — Legacy SSE only (for servers exposing `/sse` endpoints).
+- `stdio` — Local child process via `command` + `args` + `env`.
+
+**Remote MCP (URL connector):** For `http`/`sse` transports, optional request
+headers (`Authorization`, `X-API-Key`, etc.) can be attached for Bearer/API-key
+authentication. URLs are SSRF-guarded (`src/lib/mcpUrlGuard.ts`) — private IPs
+and metadata endpoints are rejected by default; set `MCP_ALLOW_PRIVATE_URLS=true`
+for self-host/dev.
+
 DB table: `mcp_servers`
 
 See: [Tool Calling](./tool-calling.md)
@@ -232,7 +243,14 @@ See: [Tool Calling](./tool-calling.md)
 An external service integration (currently: Notion). Enabled per-thread via
 `thread.connectionIds`. Uses OAuth for authentication.
 
+**Remote MCP vs OAuth Connection:** Remote MCP servers own their own OAuth/tokens
+(the MCP server handles auth, UmansChat only passes static headers). OAuth
+Connections (Notion pattern) store tokens in UmansChat and expose hardcoded
+tools. Use remote MCP for Google Drive, GitHub, Slack, etc. — do not build
+first-party OAuth Connection providers for each SaaS.
+
 DB table: `connections`
+
 
 ### Tool Probe
 

@@ -5,11 +5,14 @@ Tool calling, MCP integration, and connections (Notion) — how UmansChat routes
 - `src/app/api/chat/route.ts` — `streamCompletion()` tool-use loop, `STREAM_TOOLS`, `buildSearchContext()`, tool-call markup workaround
 - `src/lib/toolProbe.ts` — startup tool-support probe (`probeToolSupport`, `warmupToolProbe`, `resetToolProbeCache`)
 - `src/lib/toolCallSanitizer.ts` — `hasToolCallMarkup`, `sanitizeToolCallMarkup`
-- `src/lib/mcpClient.ts` — MCP client: connect, list tools, call tools, name format
+- `src/lib/mcpClient.ts` — MCP client: connect (http/sse/stdio), list tools, call tools, name format
+- `src/lib/mcpUrlGuard.ts` — SSRF guard: `assertMcpRemoteUrl`, `normalizeMcpHeaders`
 - `src/lib/connections/index.ts` — connection tool definitions and dispatch (`getConnectionTools`, `dispatchConnectionTool`)
 - `src/lib/connections/notion.ts` — Notion OAuth: token exchange, refresh, API calls
 - `src/lib/searchDecision.ts` — search decision router (`decideSearch`, `buildHeuristicDecision`)
-- `src/app/api/mcp-servers/route.ts` — MCP server CRUD API
+- `src/app/api/mcp-servers/route.ts` — MCP server CRUD API (GET/POST with header masking)
+- `src/app/api/mcp-servers/[id]/route.ts` — MCP server PATCH/DELETE
+- `src/app/api/mcp-servers/test/route.ts` — MCP server connection test (connect + listTools + close)
 - `src/app/api/connections/route.ts` — connection list/delete API
 - `src/app/api/connections/notion/authorize/route.ts` — Notion OAuth authorize redirect
 - `src/app/api/connections/notion/callback/route.ts` — Notion OAuth callback + token exchange
@@ -23,7 +26,7 @@ UmansChat supports two parallel tool-calling paths, gated by a startup probe tha
 
 On top of these built-in tools, two extensibility mechanisms allow external tools:
 
-- **MCP (Model Context Protocol) servers** — registered per-user, enabled per-thread, connected at request time with HTTP or stdio transports.
+- **MCP (Model Context Protocol) servers** — registered per-user, enabled per-thread, connected at request time with HTTP, SSE, or stdio transports. Optional request headers (Bearer/API-key) supported for remote servers.
 - **Connections (OAuth-based providers)** — currently Notion only, with OAuth token management and auto-refresh.
 
 ---
@@ -313,25 +316,48 @@ UmansChat integrates with external tool servers via the [Model Context Protocol]
 
 MCP servers are managed via the CRUD API at `src/app/api/mcp-servers/route.ts`:
 
-- **`GET /api/mcp-servers`** — list the user's servers (newest first).
-- **`POST /api/mcp-servers`** — register a new server. Body: `{ name, transport, url?, command?, args?, env? }`.
-  - `transport: "http"` requires `url`.
+- **`GET /api/mcp-servers`** — list the user's servers (newest first). Headers are never returned raw — only `hasHeaders: boolean` is exposed (secret masking).
+- **`POST /api/mcp-servers`** — register a new server. Body: `{ name, transport, url?, command?, args?, env?, headers? }`.
+  - `transport: "http"` requires `url` (SSRF-guarded).
+  - `transport: "sse"` requires `url` (SSRF-guarded).
   - `transport: "stdio"` requires `command`.
-- **`PATCH /api/mcp-servers/[id]`** — update a server.
+  - `headers` (optional, http/sse only): `Record<string, string>` for Bearer/API-key auth. Normalized (trimmed, max 20 entries, max 4 KiB per value). Ignored for stdio (forced null).
+- **`POST /api/mcp-servers/test`** — probe a server connection (connect + listTools + close). Returns `{ ok, transportUsed, tools: [{ name, description }] }` or `{ ok: false, error }`. Timeout: 15s.
+- **`PATCH /api/mcp-servers/[id]`** — update a server (transport can now be changed).
 - **`DELETE /api/mcp-servers/[id]`** — delete a server.
 
 Servers are stored in the `mcpServers` table, scoped by `userId`.
 
+### SSRF guard
+
+Remote URLs (http/sse transports) are validated by `assertMcpRemoteUrl()` (`src/lib/mcpUrlGuard.ts`) before any network request:
+
+- **https:** always allowed (subject to host check).
+- **http:** only allowed when `MCP_ALLOW_PRIVATE_URLS=true` (for LAN/loopback self-host).
+- Rejects private IPv4/IPv6, loopback, link-local, and cloud metadata IPs (`169.254.169.254`, etc.) by default.
+- Rejects embedded credentials and query strings in the URL.
+Set `MCP_ALLOW_PRIVATE_URLS=true` to relax for self-host/dev (e.g. `http://localhost:3001/mcp`).
+
 ### Transports
 
-`connectMcpServer(config)` (mcpClient.ts:74) establishes a connection based on the transport type:
+`connectMcpServer(config)` (mcpClient.ts:135) establishes a connection based on the transport type:
 
 | Transport | How it connects | Fallback |
 |-----------|-----------------|----------|
-| `"http"` | `StreamableHTTPClientTransport` (MCP spec's Streamable HTTP) | Falls back to `SSEClientTransport` (legacy SSE) on failure |
+| `"http"` | `StreamableHTTPClientTransport` with headers (MCP spec's Streamable HTTP) | Falls back to `SSEClientTransport` (legacy SSE) with a **fresh** `Client` on failure |
+| `"sse"` | `SSEClientTransport` with headers (legacy SSE only — no Streamable attempt) | None |
 | `"stdio"` | `StdioClientTransport` — spawns a child process with `command`, `args`, `env` | None |
 
-For HTTP transport, the client first tries the Streamable HTTP transport. If that fails (server only supports legacy SSE), it falls back to the SSE transport with a warning log.
+#### Headers (remote transports only)
+
+Optional HTTP headers (`Authorization`, `X-API-Key`, etc.) are passed to both `StreamableHTTPClientTransport` and `SSEClientTransport` via the SDK's `requestInit: { headers }` option. This covers the SSE EventSource GET and the POST message path (verified against SDK source). Headers are never logged — only `hasHeaders: boolean` appears in logs.
+
+#### Client-per-attempt fallback
+
+When `transport: "http"` falls back from Streamable HTTP to SSE, a **new** `Client` instance is used for the SSE attempt. Reusing a `Client` that already attempted a failed `connect()` is unstable (SDK internal state). The fallback flow:
+
+1. New `Client` + `StreamableHTTPClientTransport` → `client.connect()`.
+2. On failure: log warning, create a **fresh** `Client` + `SSEClientTransport` → `sseClient.connect()`.
 
 For stdio transport, a child process is spawned. This process lives for the duration of the request and is terminated when the connection is closed.
 
