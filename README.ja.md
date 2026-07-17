@@ -1,6 +1,6 @@
 # UmansChat
 
-高リソースの OpenAI 互換プロバイダ（UmansAI、OpenAI、vLLM、Ollama）向けの、セルフホスト可能なオープンソース AI ワークスペース。ChatGPT ライクな会話に、枝分かれスレッド、セマンティック記憶、Web 知識の取り込み、MCP ツール、外部コネクション、マルチモデルワークフロー、再利用可能なスキル、パーソナライズを統合。
+**UmansAI** をバックエンドとする、セルフホスト可能なオープンソース AI ワークスペース。ChatGPT ライクな会話に、枝分かれスレッド、セマンティック記憶、Web 知識の取り込み、MCP ツール、外部コネクション、マルチモデルワークフロー、再利用可能なスキル、隔離コード実行、パーソナライズを統合。
 
 [English](./README.md)
 
@@ -8,58 +8,72 @@
 
 **UmansChat はプレリリース版です。** バージョン間で破壊的変更が発生する可能性があります — データベーススキーマ、設定変数、API が予告なく変更されることがあります。更新前に `data/` ディレクトリと `.env` をバックアップしてください。
 
-**Docker が推奨デプロイ方法です。** Docker Compose 構成が全サービス（アプリ、embedder、scraper、SearXNG、Tor）を統合し、`docker compose pull && docker compose up -d` で簡単に更新できます。Docker を使わないスタンドアロン Windows exe も提供されています。
-
-## コントリビューター向けドキュメント
-
-コントリビューター向けの包括的なドキュメントは [`docs/`](./docs/) フォルダにあります。アーキテクチャ、データベーススキーマ、チャットストリーミング、記憶/スキルシステム、ツール呼び出し、フロントエンドコンポーネント、デプロイメント、テストなどを網羅しています。全インデックスは [`docs/README.md`](./docs/README.md) を参照してください。
+**Docker が推奨デプロイ方法です。** Docker Compose が全サービス（アプリ、embedder、scraper、SearXNG、Tor）を統合し、`docker compose pull && docker compose up -d` で簡単に更新できます。Docker を使わないスタンドアロン Windows exe も提供されています。
 
 ## 主な機能
 
+### チャット・会話
+
 - **ストリーミングチャット** — SSE によるトークンごとの出力
-- **並列プリストリーム処理** — 検索・URL・記憶・スキルコンテキストの構築を順次ではなく並列で実行。ツールプローブをモジュール読み込み時にウォームアップし、コード/翻訳/意見/アドバイスリクエストはヒューリスティックで検索判定LLM呼び出しをスキップして初回トークンまでのレイテンシを削減
-- **ラピッドモード** — 入力欄の ⚡ ボタンで、Web 検索・URL スクレイプ・記憶/スキル RAG（LLM 前の取得とストリーム後の生成の両方）をスキップし、初回トークンまでのレイテンシを下げます。MCP/コネクションツールとデュアルモデルフローは有効なまま。再度 ⚡ をクリックするまで、メッセージやスレッドを跨いでオン状態が維持されます。
-- **枝分かれする会話ツリー** — 再生成やメッセージ編集で兄弟ノードを作成。`< 1/N >` で兄弟間を移動
-- **添付ファイル** — 画像（ビジョン）、PDF（テキスト抽出）、テキスト/コードファイル（1ファイル最大 10MB）
-- **セマンティック検索** — 全スレッド横断でコサイン類似度により検索
-- **会話記憶** — 各ターン終了後に fact/working 記憶を抽出し、RAG コンテキストとして注入。記憶は完全なライフサイクルを備える: 置換された記憶は削除ではなく時限無効化（`validUntil`）され、working 記憶は7日後に自動期限切れ、fact 記憶は期限切れなし。矛盾検出 LLM 呼び出しにより対立する記憶の蓄積を防止。フィードバックループが注入回数と参照新しさを追跡し、ユーザーが繰り返し参照する記憶の重要度を自動調整して検索精度を向上。サイドバーの 🧠 メモリマネージャーから記憶の確認・検索・編集・削除・手動追加が可能
-- **Web ページスクレイピング → 知識化** — スクレイプしたページを RAG ソースとして取り込み、以降の回答に活用。チャットに URL を貼ると自動でスクレイプしてコンテキストに注入
-- **Web 検索** — アプリレベルの SearXNG パイプライン。検索クエリ生成と結果要約は検索専用モデルが担当。揮発性情報・明示的な検索要求・未知の語や固有名詞で自動起動。設定で切替可能
-- **デュアルモデル結論** — 2つのモデルを相互レビュー方式または会話方式で走らせ、統合した最終回答をストリーミングし、A/Bの検討内容は折りたたみ詳細で確認可能
-- **ハイパーシンキングモード** — 1つのモデルが1〜5ラウンドの自己レビューを繰り返し回答を洗練。各ラウンドで異なる視点（事実正確性、論理一貫性、完全性、明確さ、実用性）から検証・改善。最終的な洗練された回答がストリーミングされ、中間ドラフトと検証内容は折りたたみトレースで確認可能。
-- **協議（カウンシル）モード** — 2〜6パネルの異なるAIペルソナが質問について議論し、初期回答を生成した後ラウンドごとに議論を行い、最終モデルが最良の回答を統合。パネル数と制限時間（30〜21600秒）は設定可能。議論の全トレースは折りたたみブロックで確認可能。
-- **ワークスペースツール** — モデルがストリーミング中にファイルの読み書き、ディレクトリ一覧、シェルコマンド実行、アプリケーションログの読み取りを自律的に実行可能。コーディング支援、デバッグ、ワークスペース内のファイル操作に有用。
-- **Todo リスト** — ユーザー単位のタスク管理。サイドバーモーダル UI で作成・編集・完了・削除・ステータス絞り込みが可能。優先度、期限設定、ベクトル埋め込み（将来のセマンティック検索用）に対応。AI がチャット中にビルトインツール経由で Todo の作成・一覧・更新・削除を行うことも可能。
-- **Tor プロキシ** — 匿名スクレイピングのための Tor 対応
-- **Thinking Effort 制御** — モデル毎に対応レベルが異なる（GLM-5.2: `none`/`high`/`max`、Flash: `none`/`low`/`medium`/`high`）。制御非対応モデルでは無視される
-- **埋め込みモデル切替** — transformers.js によるローカル ONNX、または HTTP Python embedder サービス。ベクトル検索は sqlite-vec で高速化
-- **フォルダ分け** — スレッドをフォルダで整理
-- **ダーク / ライト / システムテーマ**
-- **EN / JA 国際化切替**（デフォルトは英語）
-- **翻訳ページ** — サイドバーの 🌐 ボタンから開く `/translate` ページ。ソース/ターゲット言語選択、履歴、オプションのコンテキスト欄を備える。コンテキスト対応モード: 会話の抜粋を貼り付けて、トーンや用語に応じた翻訳を取得可能。コンテキストが空の場合は通常の翻訳に縮退する。複数候補モード: 異なる特性（直訳・自然・意訳）を持つ3つの翻訳を生成し、最適なものを選択可能。特性の主言語は設定で指定可能（または UI ロケールに自動追従）。
-- **OpenAI 互換 LLM バックエンド** — UmansAI、OpenAI、vLLM、Ollama など
+- **並列プリストリーム処理** — 検索・URL・記憶・スキルコンテキストの構築を並列実行。ツールプローブをモジュール読み込み時にウォームアップし、コード/翻訳/意見/アドバイスはヒューリスティックで検索判定 LLM をスキップして初回トークンまでのレイテンシを削減
+- **ラピッドモード** — 入力欄の ⚡ で Web 検索・URL スクレイプ・記憶/スキル RAG（LLM 前の取得とストリーム後の生成の両方）をスキップ。MCP/コネクションとマルチモデルモードは有効のまま。再度 ⚡ を押すまでメッセージ・スレッドを跨いで維持
+- **枝分かれする会話ツリー** — 再生成や編集で兄弟ノードを作成。`< 1/N >` で移動
+- **添付ファイル** — 画像（ビジョン）、PDF（テキスト抽出）、テキスト/コード（1ファイル最大 10MB）
+- **送信モード切替** — 既定は `Ctrl+Enter` / `Cmd+Enter` で送信。`⌃↵` をクリックすると `Enter` 送信（`Shift+Enter` で改行）
+- **推論表示** — 思考トークンとインライン `<thinking>` タグを折りたたみブロックで表示
+- **リッチ Markdown** — KaTeX（`$...$` / `$$...$$`）、コピー付きシンタックスハイライト、GFM テーブル/取り消し線/タスクリスト
+- **モデル名・経過時間表示** — 各アシスタントメッセージに表示
 - **自動タイトル生成** — 最初のユーザーメッセージから生成
-- **日時・実行環境のプロンプト注入** — 現在日時（タイムゾーン考慮）と検出した OS/アーキテクチャを全プロンプトの先頭に付与し、モデルが環境に適した回答を返すようにする
-- **モデル名・経過時間表示** — 各アシスタントメッセージに使用モデルと応答時間を表示
-- **モーション UI アニメーション** — モーダル遷移、ボタン押下フィードバック、アコーディオン展開、スムーズスクロール
+- **日時・実行環境のプロンプト注入** — タイムゾーン考慮の現在日時と OS/アーキテクチャ
+
+### マルチモデルワークフロー
+
+- **モデルフォールバック（TTFT）** — プライマリが `LLM_FALLBACK_TIMEOUT_MS` 以内に最初のトークンを出さない場合、`LLM_FALLBACK_MODEL` へ一度だけ切替（空 = 無効）
+- **デュアルモデル結論** — 相互レビュー方式または会話方式。統合最終回答 + 折りたたみの A/B 詳細
+- **ハイパーシンキングモード** — 1〜5 ラウンドの自己レビュー（事実正確性・論理・完全性・明確さ・実用性）。最終回答をストリーム、中間は折りたたみトレース
+- **協議（カウンシル）モード** — 2〜6 パネルが制限時間内で議論し最終モデルが統合。全トレースは折りたたみで確認
+- **Thinking Effort 制御** — モデル毎の推論レベル（例: GLM-5.2: `none`/`high`/`max`、Flash: `none`/`low`/`medium`/`high`）
+
+### 知識・記憶・検索
+
+- **セマンティック検索** — 全スレッド横断（コサイン類似度 + sqlite-vec）
+- **会話記憶** — 各ターン後に fact/working を抽出して RAG 注入。ライフサイクル（`validUntil`、working は 7 日期限、矛盾検出）、フィードバックループで重要度調整。サイドバー 🧠 メモリマネージャーで CRUD
+- **Web ページスクレイピング → 知識化** — スクレイプ結果を RAG 化。チャットの URL は自動スクレイプ
+- **Web 検索** — SearXNG パイプライン + 検索専用モデル。カテゴリ、ランキング、wiki フォールバック、適応リトライ。ラウンド数・件数は設定可能
+- **時間範囲フィルタ** — 入力欄（None/day/week/month/year）で記憶・知識・スキル RAG・Web 検索を絞り込み
+- **フォルダレベルのインストラクションとメモリスコープ** — フォルダ単位のシステムプロンプト。メモリスコープは `global` または `folder`
+
+### ツール・連携
+
+- **ワークスペースツール** — ストリーミング中にファイル読み書き、ディレクトリ一覧、シェル実行、アプリログ読み取り
+- **サンドボックスコード実行（実験的、v0.4）** — Docker 隔離の `sandbox_run`（Python/JS）。Docker/イメージが無い場合は自動オフ。[サンドボックス](#サンドボックスコード実行任意) を参照
+- **MCP サーバー統合** — Streamable HTTP / レガシー SSE / stdio。任意のリクエストヘッダー、接続テスト、SSRF ガード（`MCP_ALLOW_PRIVATE_URLS` でセルフホスト緩和）。Google Drive / GitHub / Slack 等はリモート MCP 経由
+- **コネクション（Notion）** — OAuth。`notion_search` / `notion_get_page` / `notion_get_blocks`。スレッド単位で＋メニューから有効化
+- **Todo リスト** — サイドバー ✓ UI + AI ツールでの作成/一覧/更新/削除（優先度・期限・埋め込み）
+
+### パーソナライズ・スキル
+
+- **パーソナライズ** — スタイルプリセット + warmth/energy/structure/emoji（0–2）。設定 → パーソナライズ。既定は無効
+- **スキルシステム** — 6 種類 + セマンティック RAG。会話からドラフト自動抽出。スキルマネージャー（サイドバー 🛠️）
+- **名前付きグローバルシステムインストラクション** — アカウント単位で複数保存。優先: スレッド systemPrompt > スレッド上書き > ユーザー既定 > body プロンプト
 - **スレッド単位のシステムプロンプトとモデル選択**
-- **名前付きグローバルシステムインストラクション** — アカウント単位で複数のシステムプロンプトを保存し、1つをユーザー既定として選択、スレッド単位で上書き可能。優先順位: スレッド systemPrompt > スレッド指示の上書き > ユーザー既定 > body プロンプト
-- **MCP サーバー統合** — 外部の Model Context Protocol サーバー（Streamable HTTP / レガシーSSE / stdio）を登録し、スレッド単位で有効化。リモートサーバー（HTTP/SSE）はオプションのリクエストヘッダー（Bearer/APIキー認証）と接続テストボタンに対応。URL は SSRF ガードで保護。LLM がストリーミング中にツールを発見・呼び出し、組み込みの検索/スクレイプツールと併用可能。Google Drive、GitHub、Slack 等はファーストパーティ OAuth ではなくリモート MCP 経由で接続。
-- **コネクション（Notion）** — Notion アカウントを OAuth で連携。チャット中に LLM が `notion_search`、`notion_get_page`、`notion_get_blocks` ツールを呼び出し、Notion のコンテンツを検索・取得。スレッド単位で＋メニューから有効化
-- **アカウント認証** — Auth.js v5 + Credentials（email/password）+ オプションで Google OAuth。初回起動時にアカウント作成が必要、以降はログイン。ユーザー毎にデータが分離
-- **認証ハードニング** — 登録用 IP CIDR ホワイトリスト（`ALLOWED_REGISTRATION_IPS`）、登録ロック（`REGISTRATION_LOCKED`）、リダイレクト反転なしのローカル/公開デュアルアクセス（AUTH_URL は中和され、リダイレクトは受信リクエストのホストに追従）。DB マイグレーション後に無効なセッションクッキーを自動検出してクリアする。
-- **パーソナライズ** — ユーザー単位のスタイルプリセット（standard/polite/casual/concise/detailed/academic/creative/technical）+ warmth/energy/structure/emoji の特性スライダー（0-2）。LLM のトーンをシステム全体で調整。デフォルトは無効。設定 → パーソナライズで構成。
-- **スキルシステム** — セマンティック RAG マッチングによる再利用可能なスキル。6種類（workflow/bugfix/project_rule/tool_usage/coding_pattern/debugging）。会話からドラフト候補を自動抽出（1回につき最大3件、信頼度 + 理由付き）。スキルマネージャー（サイドバーの 🛠️ ボタン）で承認・編集後承認・却下が可能。手動 CRUD も対応。スキルは使用状況（成功/失敗回数、最終使用日時）を記録。
-- **時間範囲フィルタ** — 入力欄のドロップダウン（None/day/week/month/year）で、記憶・Web知識・スキル RAG 取得および Web 検索結果を選択した期間に絞り込みます。
-- **フォルダレベルのインストラクションとメモリスコープ** — フォルダにフォルダ単位のシステムプロンプト（フォルダ内全スレッドに適用）とメモリスコープ切替（`global` = 全スレッド、`folder` = 同フォルダ内のスレッドのみ）を設定可能。
-- **推論表示** — モデルが思考トークンを出力する場合、回答の上に折りたたみ可能な「Thinking」ブロックとして表示。インラインの `<thinking>` タグも抽出してレンダリングします。
-- **リッチ Markdown** — KaTeX 数式レンダリング（`$...$` インライン、`$$...$$` ブロック）、コピーボタン付きシンタックスハイライトコードブロック、GFM テーブル/取り消し線/タスクリスト。
-- **設定 GUI** — `.env` に書き込み、埋め込みモデルのマイグレーション以外は再起動不要
-- **exe リビルド時のデータ保存** — 既存の `dist/UmansChat/` に `bun run pack:exe` を再実行すると、`.env` と `data/` を退避・復元し、設定・API キー・データベースがリビルド後も保持される。
+
+### アカウント・UI・運用
+
+- **アカウント認証** — Auth.js v5 Credentials + 任意の Google OAuth。初回は管理者作成。ユーザー毎にデータ分離
+- **認証ハードニング** — 登録ロック、IP CIDR ホワイトリスト、ローカル/公開デュアルアクセス（リダイレクトはリクエスト Host に追従）
+- **フォルダ整理**、**ダーク / ライト / システムテーマ**、**EN / JA 国際化**（既定は英語）
+- **翻訳ページ** — `/translate`（サイドバー 🌐）。コンテキスト対応・複数候補モード
+- **モーション UI** — 控えめなモーダル/ボタン/アコーディオン
+- **設定 GUI** — `.env` へ書き込み（埋め込みモデル移行以外は再起動不要）
+- **チャットエクスポート** — 任意でターン毎 Markdown 出力（`CHAT_EXPORT_PATH` / Docker は `CHAT_EXPORT_HOST_PATH`）
+- **埋め込みモデル切替** — ローカル ONNX（transformers.js）または HTTP Python embedder
+- **Tor プロキシ** — 匿名スクレイピング
+- **exe リビルド / 自動更新時のデータ保持** — `.env` と `data/` は `%USERPROFILE%\.umans_chat_unofficial\`
 
 ## アーキテクチャ
 
-UmansChat は Next.js 16 + React 19 のアプリケーションで、SQLite（better-sqlite3）をバックエンドに持ちます — ファイルベースの組み込みデータベースで、別サーバーは不要です。下記の Docker Compose 構成は、アプリとオプションサービスをまとめて起動します。
+UmansChat は Next.js 16 + React 19 のアプリで、バックエンドは SQLite（better-sqlite3）— ファイルベースで別サーバー不要です。Docker Compose はアプリとオプションサービスをまとめて起動します。
 
 ```mermaid
 flowchart LR
@@ -82,22 +96,26 @@ flowchart LR
     searxng --> tor
 ```
 
-| サービス   | イメージ / ビルド        | 役割                                            | ポート         |
-|------------|--------------------------|-------------------------------------------------|----------------|
-| `app`      | `Dockerfile` からビルド  | Next.js アプリ（チャット UI・API・設定）         | `3001 → 3000`  |
-| `db`       | `better-sqlite3`（SQLite）  | SQLite データベース（ファイルベース・組み込み）            | —              |
-| `embedder` | `./embedder` からビルド  | Python `sentence-transformers` HTTP embedder    | `8000`（公開） |
-| `scraper`  | `./scraper` からビルド   | Scrapling FastAPI スクレイパー + SearXNG クライアント | `8000`（公開） |
-| `searxng`  | `searxng/searxng:latest` | SearXNG メタ検索エンジン                         | `8081 → 8080`  |
-| `tor`      | `dperson/torproxy:latest`| 匿名スクレイピング用 Tor SOCKS プロキシ          | `9050`（公開） |
+| サービス   | イメージ / ビルド        | 役割                                            | ポート              |
+|------------|--------------------------|-------------------------------------------------|---------------------|
+| `app`      | `Dockerfile` からビルド  | Next.js アプリ（チャット UI・API・設定）         | `3001 → 3000`       |
+| `db`       | better-sqlite3           | SQLite（ファイルベース・組み込み）               | —                   |
+| `embedder` | `./embedder` からビルド  | Python `sentence-transformers` HTTP embedder    | `8001`（公開）      |
+| `scraper`  | `./scraper` からビルド   | Scrapling FastAPI + SearXNG クライアント         | 内部 `8000`         |
+| `searxng`  | `searxng/searxng`        | SearXNG メタ検索                                 | `8081 → 8080`       |
+| `tor`      | `dperson/torproxy`       | 匿名スクレイピング用 Tor SOCKS                   | `9050`（公開）      |
+| `sandbox`  | profile `sandbox`        | `sandbox_run` 用イメージビルドのみ（常駐しない） | —                   |
 
-- **Node.js / Bun** — Bun が主なランタイム兼パッケージマネージャ（ローカル開発・ビルド用）
-- **Docker**（Docker Compose 含む） — セルフホストデプロイに推奨。スタンドアロン Windows exe とローカル開発の SQLite パスも利用可能で、追加インストールは不要です。
-- **OpenAI 互換 LLM の API キー** — UmansAI、OpenAI、vLLM、Ollama など
+## 要件
+
+- **Bun** — 主なランタイム兼パッケージマネージャ（ローカル開発・ビルド）
+- **Docker**（Compose 含む） — セルフホストの推奨。スタンドアロン Windows exe はターゲットに Docker 不要
+- **UmansAI の API キー** — プロバイダは UmansAI 固定。`LLM_API_KEY` のみ必須
+- **サンドボックス**を使う場合は Docker も必要（イメージはローカルビルド）
 
 ## クイックスタート（Docker）
 
-UmansChat を自己完結したサービスとして動かす場合の推奨手順です。
+自己完結スタックの推奨手順です。
 
 ```bash
 # 1. 環境設定テンプレートをコピー
@@ -105,266 +123,271 @@ cp .env.example .env
 
 # 2. LLM の API キーを設定（必須）
 #    .env を編集し LLM_API_KEY を入力
-#    LLM_MODEL をデフォルトモデルに設定（省略時は umans-glm-5.2）
+#    任意: LLM_MODEL（省略時 umans-glm-5.2）
 
-# 2b. AUTH_SECRET を生成して .env に追加
+# 2b. AUTH_SECRET を生成
 bunx auth secret
-# 2c.（任意）「Google でログイン」を有効にする場合、.env に設定:
-#     GOOGLE_CLIENT_ID と GOOGLE_CLIENT_SECRET
-#     https://console.cloud.google.com/apis/credentials で認証情報を作成
+# 2c.（任意）Google ログイン:
+#     GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 #     リダイレクト URI: http://localhost:3001/api/auth/callback/google
 
 # 3. 全サービスを起動
 docker compose up -d
 
-# 4. アプリを開く
-#    http://localhost:3001
-#    初回起動時は管理者アカウントの作成を求められます
+# 4. http://localhost:3001 を開く
+#    初回は管理者アカウント作成
 ```
 
-初回起動時、データベースのマイグレーションはアプリが自動的に適用されます。また、初回は管理者アカウントの作成（ニックネーム + メールアドレス + パスワード）を求められます。以降のアクセスにはログインが必要です。ユーザー毎にスレッド・フォルダ・記憶は分離されます。初期セットアップ後に埋め込みモデルを変更する場合は [データベースマイグレーション](#データベースマイグレーション) を参照してください。
+マイグレーションは自動適用。ユーザー毎にスレッド・フォルダ・記憶は分離。埋め込みモデル変更後は [データベースマイグレーション](#データベースマイグレーション) を参照。
+
+**任意: サンドボックスイメージ（初回のみ）**
+
+```bash
+docker compose --profile sandbox build
+```
 
 ## クイックスタート（スタンドアロン Windows exe）
 
-Docker を使わずに配布・実行するもう一つの方法です。配布フォルダには `umanschat.exe` と同梱の `node.exe` が含まれ、Docker や Node.js、Bun をユーザー環境に用意する必要はありません。ビルド環境でのみ Bun が必要です。
+ターゲットに Docker / Node / Bun は不要。ビルド環境は Windows + [Bun](https://bun.sh)。
 
 ```bash
-# 1. 依存パッケージをインストール（ビルド環境）
 bun install
-
-# 2. 環境設定テンプレートをコピーして設定
-cp .env.example .env
-#    .env を編集し LLM_API_KEY を入力
-#    AUTH_SECRET を生成: bunx auth secret
-
-# 3. 配布フォルダをビルド（内部で next build を DATABASE_URL=":memory:" で実行）
-bun run pack:exe
-#    dist/UmansChat/ に umanschat.exe と必要ファイル一式が出力されます
+cp .env.example .env   # LLM_API_KEY を設定; bunx auth secret
+bun run pack:exe       # → dist/UmansChat/
+# umanschat.exe をダブルクリック（または node dist/UmansChat/umanschat.cjs）
 ```
 
-> **同一フォルダ再ビルド時の状態保持**: 既存の `dist/UmansChat/` に対して `bun run pack:exe` を再実行すると、`.env` と `data/`（SQLite DB）を退避・復元し、セキュリティ設定・API キー・データベースが再ビルド後も保持されます（アプリ内自動更新と同じ挙動）。新規フォルダへの展開は正しく初期状態（ロック解除）で起動し、最初の管理者作成が可能です。
+> **同一フォルダ再ビルド:** 既存 `dist/UmansChat/` への `pack:exe` は `.env` と `data/` を保持します。
+>
+> **データの場所:** `%USERPROFILE%\.umans_chat_unofficial\`（exe フォルダではない）。旧版からのアップグレード時は自動移行。
 
-> **データの場所:** `.env` と `data/` は exe フォルダではなく `%USERPROFILE%\.umans_chat_unofficial\` に保存されます。exe フォルダを削除・入れ替えても設定・APIキー・データベースは保持されます。旧バージョンからのアップグレード時、ランチャーが exe フォルダから自動でデータを移行します。
+初回起動で DB 作成・マイグレーション・`:3001` 起動・ブラウザ表示。
 
-`dist/UmansChat/` フォルダをユーザーの Windows マシンにそのまま配布できます。`umanschat.exe` をダブルクリックすると：
-
-1. ユーザーデータフォルダ（`%USERPROFILE%\.umans_chat_unofficial\data\`）に SQLite データベース（`umanschat.db`）を初回起動時に作成し、マイグレーションを適用
-2. サーバーを起動し、ブラウザで `http://localhost:3001` を自動で開く
-3. 初回は管理者アカウントの作成を求められます
-
-**埋め込みモデルの初回ダウンロード**: スタンドアロン exe はデフォルトでローカル ONNX 埋め込み（`EMBED_PROVIDER=local` 用に `.env.example` で `Xenova/all-MiniLM-L6-v2`）を使います。初回の埋め込み生成時に Hugging Face からモデルがダウンロードされるため、インターネット接続が必要です。モデルのダウンロードが完了すれば、以降のチャットはオフラインで動作します。HTTP Python embedder（`EMBED_PROVIDER=http`）の場合、既定モデルは `LiquidAI/LFM2.5-Embedding-350M`（1024次元）でサーバー側で実行され、クライアントでのダウンロードは不要です。
-
-
-**オプションサービスの縮退**: スタンドアロン exe にはスクレイパー、SearXNG、Tor、Python embedder は同梱されません。これらの機能を使わずにチャットは正常に動作しますが、Web 検索・スクレイピングは空の結果を返します（エラーにはなりません）。スクレイピング/検索を利用したい場合は別途 Docker で該当サービスを起動し、`.env` の `SCRAPER_URL`・`SEARXNG_URL` を公開ポートに向けてください。
+> **初回はインターネット必須**（ローカル ONNX 埋め込み `Xenova/all-MiniLM-L6-v2` のダウンロード）。以降はオフライン可。Docker サイドカー無しでは Web 検索/スクレイプは空結果（チャット自体は動作）。
+>
+> **サンドボックス / scraper / SearXNG / Tor / Python embedder は同梱されません。** 必要なら `SCRAPER_URL` / `SEARXNG_URL` を Docker に向ける。サンドボックスは Docker Desktop + イメージビルド（[サンドボックス](#サンドボックスコード実行任意)）。
 
 ### 自動更新（exe 版のみ）
 
-スタンドアロン exe は起動時および **設定 → システム** で更新を確認します。GitHub に新しいリリースがある場合、設定ボタンに amber（琥珀色）のドットが表示されます。
+設定 → システム → GitHub に新リリースがあるとき **ダウンロードして更新**。`data/` と `.env` は触れません。Docker は `docker compose pull && docker compose up -d`。
 
-1. 設定 → システムタブを開く
-2. **ダウンロードして更新** をクリック — リリース zip をダウンロード・展開し、マーカーファイルを書き込みます
-3. ランチャーが 5 秒以内にマーカーを検出し、サーバーを停止、ファイルを差し替え（`data/` と `.env` を保持）、新しい exe を起動します
-4. 新しいサーバーが起動するとブラウザが自動リロードされます
-
-`data/` と `.env` は `%USERPROFILE%\.umans_chat_unofficial\` にあり、更新時には一切触れられません。古い `umanschat.exe` は `.old` にリネームされ、次回起動時に削除されます。
-
-> **前提条件**: GitHub Releases API とアセットダウンロードを認証なしで利用するには、リポジトリを公開設定にする必要があります。
-> **Docker** ユーザーは `docker compose pull && docker compose up -d` で更新します — 自動更新は exe 版のみの機能です。
+> 認証なしの Releases API には **公開リポジトリ** が必要です。
 
 ## リリース（Docker + exe）
 
-リリースは GitHub Actions の手動実行（`workflow_dispatch`）のみで行います。各リリースでは **両方** の配布形式を公開します:
+手動実行（`workflow_dispatch`）のみ。各リリースで **両方** を公開:
 
-- **Docker イメージ**（GHCR）:
-  - `ghcr.io/johmaru/umanschat-unofficial-app:<バージョン>`
-  - `ghcr.io/johmaru/umanschat-unofficial-scraper:<バージョン>`
-  - `ghcr.io/johmaru/umanschat-unofficial-embedder:<バージョン>`
-  各イメージには `:<バージョン>` と `:latest` の両方のタグが付きます。
-- **Windows スタンドアロン exe**: `UmansChat-<バージョン>-windows-x64.zip`。GitHub Release に添付されます。
-
-リリースを作成するには、ワークフローを手動実行します:
+- **Docker（GHCR）** — `app` / `scraper` / `embedder` に `:<version>` と `:latest`
+  - `ghcr.io/johmaru/umanschat-unofficial-app:<version>`
+  - `ghcr.io/johmaru/umanschat-unofficial-scraper:<version>`
+  - `ghcr.io/johmaru/umanschat-unofficial-embedder:<version>`
+- **Windows exe** — `UmansChat-<version>-windows-x64.zip` を GitHub Release に添付
 
 ```
-Actions タブ → Release → Run workflow → バージョンを入力（例: 1.2.3）
+Actions → Release → Run workflow → バージョン入力（例: 1.2.3）
 ```
 
-`version` 入力は **必須** です。省略時は実行できないようにすることで、誤実行による `:latest` の上書きを防ぎます。タグ push では自動リリースしません。意図的に公開したい時だけ実行してください。
-
-パイプラインは 4 ジョブで構成されます: `prepare`（共通バージョン計算）、`docker`（ubuntu-latest、3 イメージを push）、`exe`（windows-latest、`umanschat.exe` をネイティブビルド — クロスコンパイルなし）、`release`（`needs: [prepare, docker, exe]` — 両アーティファクト成功後にのみ GitHub Release を作成）。
-
-### 公開イメージの利用
+`version` は必須（`:latest` の誤上書き防止）。パイプライン: `prepare` → `docker` + `exe` → `release`（両成功時のみ）。
 
 ```bash
-# ソースからビルドせず、公開済みイメージを pull して起動
-docker compose pull
-docker compose up -d
+docker compose pull && docker compose up -d   # 公開イメージ
+docker compose up -d --build                  # ソースからビルド
 ```
 
-ローカル開発でソースからビルドする場合は `docker compose up -d --build` を使います。
+CI（`.github/workflows/ci.yml`）: `develop`/`main` への push/PR で 3 イメージビルド（push なし）+ windows-latest で `pack:exe`。
 
-### CI 検証
+## クイックスタート（ローカル開発）
 
-`develop`/`main` への push/PR ごとに `.github/workflows/ci.yml` が実行されます: 3 つの Docker イメージをビルド（push なし）し、windows-latest で `bun run pack:exe` を実行します。両ジョブが成功しないとマージできません。
+```bash
+bun install
+cp .env.example .env   # LLM_API_KEY 必須
+bun run dev            # predev が sync-env + drizzle migrate
+# http://localhost:3000
+```
 
+オプションのサイドカー:
+
+```bash
+docker compose up -d scraper embedder searxng tor
+# SCRAPER_URL / SEARXNG_URL / EMBEDDER_URL をホスト公開ポートに向ける
+```
+
+## LLM プロバイダ
+
+プロバイダは **UmansAI 固定**（`https://api.code.umans.ai/v1`）。必要なのは `LLM_API_KEY` のみ。
+
+- モデル一覧と推論レベルは `/v1/models/info` から自動取得（プロセス内キャッシュ）
+- セレクタには表示名（例: `Umans Qwen3.6 35B A3B`）
+- API 失敗時は組み込み `MODEL_REASONING` テーブルにフォールバック
+- 任意の **TTFT モデルフォールバック**: `LLM_FALLBACK_MODEL` + `LLM_FALLBACK_TIMEOUT_MS`（既定 10000）
+
+## サンドボックスコード実行（任意）
+
+> **実験的機能（v0.4）。** API・エラーコード・イメージタグは予告なく変わる可能性あり。Tier 2/3（ファイル検査・マルウェア分析）は未実装。
+
+ネットワーク無し Docker コンテナ内で Python/JavaScript を実行する `sandbox_run`。Docker 到達可能かつイメージ存在時のみツールを公開（`SANDBOX_ENABLED=auto`）。
+
+```bash
+# Docker Compose
+docker compose --profile sandbox build
+docker compose up -d --build
+
+# ネイティブ / exe / bun run dev
+docker build -t umanschat-sandbox-python:v0.4 sandbox/python
+```
+
+チャットで「Python サンドボックスで `print(2+2)` を実行して」などと依頼。イメージが無い場合はツールが単に提示されない（エラーや半端な状態にはならない）。
+
+詳細: [`.agents/skills/umanschat-install/SKILL.md`](./.agents/skills/umanschat-install/SKILL.md)
 
 ## Cloudflare Tunnel によるパブリックアクセス（任意）
 
-ポート開放やパブリック IP なしで HTTPS 経由でアプリを公開するには、Cloudflare 名前付きトンネルを使います。リモートネットワークから Google OAuth を利用する場合に推奨します。
+ポート開放なしで HTTPS 公開。リモートからの Google OAuth に推奨。
 
-### GUI での設定（推奨）
+### GUI（推奨）
 
-1. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → Create a tunnel で名前付きトンネルを作成（タイプ: Cloudflared）。
-2. パブリックホスト名を追加し、`Service=http://app:3000` にルーティング。
-3. Cloudflare ダッシュボードからトンネルトークンをコピー。
-4. UmansChat → 設定 → 公開・セキュリティタブ → Cloudflare Tunnel セクションを開く。
-5. **Tunnel Token** 欄にトークンを貼り付け。
-6. **AUTH_URL** に公開ホスト名を設定（例: `https://umanschat.example.com`）。`https://` で始まる必要があります。
-7. **起動** ボタンをクリック。トンネルが即座に起動します — アプリの再起動は不要です。
+1. 名前付きトンネルを作成（Cloudflare Zero Trust → Networks → Tunnels）。
+2. パブリックホスト名 → `Service=http://app:3000`。
+3. 設定 → 公開・セキュリティ → Cloudflare Tunnel: **Tunnel Token** を貼付、**AUTH_URL** を `https://…` に設定して起動。
+4. アプリ再起動不要。GUI からいつでも起動/停止可能。
 
-GUI からいつでもトンネルの起動/停止ができます。`AUTH_URL` は動的反映されるため（NextAuth がリクエスト毎に読み込み）、Google OAuth のコールバック URL も即座に切り替わります。
-
-### .env での設定
+### .env
 
 ```bash
-# .env
 TUNNEL_TOKEN=your-token-here
 AUTH_URL=https://your-tunnel.example.com
 ```
 
-アプリが `TUNNEL_TOKEN` を検出すると自動的にトンネルが起動します。`docker compose --profile tunnel` は不要 — cloudflared はアプリコンテナ内の子プロセスとして動作します。
+Google リダイレクト URI: `https://your-tunnel.example.com/api/auth/callback/google`
 
-### Google OAuth のリダイレクト URI
-
-Google Cloud Console で認可リダイレクト URI を以下に設定:
-`https://your-tunnel.example.com/api/auth/callback/google`
-
-### Docker とスタンドアロン exe の違い
-
-- **Docker Compose**: cloudflared はアプリコンテナ内の子プロセスとして動作します。初回使用時にバイナリが `data/cloudflared/` にダウンロードされ、SHA256 検証が行われます。
-- **スタンドアロン exe（Windows x64 のみ）**: Docker と同じ — 初回使用時に cloudflared バイナリを `data/cloudflared/` にダウンロード。固定バージョン（`2024.12.2`）+ SHA256 検証 + HTTPS のみ + 自動更新なし。バージョンアップは開発者が再ビルドが必要。
-- **Linux x64 で Node/Bun 実行時**: ソースから Linux 上で実行する場合（スタンドアロン exe ではなく）、Linux 版 cloudflared バイナリを同じセキュリティ検証付きでダウンロード。
-- macOS は非対応（`.tgz` 展開が必要なため、未実装）。
-
-## クイックスタート（ローカル開発）
-
-Next.js アプリ本体を開発する場合の手順です。
-
-```bash
-# 1. 依存パッケージをインストール
-bun install
-
-# 2. データベースを準備（SQLite は組み込み。初回起動時に data/umanschat.db が自動作成される）
-#    スクレイピング/検索などのオプションサービスを使う場合は別途 Docker で起動（後述）
-
-# 3. 環境設定テンプレートをコピーして設定
-cp .env.example .env
-#    LLM_API_KEY を設定。スクレイピング/検索を使う場合は各サービス URL も設定
-
-# 4. 開発サーバーを起動（predev フックが自動でマイグレーションを実行）
-bun run dev
-#    http://localhost:3000
-```
-
-ローカル開発では Docker で DB コンテナを起動する必要はありません。SQLite ファイル（`data/umanschat.db`）が `bun run dev` の初回起動時に自動作成され、`predev` フックが `drizzle-kit migrate` でテーブルを作成します。
-
-ローカル開発中にスクレイピング/検索が必要な場合は、scraper / embedder / searxng / tor を Docker で起動できます。
-
-```bash
-docker compose up -d scraper embedder searxng tor
-```
-
-Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCRAPER_URL`・`SEARXNG_URL`・`EMBEDDER_URL`（HTTP 埋め込みを使う場合）を、ホストに公開されたポートに向けてください。
-
+- **Docker / exe / Linux x64**: cloudflared を `data/cloudflared/` に固定バージョン + SHA256 検証でダウンロード
+- **macOS**: 非対応
 
 ## 設定
 
-設定はすべて `.env` にまとまっています（`.env.example` が典拠）。アプリ内の設定 GUI で大部分を実行時に編集でき、再起動不要です。
+すべて `.env`（典拠は `.env.example`）。大半は設定 GUI で再起動なしに編集可能。
 
-| 変数                    | 説明                                                              | デフォルト                                           |
-|-------------------------|-------------------------------------------------------------------|------------------------------------------------------|
-| `LLM_API_KEY`           | API キー（必須）                                                  | —                                                    |
-| `LLM_MODEL`             | デフォルトモデル                                                  | `umans-glm-5.2`                                      |
-| `THINKING_EFFORT`       | 推論レベル（`none`/`low`/`medium`/`high`/`max`、モデル毎に異なる）  | `medium`                                             |
-| `TRANSLATE_TIMEOUT`     | 翻訳LLMのタイムアウト（秒）。長文や複数候補モードで増やす        | `30`                                                 |
-| `EMBED_MODEL`           | 埋め込みモデル名（`local` プロバイダでは `Xenova/*` ONNX モデル、`http` プロバイダでは `sentence-transformers` モデル） | `LiquidAI/LFM2.5-Embedding-350M`                           |
-| `EMBED_DIM`             | 埋め込み次元数（`EMBED_MODEL` に合わせる）                          | `1024`                                               |
-| `EMBED_PROVIDER`        | 埋め込みバックエンド: `local`（ONNX）または `http`（Python embedder） | `local`                                  |
-| `EMBEDDER_URL`          | Python embedder の URL（`EMBED_PROVIDER=http` 時に必要。Docker は自動設定） | `http://localhost:8001`                   |
-| `EMBEDDER_GPU_COUNT`    | Python embedder のGPU数（0 = CPUフォールバック、nvidiaのみ、Docker Composeのみ） | `0` |
-| `WEB_SEARCH_MAX_RESULTS`| チャット送信時に取得・スクレイピングする件数                       | `3`                                                  |
-| `WEB_SEARCH_MAX_ROUNDS` | 1回の回答で検索を繰り返す最大回数（1-5）。検索判定 LLM が決定したクエリのうち実行する数を制限 | `3`                                                  |
-| `SCRAPER_URL`           | Scraper マイクロサービスの URL                                    | `http://localhost:8000`                              |
-| `SEARXNG_URL`           | SearXNG の URL                                                    | `http://localhost:8080`                              |
-| `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |
-| `SCRAPE_PROXY`          | Scraper がスクレイピング時に使用するプロキシ                       | —                                                    |
-| `WEB_SEARCH_MODEL`    | 検索クエリ生成と結果要約に使うモデル                              | `umans-qwen3.6-35b-a3b`                              |
-| `DATABASE_URL`          | SQLite データベースファイルのパス                                   | `data/umanschat.db`                                  |
-| `HOST_OS`              | プロンプトに注入する OS 名（`Windows`, `macOS`, `Linux`。空 = `/proc/version` から自動検出） | —                            |
-| `AUTH_SECRET`           | Auth.js JWT 暗号化シークレット（必須。`bunx auth secret` で生成） | —                                                  |
-| `AUTH_TRUST_HOST`       | リバースプロキシ背後でホストヘッダーを信頼（Docker 用）            | `true`                                               |
-| `REGISTRATION_LOCKED`     | 新規アカウント作成をロック（`true`/`false`）                        | `false`                                              |
-| `ALLOWED_REGISTRATION_IPS`| 新規登録を許可する IP/CIDR のカンマ区切りリスト（空 = 全IP許可。IP不明時は拒否） | — |
-| `LOG_LEVEL`             | ログレベル閾値（`debug`/`info`/`warn`/`error`）                    | `info`                                               |
-| `LOG_FILE_ENABLED`      | `data/logs/umanschat.log` へのファイル出力（`true`/`false`。自動: exe→`true`、Docker→`false`） | auto                                   |
-| `LOG_FILE_MAX_SIZE`     | ローテーション前の最大ファイルサイズ（`.log.1` バックアップを1つ保持） | `5242880` (5MB)                                 |
-| `CHAT_EXPORT_PATH`      | チャットをMarkdownファイルとして保存するディレクトリ（`<YYYY>/<MM>/<DD>/<title>.md`、空 = 無効） | —                            |
-| `CHAT_EXPORT_HOST_PATH` | Docker専用: エクスポート先としてマウントするホスト側パス（Windowsではスラッシュ使用: `C:/Users/...`、空 = Docker無効） | —                            |
-| `TZ`                   | プロンプト日時表示のタイムゾーン（空 = `Asia/Tokyo`）              | —                                                    |
-| `NOTION_CLIENT_ID`      | Notion OAuth クライアント ID（コネクション機能。[Notion 連携設定](#notion-連携設定)を参照） | — |
-| `NOTION_CLIENT_SECRET`  | Notion OAuth クライアントシークレット                              | —                                                    |
-| `AUTH_URL`              | 設定 UI・トンネルステータス・OAuth コンソールの公開ベース URL。リダイレクトは受信リクエストの Host に従うため、この値を変更せずローカルと公開アクセスを併用可能。 | `http://localhost:3001` |
+### LLM
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `LLM_API_KEY` | UmansAI API キー（必須） | — |
+| `LLM_MODEL` | デフォルトモデル | `umans-glm-5.2` |
+| `LLM_FALLBACK_MODEL` | TTFT フォールバック先モデル id（空 = 無効） | — |
+| `LLM_FALLBACK_TIMEOUT_MS` | 最初のトークンを待つミリ秒 | `10000` |
+| `THINKING_EFFORT` | 推論レベル（`none`/`low`/`medium`/`high`/`max`） | `medium` |
+| `TRANSLATE_TIMEOUT` | 翻訳 LLM タイムアウト（秒） | `30` |
+
+### 埋め込み
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `EMBED_PROVIDER` | `local`（ONNX）または `http`（Python embedder） | `local` |
+| `EMBED_MODEL` | モデル名（プロバイダに合わせる） | `Xenova/all-MiniLM-L6-v2` |
+| `EMBED_DIM` | 次元数（モデルに合わせる） | `384` |
+| `EMBEDDER_URL` | `http` 時の Python embedder URL | `http://localhost:8001` |
+| `EMBEDDER_GPU_COUNT` | embedder コンテナの GPU 数（0 = CPU、Compose のみ） | `0` |
+
+Docker の HTTP embedder を使う場合: `EMBED_PROVIDER=http`、`EMBED_MODEL=LiquidAI/LFM2.5-Embedding-350M`、`EMBED_DIM=1024`。
+
+### Web 検索・スクレイピング
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `WEB_SEARCH_MODEL` | クエリ生成 + 結果要約モデル | `umans-qwen3.6-35b-a3b` |
+| `WEB_SEARCH_MAX_RESULTS` | 1 クエリあたりの取得・スクレイプ件数 | `3` |
+| `WEB_SEARCH_MAX_ROUNDS` | 1 回答あたりの最大検索ラウンド（1–5） | `3` |
+| `SCRAPER_URL` | Scraper（空 = 無効） | —（Compose がサービス URL を設定） |
+| `SEARXNG_URL` | SearXNG（空 = 無効） | —（Compose がサービス URL を設定） |
+| `TOR_PROXY` | アプリ側 Tor 参照（空 = なし） | — |
+| `SCRAPE_PROXY` | Scraper が使うプロキシ | — |
+
+### データベース・ログ・実行環境
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `DATABASE_URL` | SQLite ファイルパス | `data/umanschat.db` |
+| `HOST_OS` | プロンプト注入 OS 名（`Windows`/`macOS`/`Linux`、空 = 自動） | — |
+| `TZ` | プロンプト日時のタイムゾーン（空 = `Asia/Tokyo`） | — |
+| `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` |
+| `LOG_FILE_ENABLED` | `data/logs/umanschat.log` へ出力（自動: exe→true、Docker→false） | auto |
+| `LOG_FILE_MAX_SIZE` | ローテーション前サイズ（`.log.1` を 1 つ保持） | `5242880` |
+| `CHAT_EXPORT_PATH` | Markdown エクスポート先（`<YYYY>/<MM>/<DD>/<title>.md`、空 = 無効） | — |
+| `CHAT_EXPORT_HOST_PATH` | Docker 専用: ホスト側マウントパス（Windows は `C:/Users/...`） | — |
+
+### 認証・セキュリティ
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `AUTH_SECRET` | Auth.js シークレット（`bunx auth secret`） | — |
+| `AUTH_TRUST_HOST` | リバースプロキシ背後でホストを信頼 | `true` |
+| `AUTH_URL` | 設定 UI・トンネル・OAuth コンソール用の公開ベース URL。リダイレクトはリクエスト Host に追従 | `http://localhost:3001` |
+| `REGISTRATION_LOCKED` | 新規アカウント作成をロック | `false` |
+| `ALLOWED_REGISTRATION_IPS` | 登録許可 IP/CIDR（空 = 全許可。IP 不明時は拒否） | — |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 任意の Google OAuth | — |
+| `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` | Notion コネクション用 OAuth | — |
+| `TUNNEL_TOKEN` | Cloudflare Tunnel トークン | — |
+| `MCP_ALLOW_PRIVATE_URLS` | リモート MCP で http とプライベート IP を許可（セルフホスト/開発） | `false` |
+
+### サンドボックス
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `SANDBOX_ENABLED` | `auto` / `true` / `false` | `auto` |
+| `SANDBOX_IMAGE` | ローカルイメージタグ（v0.4 では GHCR 非公開） | `umanschat-sandbox-python:v0.4` |
+| `SANDBOX_MIN_FREE_MEM_PERCENT` | 空きメモリ % が下回ると拒否 | `15` |
+| `SANDBOX_MAX_CONCURRENT` | 同時コンテナ上限 | `1` |
+| `SANDBOX_DEFAULT_TIMEOUT_SEC` | 壁時計タイムアウト | `30` |
+| `SANDBOX_STDOUT_MAX_BYTES` | サニタイズ後の stdout/stderr 上限 | `4096` |
 
 ## Notion 連携設定
 
-コネクション機能を使うと、チャット中に LLM が Notion ツール（ページ検索、ページ内容取得）を呼び出せます。有効化手順:
+1. [notion.so/developers](https://www.notion.so/developers) で **public** インテグレーションを作成。
+2. リダイレクト URI: `http://localhost:3001/api/connections/notion/callback`（デプロイに合わせて調整）。
+3. `.env` に `NOTION_CLIENT_ID`、`NOTION_CLIENT_SECRET`、`AUTH_URL` を設定。
+4. 必要ならアプリを再作成/再起動。
+5. 設定 → コネクション → Notion に接続。
+6. スレッド単位: ＋ → コネクション → Notion をオン。
 
-1. [https://www.notion.so/developers](https://www.notion.so/developers) で **public** インテグレーションを作成する。
-2. リダイレクト URI を `http://localhost:3001/api/connections/notion/callback` に設定する（デプロイ環境に合わせてホスト/ポートを調整）。
-3. `.env` に `NOTION_CLIENT_ID` と `NOTION_CLIENT_SECRET` を設定する。`AUTH_URL` はアプリの公開 URL に合わせる（リダイレクト URI と一致させる）。
-4. アプリを再起動する（`docker compose up -d --build`）。
-5. 設定 → コネクション →「Notion に接続」を開く。Notion で認可すると、コネクションが設定リストに表示される。
-6. スレッド単位: ＋メニュー →「コネクション」→ Notion コネクションをオンにする。LLM が会話内容から判断して Notion ツールを自動呼び出しする。
+デュアルアクセス時は localhost とトンネル両方のコールバック URL を登録。
 
 ## 使い方
 
-- **スレッド作成** — 入力欄に入力すると、最初の送信でスレッドが作成され、最初のメッセージから自動でタイトルが生成されます。
-- **メッセージ送信** — デフォルトは `Ctrl+Enter`（Macは`Cmd+Enter`）で送信、`Enter` で改行。入力欄の `⌃↵` ボタンをクリックすると `Enter` 送信モード（`Shift+Enter` で改行）に切り替わります。応答はトークンごとにストリーミングされます。完了した各アシスタントメッセージの下にモデル名と応答時間が表示されます。
-- **ラピッドモード** — 入力欄の ⚡ をクリックすると、Web 検索・URL スクレイプ・記憶/スキル取得をスキップして高速に応答します。再度 ⚡ をクリックするまで、以降のメッセージ（スレッド切替後も）でオンのままです。MCP/コネクションツールとデュアルモデルモードは通常通り動作します。
-- **枝分かれ** — 任意のメッセージで「再生成」または「編集」を行うと兄弟ブランチが作成されます。`< 1/N >` で兄弟間を移動できます。
-- **デュアルモデルモード** — スレッド設定で「応答モード」を「デュアルモデル」に切り替え、モデルA/Bと「相互レビュー」または「会話方式」を選びます。チャットには統合された最終回答が先に表示され、A/B回答・レビュー・議論ログは「デュアルモデル詳細」の折りたたみで確認できます。1メッセージあたり複数回LLMを呼ぶため、通常モードよりコストと待ち時間が増えます。
-- **ハイパーシンキングモード** — スレッド設定で「応答モード」を「ハイパーシンキング」に切り替え、反復回数（1〜5、既定3）を設定します。モデルが初期ドラフトを生成した後、異なる視点（事実正確性、論理一貫性、完全性、明確さ、実用性）から検証と改善を繰り返します。最終的な洗練された回答がストリーミングされ、全中間ドラフト・検証・修正版は「ハイパーシンキング詳細」の折りたたみで確認できます。各ラウンドで1回のLLM呼び出しが発生するため、合計コストはラウンド数に比例します。
-- **協議（カウンシル）モード** — スレッド設定で「応答モード」を「協議（カウンシル）」に切り替え、パネル数（2〜6、既定3）と制限時間（30〜21600秒、既定60）を設定します。各パネルが異なるペルソナで初期回答を生成し、ラウンドごとに議論を行います。最終モデルが議論から最良の回答を統合します。議論の全トレース（パネル、初期回答、発言）は「協議の詳細」の折りたたみで確認できます。このモードは多数のLLM呼び出しを行うため、コストと応答時間が長くなります。
-- **添付ファイル** — 画像（ビジョン対応モデルに送信）、PDF（テキスト抽出）、テキスト/コードファイル（各 10MB まで）を添付できます。
-- **セマンティック検索** — 全スレッドを横断して検索し、コサイン類似度で順位付けします。
-- **Web スクレイピング** — Web 検索が有効な場合、結果がスクレイプされ、現在の回答の RAG ソースとして取り込まれます。
-- **Tor** — 設定で Tor を切り替え、匿名スクレイピングを有効にできます。
-- **設定** — 設定パネルを開き、LLM プロバイダ/モデル、Thinking Effort、埋め込みモデル、Web 検索件数、Tor オプション、ログレベル、翻訳のデフォルトモード（単一 vs 複数候補）、翻訳特性の主言語を変更できます。変更は `.env` に書き込まれ、埋め込みモデルの変更（マイグレーションが必要）以外は即座に反映されます。
-- **グローバルシステムインストラクション** — 設定 → AI & Models で名前付きシステムインストラクションを作成・編集・削除。1つを既定として選択すると全スレッドに適用されます（スレッドで上書き可能）。スレッド設定でスレッド単位のインストラクションを選択できます。
-- **メモリマネージャー** — サイドバーの 🧠 ボタンから会話記憶（fact/working）の一覧表示・検索・フィルタ・編集（内容/種類/重要度）・削除（論理削除で RAG から除外）・手動追加ができます。各記憶には注入回数・最終注入日時・最終参照日時が表示され、どの記憶が会話に活用されているかを確認できます。
-- **Todo リスト** — サイドバーの ✓ ボタンで Todo を管理。タイトル、説明、優先度（低/中/高）、期限を設定して作成。すべて/未完了/完了済みで絞り込み。チェックボックスで完了切替、鉛筆アイコンで編集、ゴミ箱アイコンで削除。チャットから AI 経由で Todo の作成・一覧・更新・削除も可能（例:「バグ修正のTodoを金曜までに追加して」「未完了のTodo一覧を教えて」）。
-- **パーソナライズ** — 設定 → パーソナライズを開きます。スタイルプリセットを選択（または「None」で無効化）。4つの特性スライダー（warmth, energy, structure, emoji; 0-2）を調整します。変更は全ての新規メッセージに即座に反映されます — 再起動不要です。
-- **スキルマネージャー** — サイドバーの 🛠️ をクリックします。**アクティブスキル**タブ: 名前/内容/種類/トリガー/タグの編集、アーカイブ。**ドラフト候補**タブ: LLM が提案したスキル（信頼度スコア + 理由付き）を確認し、そのまま承認・編集後承認・却下が可能。**アーカイブ**タブ: アーカイブ済みスキルを復元。スキルは会話とのコサイン類似度でマッチングされ、コンテキストとして注入されます。
-- **時間範囲フィルタ** — 入力欄のドロップダウン（⚡ の隣）を使って、記憶/知識/スキル取得と Web 検索を直近の時間枠に絞り込みます。「None」は全履歴を検索します。
-- **フォルダ設定** — フォルダを右クリック → 設定（または新規フォルダ作成）。フォルダレベルのインストラクション（フォルダ内全スレッドのシステムプロンプト）とメモリスコープ（global = 全スレッド、folder = このフォルダ内のスレッドのみ）を設定します。
-- **翻訳** — サイドバーの 🌐 言語アイコンをクリックして `/translate` を開く。ソース（自動検出対応）とターゲット言語を選択し、テキストを入力して翻訳。「コンテキスト」アコーディオンを展開して会話の抜粋を貼り付けると、文脈を考慮した翻訳（トーン・用語・参照）が可能。複数候補モード（設定でオン切替）を有効にすると、異なる特性（直訳・自然・意訳）を持つ3つの翻訳を生成し、最適なものを選択可能。特性の主言語は設定で指定、または自動で UI ロケールに追従。翻訳履歴は下に表示される。
+- **スレッド作成** — 入力欄に入力し、初回送信で作成 + 自動タイトル。
+- **送信** — 既定 `Ctrl+Enter` / `Cmd+Enter`。`⌃↵` で Enter 送信に切替。ストリーミング応答にモデル名と経過時間。
+- **ラピッドモード** — ⚡ で検索/スクレイプ/記憶/スキル RAG をスキップ（オフまで維持）。
+- **枝分かれ** — 再生成 / 編集 → `< 1/N >`。
+- **デュアル / ハイパーシンキング / 協議** — スレッド設定の応答モード。
+- **添付** — 画像、PDF、テキスト/コード（各 10MB）。
+- **セマンティック検索** — 全スレッドをコサイン類似度で。
+- **Web スクレイピング / Tor** — サービス設定時。Tor は設定で切替。
+- **設定** — モデル、フォールバック、Thinking Effort、埋め込み、検索、Tor、ログ、翻訳モード。`.env` に書き込み。
+- **グローバルインストラクション** — 設定 → AI & Models。
+- **メモリマネージャー** — サイドバー 🧠。
+- **Todo リスト** — サイドバー ✓（または AI に依頼）。
+- **パーソナライズ** — 設定 → パーソナライズ。
+- **スキルマネージャー** — サイドバー 🛠️（アクティブ / ドラフト / アーカイブ）。
+- **時間範囲フィルタ** — 入力欄 ⚡ 隣のドロップダウン。
+- **フォルダ設定** — フォルダインストラクション + メモリスコープ。
+- **翻訳** — サイドバー 🌐 → `/translate`。
+- **サンドボックス** — Docker + イメージ準備後、モデルにサンドボックス実行を依頼。
 
 ## データベースマイグレーション
 
-UmansChat は Drizzle ORM を使用し、デフォルトで SQLite（better-sqlite3）をバックエンドにします。初回起動時に `drizzle-kit migrate` がテーブルを作成します — `bun run dev` の `predev` フック、Docker コンテナの起動エントリ、スタンドアロン exe のランチャーのいずれかが実行します。pgvector 拡張や HNSW インデックスは不要です。
+Drizzle ORM + SQLite。Docker 起動時・exe 起動時・`bun run dev`（`predev` → `drizzle-kit migrate`）で自動適用。
 
-Docker を使わないローカル開発では、`predev` フックが自動的に `drizzle-kit migrate` を実行するため手動適用は不要です（[クイックスタート（ローカル開発）](#クイックスタートローカル開発) を参照）。
-
-埋め込みモデルを切り替えた場合（`EMBED_MODEL` / `EMBED_DIM` を変更）、既存の埋め込みデータは新しいベクトル空間と互換性がなくなります。設定 GUI のマイグレーション機能（`applyMigration`）は `memories` および `page_embeddings` テーブルの埋め込みデータをクリアします（DDL 不要 — SQLite では埋め込みは JSON text 列として保存されるため、次元数に依存しません）。クリア後、コンテンツを再埋め込みしてください。
+`EMBED_MODEL` / `EMBED_DIM` 切替時は既存ベクトルと非互換。設定 GUI のマイグレーション（`applyMigration`）が `memories` と `page_embeddings` の埋め込みをクリア（JSON text 保存のため DDL 不要）。その後再埋め込み。
 
 ## テスト
 
 ```bash
-# ユニットテスト
-bun run test
-
-# 型チェック
+bun run test        # Vitest ユニットテスト
 bun run typecheck
-
-# リント
 bun run lint
 ```
+
+## コントリビューター向けドキュメント
+
+包括ドキュメントは [`docs/`](./docs/)（アーキテクチャ、スキーマ、ストリーミング、記憶/スキル、ツール、フロントエンド、デプロイ、テスト）。索引: [`docs/README.md`](./docs/README.md)。
+
+AI エージェント向けルール: [`AGENTS.md`](./AGENTS.md)。
