@@ -1,11 +1,11 @@
 # Sandbox Architecture Design — AI-Driven Isolated Execution
 
-> **Status**: Conceptual / Pre-implementation（v0.4 実装 plan あり）  
+> **Status**: **v0.4 implemented**（Tier 1 `code_run`）。v0.5+ は未着手  
 > **Target**: v0.4 experimental, v0.5+ phased rollout  
 > **Created**: 2026-07-15  
 > **Last rewritten**: 2026-07-17（構造整理・Open Questions / 統合接点の追加）  
 > **Decisions log**: §12.1（確定済み）、未決は §12.2  
-> **Implementation plan (v0.4)**: [2026-07-17-sandbox-v0.4.md](../plans/2026-07-17-sandbox-v0.4.md)
+> **Implementation plan (v0.4)**: [2026-07-17-sandbox-v0.4.md](../plans/2026-07-17-sandbox-v0.4.md) — Tasks 1–12 done; out-of-scope open
 
 ## 1. Overview
 
@@ -313,6 +313,7 @@ v0.4 で Tier 2/3 未実装の間、強制 Tier ≥ 2 の入力は**拒否**す�
 - **隔離単位（D4）**: セマンティクスは **request 単位**（1 `sandbox_run` = 1 寿命。実行間で状態を共有しない）。
 - **ステージング（D5）**: run ごと一時ディレクトリ。Lifecycle のみが実パスを知る。コンテナへは **read-only bind mount**。終了時（成功・失敗・タイムアウト問わず）に削除。
 - 原則: ツール引数は `inputRef` / `attachmentId` / インライン `code` 等のみ。**AI にホスト絶対パスを自由指定させない**。
+- **v0.4 実装メモ**: staging は host dir ではなく **Docker named volume**（`sandbox-staging-<runId>`）。DinD sibling 向け。詳細は plan Implementation status。
 
 ---
 
@@ -391,28 +392,28 @@ VM: 実行後自動破棄
 
 ## 11. 実装フェーズ
 
-### v0.4（実験的実装）
+### v0.4（実験的実装）— **done**
 
-- [ ] Tier 1 のみ（コード実行サンドボックス）
-  - [ ] **Docker コンテナ隔離のみ**（プロセス隔離フォールバックなし — D1）
-  - [ ] Docker 未検出時はサンドボックス機能を**無効**（ツール非表示 or 明確なエラー）
-  - [ ] タイムアウト + リソース制限 + ネットワーク遮断
-  - [ ] 薄いツール面: `sandbox_run`（preset=`code_run` + language/code 等）→ Gate → Lifecycle（D3）
-  - [ ] **request 単位寿命**（1 run = create→run→destroy。状態非共有 — D4）
-  - [ ] **prebuilt イメージのみ**（実行時の汎用 `pip install` 禁止 — D4）
-  - [ ] **入場制御**: ホスト空きメモリが閾値未満なら `sandbox_run` を失敗させる（D4）
-  - [ ] **run ごと staging dir** + ro mount + 終了時削除（D5）。ツールは path ではなく ref / インライン code
-  - [ ] **同期実行のみ**（D6）。preset timeout で打ち切り
-  - [ ] 軽量出力サニタイズ（長さ上限・制御文字除去・untrusted マーク）
-- [ ] Tier 型・インターフェース枠のみ（Tier 2/3 拡張ポイント）
-- [ ] Tier 強制判定（D7）: インライン vs 添付、PE/ELF→3、添付スクリプト→≥2。v0.4 で Tier2/3 未実装なら該当入力は**拒否**（下位への黙降格はしない）
-- [ ] Lifecycle Manager の骨格（app 内実装 + `SandboxLifecycle` インターフェース。LLM は Docker 非接触）
+- [x] Tier 1 のみ（コード実行サンドボックス）
+  - [x] **Docker コンテナ隔離のみ**（プロセス隔離フォールバックなし — D1）
+  - [x] Docker 未検出時はサンドボックス機能を**無効**（ツール非表示 or 明確なエラー）
+  - [x] タイムアウト + リソース制限 + ネットワーク遮断
+  - [x] 薄いツール面: `sandbox_run`（preset=`code_run` + language/code 等）→ Gate → Lifecycle（D3）
+  - [x] **request 単位寿命**（1 run = create→run→destroy。状態非共有 — D4）
+  - [x] **prebuilt イメージのみ**（実行時の汎用 `pip install` 禁止 — D4）
+  - [x] **入場制御**: ホスト空きメモリが閾値未満なら `sandbox_run` を失敗させる（D4）
+  - [x] **run ごと staging** + 終了時削除（D5）。実装は **Docker named volume**（host bind の `staging.ts` ではなく `dockerLifecycle`）。ツールは path ではなくインライン code
+  - [x] **同期実行のみ**（D6）。preset timeout で打ち切り
+  - [x] 軽量出力サニタイズ（長さ上限・制御文字除去・untrusted マーク）
+- [x] Tier 型・インターフェース枠のみ（Tier 2/3 は `implemented: false` + ゲート拒否）
+- [x] Tier 強制判定（D7）: インライン vs 添付、`inputRef` / 未実装 preset は拒否
+- [x] Lifecycle Manager の骨格（app 内実装 + `SandboxLifecycle` インターフェース。LLM は Docker 非接触）
 
-### v0.5+
+### v0.5+ — **not started**
 
 - [ ] Tier 2: 静的解析 + 翻訳モデル
 - [ ] Tier 3: 動的解析 + フル防衛スタック
-  - [ ] ポリシーゲート本実装
+  - [ ] ポリシーゲート本実装（Tier 2/3 パイプライン）
   - [ ] バックAI dual control
   - [ ] syscall トレース等
 - [ ] （任意）microVM 等への隔離強化
