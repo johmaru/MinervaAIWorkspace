@@ -130,6 +130,20 @@ export async function signInWithGoogle(): Promise<void> {
 }
 
 /**
+ * signInWithGithub — Server action to start GitHub OAuth login.
+ */
+export async function signInWithGithub(): Promise<void> {
+  await signIn("github", { callbackUrl: "/" });
+}
+
+/**
+ * signInWithMicrosoft — Server action to start Microsoft Entra ID OAuth login.
+ */
+export async function signInWithMicrosoft(): Promise<void> {
+  await signIn("microsoft-entra-id", { callbackUrl: "/" });
+}
+
+/**
  * clearSessionCookies — サーバー側でAuth.js系のHttpOnly Cookieを全て削除する。
  * マイグレーション後に古いJWTが残り、document.cookie経由ではHttpOnlyのため削除できない問題の解決。
  * /loginページのLoginFormから呼ばれる。

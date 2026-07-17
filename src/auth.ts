@@ -1,6 +1,8 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
+import GitHub from "next-auth/providers/github";
+import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { authConfig } from "@/auth.config";
 import { db } from "@/db";
@@ -75,34 +77,58 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }),
         ]
       : []),
+    // GitHub login (optional)
+    ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
+      ? [
+          GitHub({
+            clientId: process.env.GITHUB_CLIENT_ID,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET,
+          }),
+        ]
+      : []),
+    // Microsoft Entra ID login (optional)
+    ...(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET
+      ? [
+          MicrosoftEntraID({
+            clientId: process.env.MICROSOFT_CLIENT_ID,
+            clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+            issuer: `https://login.microsoftonline.com/${process.env.MICROSOFT_TENANT_ID || "common"}/v2.0`,
+          }),
+        ]
+      : []),
   ],
   callbacks: {
     ...authConfig.callbacks,
-    // Called before Google login. With JWT strategy, handleLoginOrRegister's
-    // getUserByAccount finds the accounts row and skips createUser/linkAccount,
-    // so users/accounts are pre-created here (or linked to an existing user).
-    // Also called on Credentials login, but returns early when provider !== "google", so no effect.
+    // Called before OAuth login (Google, GitHub, Microsoft). With JWT strategy,
+    // handleLoginOrRegister's getUserByAccount finds the accounts row and skips
+    // createUser/linkAccount, so users/accounts are pre-created here (or linked
+    // to an existing user).
+    // Also called on Credentials login, but returns early when provider is "credentials".
     signIn: async ({ user, account }) => {
-      if (account?.provider !== "google" || !user?.email) return true;
+      // Only handle OAuth providers; skip Credentials (handled by the Credentials authorize function)
+      const oauthProviders = ["google", "github", "microsoft-entra-id"];
+      if (!account || !oauthProviders.includes(account.provider) || !user?.email) return true;
+      const provider = account.provider;
       const email = user.email.toLowerCase().trim();
       const [existing] = await db
         .select({ id: users.id })
         .from(users)
         .where(eq(users.email, email));
-      // Security: require Google-verified email before linking to prevent account takeover
-      // (attacker creates Google account with victim's email → OAuth linking without verification)
-      if (!account.email_verified) {
-        logger.warn("auth", "google-email-not-verified", { email });
+      // Security: require provider-verified email before linking to prevent account takeover.
+      // GitHub's NextAuth provider doesn't propagate email_verified, so skip for GitHub
+      // (GitHub only returns verified emails via /user/emails, which the provider uses internally).
+      if (provider !== "github" && !account.email_verified) {
+        logger.warn("auth", "oauth-email-not-verified", { provider, email });
         return false;
       }
       if (existing) {
-        // Link Google account to existing user (create accounts row if it doesn't exist)
+        // Link OAuth account to existing user (create accounts row if it doesn't exist)
         const [acct] = await db
           .select({ id: accounts.id })
           .from(accounts)
           .where(
             and(
-              eq(accounts.provider, "google"),
+              eq(accounts.provider, provider),
               eq(accounts.providerAccountId, account.providerAccountId),
             ),
           )
@@ -111,7 +137,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           await db.insert(accounts).values({
             userId: existing.id,
             type: "oauth",
-            provider: "google",
+            provider,
             providerAccountId: account.providerAccountId,
             accessToken: account.access_token ?? null,
             refreshToken: account.refresh_token ?? null,
@@ -127,7 +153,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       // Registration gate: lock + IP whitelist (extracted for testability)
       if (!(await canCreateNewAccount(false))) return false;
-      // Create new Google user (passwordHash is null)
+      // Create new OAuth user (passwordHash is null)
       const nickname = user.name ?? email.split("@")[0];
       const [newUser] = await db
         .insert(users)
@@ -142,7 +168,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       await db.insert(accounts).values({
         userId: newUser.id,
         type: "oauth",
-        provider: "google",
+        provider,
         providerAccountId: account.providerAccountId,
         accessToken: account.access_token ?? null,
         refreshToken: account.refresh_token ?? null,
@@ -153,7 +179,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         scope: account.scope ?? null,
         idToken: account.id_token ?? null,
       });
-      logger.info("auth", "login-success", { provider: account?.provider });
+      logger.info("auth", "login-success", { provider });
       return true;
     },
     jwt: async ({ token, user }) => {

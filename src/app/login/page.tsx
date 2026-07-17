@@ -37,12 +37,20 @@ export default async function LoginPage() {
   const googleEnabled = !!(
     process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
   );
+  const githubEnabled = !!(
+    process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
+  );
+  const microsoftEnabled = !!(
+    process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET
+  );
 
   return (
     <LoginForm
       initialMode={firstRun ? "register" : "login"}
       firstRun={firstRun}
       googleEnabled={googleEnabled}
+      githubEnabled={githubEnabled}
+      microsoftEnabled={microsoftEnabled}
       sessionInvalid={sessionInvalid}
     />
   );
