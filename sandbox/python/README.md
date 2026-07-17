@@ -1,4 +1,9 @@
-# Sandbox Python+Node Image (v0.4)
+# Sandbox Python+Node Image (v0.4) — **EXPERIMENTAL**
+
+> **Status: Experimental (v0.4).** This feature is under active development.
+> The API, error codes, and image tag may change without notice. Tier 2/3
+> presets (file inspection, malware analysis) are not yet implemented.
+> See `docs/superpowers/specs/2026-07-15-sandbox-architecture-design.md`.
 
 Prebuilt Docker image for UmansChat's Tier 1 `code_run` sandbox. Ships Python
 3.12 and Node.js so the `sandbox_run` tool can execute inline `python` or
@@ -6,7 +11,18 @@ Prebuilt Docker image for UmansChat's Tier 1 `code_run` sandbox. Ships Python
 
 ## Build
 
-From the repo root:
+### Docker Compose (recommended)
+
+```bash
+docker compose --profile sandbox build
+```
+
+This builds the image into the host's image store via the `sandbox` profile
+service (defined in `docker-compose.yml`). The service builds but does not
+start. The app container has the `docker` CLI installed and the host Docker
+socket mounted, so it can spawn sandbox siblings from this image.
+
+### Native / dev (`bun run dev`)
 
 ```bash
 docker build -t umanschat-sandbox-python:v0.4 sandbox/python

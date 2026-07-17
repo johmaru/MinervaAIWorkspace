@@ -2,6 +2,11 @@
 
 Setup and verification guide for the sandbox (`sandbox_run`) feature (v0.4).
 
+> ⚠️ **Experimental feature (v0.4).** This feature is under active development.
+> The API, error codes, and image tag may change without notice. Tier 2/3
+> presets (file inspection, malware analysis) are not yet implemented.
+> See `docs/superpowers/specs/2026-07-15-sandbox-architecture-design.md`.
+
 This skill does **not** replace `AGENTS.md` coding rules. It is a setup
 recipe for developers who want the isolated code-execution tool working
 locally or in Docker Compose.
@@ -15,9 +20,34 @@ locally or in Docker Compose.
   - Native exe / dev (`bun run dev`): the Docker Desktop daemon is reachable
     directly.
   - Docker Compose: the app container needs the host Docker socket mounted
-    (see below) to spawn sibling sandbox containers.
+    (already configured in `docker-compose.yml`) to spawn sibling sandbox
+    containers.
 
-## Quick start (native / dev)
+## Quick start (Docker Compose — recommended)
+
+1. Build the sandbox image (first time only):
+
+   ```bash
+   docker compose --profile sandbox build
+   ```
+
+   This builds `umanschat-sandbox-python:v0.4` into the host's image store.
+   The `sandbox` service is profile-gated — it builds but does not start.
+
+2. Build and start the app:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   The app container has the `docker` CLI installed (via `Dockerfile`) and
+   the host Docker socket mounted (`docker-compose.yml`), so it can spawn
+   sandbox siblings.
+
+3. Verify in a chat: ask the model to "run `print(2+2)` in the python
+   sandbox". The tool should fire and return sanitized stdout.
+
+## Quick start (native / dev — `bun run dev`)
 
 1. Build the prebuilt sandbox image once:
 
@@ -37,35 +67,12 @@ locally or in Docker Compose.
 3. Start the app. The `sandbox_run` tool is auto-exposed to the LLM when
    Docker is reachable and the image is present (`SANDBOX_ENABLED=auto`).
 
-4. Verify in a chat: ask the model to "run `print(2+2)` in the python
-   sandbox". The tool should fire and return sanitized stdout.
+## What happens without the image
 
-## Docker Compose (app-in-Docker)
-
-When the app runs inside Compose, it cannot reach the host Docker daemon
-unless the socket is mounted. Uncomment the `sandbox-dind` block in
-`docker-compose.yml` under the `app` service:
-
-```yaml
-app:
-  volumes:
-    - ./.env:/app/.env
-    - ./data:/app/data
-    - /var/run/docker.sock:/var/run/docker.sock   # ← sandbox sibling spawning
-```
-
-Without the socket, `shouldExposeSandboxTool()` returns `false` and the
-`sandbox_run` tool is not offered. This is intentional — the feature is
-correctly off rather than half-enabled.
-
-After mounting the socket, rebuild the sandbox image on the host (the app
-container talks to the host Docker daemon, which shares the host image
-store):
-
-```bash
-docker build -t umanschat-sandbox-python:v0.4 sandbox/python
-docker compose up -d --build
-```
+If the sandbox image is not built locally, `shouldExposeSandboxTool()`
+returns `false` and the `sandbox_run` tool is **not** offered to the LLM.
+The app runs normally — the feature is simply off. This is intentional:
+no error, no half-enabled state.
 
 ## Environment variables
 
@@ -97,9 +104,9 @@ dev prerequisite.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `sandbox_run` tool not offered | Docker not reachable, or image not built | `docker info`; `docker build -t umanschat-sandbox-python:v0.4 sandbox/python` |
+| `sandbox_run` tool not offered | Docker not reachable, or image not built | `docker info`; `docker compose --profile sandbox build` (Compose) or `docker build -t umanschat-sandbox-python:v0.4 sandbox/python` (native) |
 | `image_missing` error at run time | Image tag mismatch or not built | Verify `SANDBOX_IMAGE` env matches the built tag |
-| `docker_unavailable` at run time | App-in-Compose without socket mount | Uncomment the `docker.sock` volume in `docker-compose.yml` |
+| `docker_unavailable` at run time | App-in-Compose without socket mount | Verify `/var/run/docker.sock` is mounted in `docker-compose.yml` |
 | `insufficient_host_memory` | Free mem below `SANDBOX_MIN_FREE_MEM_PERCENT` | Close other apps or lower the threshold (not recommended below 10) |
 | `concurrent_limit` | Another sandbox run is in progress | Wait, or raise `SANDBOX_MAX_CONCURRENT` (caveat: each container caps memory) |
 | `timeout` | Code ran longer than `SANDBOX_DEFAULT_TIMEOUT_SEC` | Increase the timeout, or fix the code (infinite loops hang the container) |
