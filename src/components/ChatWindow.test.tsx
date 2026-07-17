@@ -467,3 +467,27 @@ describe("ChatWindow — ctrl-enter mode (default)", () => {
     expect(screen.getByLabelText("Enter送信モード")).toBeInTheDocument();
   });
 });
+
+describe("ChatWindow — mobile input layout", () => {
+  beforeEach(() => {
+    mockState.thread = mockThread();
+  });
+
+  it("stacks input vertically on mobile via flex-col-reverse with sm:contents wrappers", () => {
+    const { container } = render(<I18nProvider><ChatWindow threadId="t1" /></I18nProvider>);
+    // Outer container is column-reverse on mobile, row on sm+
+    const outer = container.querySelector(".flex-col-reverse");
+    expect(outer).not.toBeNull();
+    expect(outer?.className).toContain("sm:flex-row");
+    // Two sm:contents wrappers: controls group + textarea/send group
+    const contentsWrappers = container.querySelectorAll(".sm\\:contents");
+    expect(contentsWrappers.length).toBe(2);
+    // First wrapper: controls (menu, send-mode, rapid, time-range)
+    expect(contentsWrappers[0].className).toContain("flex");
+    // Second wrapper: textarea + send
+    expect(contentsWrappers[1].className).toContain("flex");
+    // Textarea lives in the second wrapper
+    const textarea = container.querySelector("textarea");
+    expect(contentsWrappers[1].contains(textarea)).toBe(true);
+  });
+});

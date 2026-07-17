@@ -266,7 +266,7 @@ export const ChatWindow = memo(function ChatWindow({
             <AttachmentBar attachments={pendingAttachments} onRemove={removeAttachment} />
           </div>
         )}
-        <div className="mx-auto flex max-w-3xl items-end gap-2">
+        <div className="mx-auto flex max-w-3xl flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-end">
           <input
             ref={fileInputRef}
             type="file"
@@ -275,6 +275,7 @@ export const ChatWindow = memo(function ChatWindow({
             onChange={handleFileSelect}
             className="hidden"
           />
+          <div className="flex items-center gap-2 sm:contents">
           <div ref={menuRef} className="relative">
             <MotionButton
               type="button"
@@ -450,6 +451,8 @@ export const ChatWindow = memo(function ChatWindow({
             <option value="month">{t("chat.timeRangeMonth")}</option>
             <option value="year">{t("chat.timeRangeYear")}</option>
           </select>
+          </div>
+          <div className="flex items-end gap-2 sm:contents">
           <textarea
             ref={taRef}
             value={input}
@@ -497,6 +500,7 @@ export const ChatWindow = memo(function ChatWindow({
               </motion.button>
             )}
           </AnimatePresence>
+          </div>
         </div>
       </div>
     </div>
