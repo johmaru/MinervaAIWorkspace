@@ -24,9 +24,12 @@ RUN DATABASE_URL=":memory:" NODE_OPTIONS="--max-old-space-size=3072" npx next bu
 FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-# Install runtime dependencies (no Docker CLI needed — socket mount removed)
+# Install runtime dependencies + Docker CLI.
+# Docker CLI is needed for the sandbox_run tool: the app spawns sibling
+# containers via the host Docker socket (mounted in docker-compose.yml).
+# Without it, sandbox_run is auto-off in Docker (no docker binary inside).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl sqlite3 && \
+    apt-get install -y --no-install-recommends ca-certificates curl sqlite3 docker.io && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/.next ./.next
 # Next.js standalone server.js serves static files (CSS/JS/fonts) from

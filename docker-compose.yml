@@ -26,6 +26,11 @@ services:
       # Set CHAT_EXPORT_HOST_PATH in .env to a host path (use forward slashes on Windows: C:/Users/...).
       # When empty, defaults to ./data/chat-export (no special host path).
       - ${CHAT_EXPORT_HOST_PATH:-./data/chat-export}:/app/chat-export
+      # Sandbox (v0.4): mount the host Docker socket so the app can spawn
+      # sibling sandbox containers (Docker-in-Docker sibling pattern).
+      # The app image includes the `docker` CLI (Dockerfile installs docker.io).
+      # Without this, sandbox_run is auto-off.
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
     environment:
@@ -44,13 +49,18 @@ services:
       CHAT_EXPORT_PATH: ${CHAT_EXPORT_HOST_PATH:+/app/chat-export}
     ports:
       - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
-    # Optional: Sandbox (v0.4) — allow the app to spawn sibling sandbox
-    # containers via the host Docker socket. Uncomment to enable sandbox_run
-    # when the app itself runs in Compose. Without this, the tool is auto-off.
-    # volumes:
-    #   - /var/run/docker.sock:/var/run/docker.sock
-    # environment:
-    #   SANDBOX_ENABLED: "auto"
+
+  # Sandbox image (v0.4): prebuilt image for code_run execution.
+  # This service is NOT started — it only triggers `docker compose build`
+  # to build the image into the host's image store. The app spawns siblings
+  # from it via the mounted docker.sock.
+  # Run: docker compose build sandbox
+  sandbox:
+    image: umanschat-sandbox-python:v0.4
+    build:
+      context: ./sandbox/python
+      dockerfile: Dockerfile
+    profiles: ["sandbox"]  # opt-in: build with `docker compose --profile sandbox build`
 
   # Cloudflare Tunnel: expose the app over public HTTPS via a named tunnel.
   # When TUNNEL_TOKEN is not set, this does not start; access directly via localhost:3001.
