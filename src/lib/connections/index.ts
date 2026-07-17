@@ -4,6 +4,9 @@ import { connections } from "@/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { callNotionApi } from "./notion";
 import { GITHUB_TOOLS, dispatchGithubTool } from "./github";
+import { GMAIL_TOOLS, dispatchGmailTool } from "./gmail";
+import { GDRIVE_TOOLS, dispatchGdriveTool } from "./google-drive";
+import { GCAL_TOOLS, dispatchGcalTool } from "./google-calendar";
 
 /**
  * Connection management module.
@@ -57,6 +60,12 @@ export function getConnectionTools(
       return NOTION_TOOLS;
     case "github":
       return GITHUB_TOOLS;
+    case "gmail":
+      return GMAIL_TOOLS;
+    case "google_drive":
+      return GDRIVE_TOOLS;
+    case "google_calendar":
+      return GCAL_TOOLS;
     default:
       return [];
   }
@@ -132,6 +141,12 @@ export async function dispatchConnectionTool(
       return dispatchNotionTool(conn, toolName, args);
     case "github":
       return dispatchGithubTool(conn, toolName, args);
+    case "gmail":
+      return dispatchGmailTool(conn, toolName, args);
+    case "google_drive":
+      return dispatchGdriveTool(conn, toolName, args);
+    case "google_calendar":
+      return dispatchGcalTool(conn, toolName, args);
     default:
       return { content: `Unknown provider: ${conn.provider}` };
   }
