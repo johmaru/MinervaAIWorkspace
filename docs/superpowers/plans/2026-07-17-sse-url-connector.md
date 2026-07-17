@@ -1,9 +1,9 @@
 # SSE URL Remote MCP Connector — Implementation Plan
 
 > **For agentic workers:** Implement task-by-task. Steps use checkbox (`- [ ]` / `- [x]`) syntax for tracking.  
-> **Status:** **Not started** (plan only; implementation deferred to a separate session/model).  
+> **Status:** **Done** — all phases shipped, committed to `develop` (cf79d4f).  
 > **Created:** 2026-07-17  
-> **Last progress update:** 2026-07-17
+> **Last progress update:** 2026-07-17 (implementation complete)
 
 **Goal:** Make remote MCP over URL a production-quality “connector”: Streamable HTTP + explicit legacy SSE, optional request headers (Bearer / API key), connection test, SSRF guard, and UI that can register `https://…/mcp` or `https://…/sse` servers. Do **not** implement first-party OAuth Connection providers (Google Drive, etc.) in this plan — those stay on remote/stdio MCP.
 
@@ -11,12 +11,12 @@
 
 | Area | Status | Notes |
 |------|--------|--------|
-| Phase 0 — SDK / docs discovery | **Not started** | |
-| Phase 1 — Schema + URL guard + connect core | **Not started** | |
-| Phase 2 — API (CRUD + test) | **Not started** | |
-| Phase 3 — UI + i18n | **Not started** | |
-| Phase 4 — Docs + README | **Not started** | |
-| Phase 5 — Verification | **Not started** | |
+| Phase 0 — SDK / docs discovery | **Done** | `requestInit.headers` confirmed for both StreamableHTTP and SSE (EventSource GET + POST) |
+| Phase 1 — Schema + URL guard + connect core | **Done** | `headers` column + `sse` transport (migration 0013); `mcpUrlGuard.ts`; fresh Client per fallback attempt |
+| Phase 2 — API (CRUD + test) | **Done** | POST/PATCH accept sse+headers; GET masks as `hasHeaders`; `POST /api/mcp-servers/test` with 15s timeout |
+| Phase 3 — UI + i18n | **Done** | McpPanel: SSE option, headers textarea, Test button, lock icon; JA+EN i18n keys |
+| Phase 4 — Docs + README | **Done** | tool-calling.md, database.md, api-routes.md, glossary.md, READMEs, `.env.example` |
+| Phase 5 — Verification | **Done** | 1044 tests pass (1 skipped), tsc clean, pushed to develop |
 | OAuth Connection providers (Drive, etc.) | **Out of scope** | Use remote MCP instead |
 | MCP OAuth 2.1 / Dynamic Client Registration | **Out of scope (v2)** | |
 
