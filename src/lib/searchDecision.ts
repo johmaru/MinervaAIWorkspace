@@ -60,24 +60,35 @@ Return JSON:
 // --- Phase B: Query generation prompt ---
 
 const QUERY_GEN_PROMPT = `You are a search query generator for SearXNG.
-SearXNG uses keyword-based search engines (Bing, Mojang, DuckDuckGo).
+SearXNG uses keyword-based search engines (Bing, Mojeek, DuckDuckGo).
 Generate optimal search queries for the user's question.
 
 CRITICAL RULES:
 - Generate KEYWORD phrases, NOT natural-language questions.
-  BAD: "Project Motor Racing 2.0 Steam review" (too verbose)
-  GOOD: "Project Motor Racing 2.0 review rating" (keyword-focused)
+  BAD: What are the Steam reviews for Project Motor Racing 2.0?
+  GOOD: "Project Motor Racing 2.0" review rating
+- Quote proper nouns, product names, and version strings with double quotes when exact match matters.
+- Use site: when a specific domain is clearly relevant:
+  - Steam game/reviews → site:store.steampowered.com or site:steamcommunity.com
+  - GitHub project → site:github.com
+  - Known official docs → site: for that docs host (e.g. site:docs.python.org)
+- Prefer intent-specific templates:
+  - News/latest → keywords + date + time_range day/week
+  - Reviews/ratings → "name" review rating (add site: when domain is known)
+  - Specs/API/docs → "name" docs or site:-scoped official docs
+  - Price/availability → "name" price (+ store site: if known)
+- Do NOT emit full conversational sentences, particles-only filler, or question marks.
 - Use the CURRENT DATE from context when the question involves "today", "latest", "recent".
   Example: user asks "今日のAIニュース" with date 2026-07-11
-  → query: "AI ニュース 2026年7月11日"
+  → query: AI ニュース 2026年7月11日
 - time_range: "day" for today's news, "week" for recent, "month" for this month, null for stable info.
 - Match the user's language for queries (Japanese queries for Japanese users).
 - If the user's language is not English, add one English query.
 
 For "web": generate 3 queries, each with a distinct role:
-1. Keyword-focused with date if applicable (e.g. "AI ニュース 2026年7月11日", time_range: "day")
-2. Broader keyword variant (e.g. "AI 最新ニュース", time_range: "week")
-3. English variant (e.g. "AI news July 2026", time_range: "week")
+1. Keyword-focused with date if applicable (e.g. AI ニュース 2026年7月11日, time_range: "day")
+2. Broader keyword variant OR site:-scoped variant (e.g. AI 最新ニュース or "PMR 2.0" review site:store.steampowered.com, time_range: "week")
+3. English variant (e.g. AI news July 2026, time_range: "week")
 
 For "wiki": generate 1-2 queries (entity name in user's language + English if non-English).
 Wiki queries always have time_range: null.

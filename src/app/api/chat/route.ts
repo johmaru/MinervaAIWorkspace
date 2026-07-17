@@ -6,7 +6,7 @@ import { messages, threads, users, mcpServers, connections, globalInstructions, 
 import { getRequestLocale, t } from "@/lib/i18n";
 import { createTodo, listTodos, updateTodo, deleteTodo } from "@/lib/todoStore";
 import type { Locale } from "@/lib/i18n/types";
-import { scrapeUrl, searchWeb } from "@/lib/scraper";
+import { scrapeUrl, searchWeb, detectSearchLanguage, dedupeAndRankSearchResults } from "@/lib/scraper";
 import type { SourceInfo } from "@/lib/scraper";
 import { extractUrls } from "@/lib/urlExtract";
 import { decideSearch } from "@/lib/searchDecision";
@@ -907,9 +907,9 @@ async function buildSearchContext({
   send("status", { label: decision.userNotice ?? t(locale, "chat.statusSearchFallback") });
 
   const maxResults = Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3;
-  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 1));
+  const maxRounds = Math.min(5, Math.max(1, Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 3));
   const allSources: SourceInfo[] = [];
-  const allResults: { url: string; title: string; snippet: string; content: string }[] = [];
+  const allResults: { url: string; title: string; snippet: string; content: string; score?: number; scraped?: boolean }[] = [];
 
   const searchQueries = decision.queries.slice(0, maxRounds);
   // Execute queries in parallel to reduce latency (serial would take up to maxRounds times longer)
@@ -920,9 +920,12 @@ async function buildSearchContext({
       // Per-query time_range takes precedence over the global UI timeRange toggle.
       // If sq.time_range is null, fall back to the global toggle.
       const effectiveTimeRange = sq.time_range ?? timeRange;
+      // Language follows the query text (not UI locale) so English keyword variants
+      // are not forced through ja-JP when the UI is Japanese.
+      const queryLanguage = detectSearchLanguage(sq.query);
       try {
-        const response = await searchWeb(sq.query, maxResults, effectiveTimeRange, locale === "ja" ? "ja-JP" : "en-US");
-        logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: response.results.length });
+        const response = await searchWeb(sq.query, maxResults, effectiveTimeRange, queryLanguage);
+        logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: response.results.length, language: queryLanguage });
         return response;
       } catch {
         logger.info("search-timing", "query", { index: qi + 1, total: searchQueries.length, duration: Date.now() - tQuery, results: 0, error: true });
@@ -934,7 +937,6 @@ async function buildSearchContext({
   for (const response of queryResults) {
     if (!response) continue;
     for (const r of response.results.slice(0, maxResults)) {
-      allSources.push({ url: r.url, title: r.scrapeTitle || r.title, snippet: r.snippet });
       allResults.push({
         url: r.url,
         title: r.scrapeTitle || r.title,
@@ -942,8 +944,18 @@ async function buildSearchContext({
         content: r.scraped
           ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)
           : r.raw_content || r.snippet,
+        score: r.score,
+        scraped: r.scraped,
       });
     }
+  }
+
+  // Cross-query URL dedupe + score ranking (multiple queries often hit the same page)
+  const ranked = dedupeAndRankSearchResults(allResults);
+  allResults.length = 0;
+  allResults.push(...ranked);
+  for (const r of ranked) {
+    allSources.push({ url: r.url, title: r.title, snippet: r.snippet });
   }
 
   if (allSources.length > 0) send("sources", { sources: allSources });
@@ -962,8 +974,13 @@ async function buildSearchContext({
   }
   // Summarization step is deprecated: raw search results are embedded directly into the system message.
   // Each result's content is sliced by SEARCH_RESULT_CONTENT_SLICE, so even raw JSON is short enough.
+  // score/scraped are ranking-only metadata and are not forwarded to the model.
   const tSummarize = Date.now();
-  const contextContent = JSON.stringify(allResults, null, 2);
+  const contextContent = JSON.stringify(
+    allResults.map(({ url, title, snippet, content }) => ({ url, title, snippet, content })),
+    null,
+    2,
+  );
   logger.info("search-timing", "skip-summarize", { duration: Date.now() - tSummarize, chars: contextContent.length });
 
   logger.info("search-timing", "buildSearchContext total", { duration: Date.now() - tTotal });
@@ -1517,11 +1534,11 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "search_web",
       description:
-        "Search the web for current information using SearXNG. Use when you need facts you are not confident about. IMPORTANT: Pass keyword-based queries (e.g. 'AI news July 2026'), NOT natural-language questions (e.g. 'What is today's AI news?'). Include the date when searching for time-sensitive information.",
+        "Search the web for current information using SearXNG. Use when you need facts you are not confident about. IMPORTANT: Pass keyword-based queries (e.g. 'AI news July 2026'), NOT natural-language questions (e.g. 'What is today's AI news?'). Quote proper nouns/versions with double quotes; use site: when a domain is clearly relevant (e.g. site:store.steampowered.com). Include the date when searching for time-sensitive information.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Search query" },
+          query: { type: "string", description: "Keyword search query (not a full sentence)" },
         },
         required: ["query"],
       },
@@ -1898,15 +1915,21 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolSearch") });
           const tTool = Date.now();
           try {
-            const response = await searchWeb(parsedArgs.query, searchMaxResults, timeRange, locale === "ja" ? "ja-JP" : "en-US");
-            for (const r of response.results) {
+            const response = await searchWeb(
+              parsedArgs.query,
+              searchMaxResults,
+              timeRange,
+              detectSearchLanguage(parsedArgs.query),
+            );
+            const rankedToolResults = dedupeAndRankSearchResults(response.results);
+            for (const r of rankedToolResults) {
               sources.push({
                 url: r.url,
                 title: r.scrapeTitle || r.title,
                 snippet: r.snippet,
               });
             }
-            toolContent = response.results
+            toolContent = rankedToolResults
               .map(
                 (r) =>
                   `<${r.url}>\n${r.scrapeTitle || r.title}\n${r.scraped ? r.content.slice(0, SEARCH_RESULT_CONTENT_SLICE) : r.snippet}`,

@@ -292,7 +292,7 @@ Compose 経由ではなくアプリを直接動かす場合は、`.env` の `SCR
 | `EMBEDDER_URL`          | Python embedder の URL（`EMBED_PROVIDER=http` 時に必要。Docker は自動設定） | `http://localhost:8001`                   |
 | `EMBEDDER_GPU_COUNT`    | Python embedder のGPU数（0 = CPUフォールバック、nvidiaのみ、Docker Composeのみ） | `0` |
 | `WEB_SEARCH_MAX_RESULTS`| チャット送信時に取得・スクレイピングする件数                       | `3`                                                  |
-| `WEB_SEARCH_MAX_ROUNDS` | 1回の回答で検索を繰り返す最大回数（1-5）。検索判定 LLM が決定したクエリのうち実行する数を制限 | `2`                                                  |
+| `WEB_SEARCH_MAX_ROUNDS` | 1回の回答で検索を繰り返す最大回数（1-5）。検索判定 LLM が決定したクエリのうち実行する数を制限 | `3`                                                  |
 | `SCRAPER_URL`           | Scraper マイクロサービスの URL                                    | `http://localhost:8000`                              |
 | `SEARXNG_URL`           | SearXNG の URL                                                    | `http://localhost:8080`                              |
 | `TOR_PROXY`             | アプリ側の Tor プロキシ（参考用。空 = Tor なし）                  | —                                                    |

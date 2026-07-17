@@ -18,6 +18,7 @@ from main import (
     extract_text,
     is_safe_host,
     parse_robots_txt,
+    rank_and_dedupe_results,
     scrape_url_safe,
 )
 from scrapling.parser import Adaptor
@@ -211,6 +212,45 @@ class TestScrapeEndpointSSRF:
         resp = client.post("/scrape", json={"url": "http://3232235521/"})
         assert resp.status_code == 400
         assert "private or reserved IP" in resp.json()["error"]
+
+
+# --- rank_and_dedupe_results ---
+
+class TestRankAndDedupeResults:
+    def test_sorts_by_score_desc(self):
+        results = [
+            {"url": "https://example.com/low", "score": 1.0, "title": "low"},
+            {"url": "https://example.com/high", "score": 9.5, "title": "high"},
+            {"url": "https://example.com/mid", "score": 3.0, "title": "mid"},
+        ]
+        out = rank_and_dedupe_results(results, max_results=3)
+        assert [r["title"] for r in out] == ["high", "mid", "low"]
+
+    def test_dedupes_trailing_slash_and_keeps_higher_score(self):
+        results = [
+            {"url": "https://example.com/a/", "score": 2.0, "title": "low"},
+            {"url": "https://example.com/a", "score": 8.0, "title": "high"},
+        ]
+        out = rank_and_dedupe_results(results, max_results=5)
+        assert len(out) == 1
+        assert out[0]["title"] == "high"
+
+    def test_respects_max_results(self):
+        results = [
+            {"url": f"https://example.com/{i}", "score": float(i), "title": str(i)}
+            for i in range(10)
+        ]
+        out = rank_and_dedupe_results(results, max_results=3)
+        assert len(out) == 3
+        assert [r["title"] for r in out] == ["9", "8", "7"]
+
+    def test_missing_score_treated_as_zero(self):
+        results = [
+            {"url": "https://example.com/a", "title": "no-score"},
+            {"url": "https://example.com/b", "score": 1.0, "title": "scored"},
+        ]
+        out = rank_and_dedupe_results(results, max_results=2)
+        assert out[0]["title"] == "scored"
 
 
 # --- /search endpoint ---
@@ -513,7 +553,7 @@ class TestSearchPagination:
         ]
 
     def test_max_results_within_safe_limit_single_request(self, client):
-        """max_results <= SAFE_LIMIT completes in a single request"""
+        """When candidate oversample fits in one page, only one SearXNG request is made."""
         results_resp = MagicMock()
         results_resp.status_code = 200
         results_resp.json.return_value = {"results": self._make_results(5)}
@@ -522,15 +562,17 @@ class TestSearchPagination:
         with patch("httpx.AsyncClient.get", mock_get), patch(
             "main.scrape_url_safe", AsyncMock(return_value={})
         ):
+            # max_results=2 → candidate_limit=max(4,5)=5 → one page of 5, remaining=0
             resp = client.post(
-                "/search", json={"query": "test", "max_results": 3}
+                "/search", json={"query": "test", "max_results": 2}
             )
 
         assert resp.status_code == 200
         assert mock_get.await_count == 1
-        # pageno=1
         params = mock_get.call_args_list[0].kwargs.get("params", {})
         assert params.get("pageno") == 1
+        # After rank+dedupe, at most max_results returned
+        assert len(resp.json()["results"]) <= 2
 
     def test_max_results_exceeds_safe_limit_paginates(self, client):
         """max_results=8, SAFE_LIMIT=5 -> 2 requests (5 on pageno=1, 3 on pageno=2)"""

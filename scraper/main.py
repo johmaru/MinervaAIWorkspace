@@ -134,6 +134,52 @@ class SearchRequest(BaseModel):
 ALLOWED_TIME_RANGES = {"day", "week", "month", "year"}
 
 
+def _normalize_result_url(url: str) -> str:
+    """Normalize a URL for dedup: drop fragment, trailing slash (non-root), lowercase host+path key."""
+    if not url or not isinstance(url, str):
+        return ""
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return url.strip().lower()
+        # Rebuild without fragment; drop trailing slash except for root path
+        path = parsed.path or ""
+        if path.endswith("/") and path != "/":
+            path = path.rstrip("/")
+        normalized = parsed._replace(fragment="", path=path).geturl()
+        return normalized.lower()
+    except Exception:
+        return url.strip().lower()
+
+
+def rank_and_dedupe_results(results: list[dict], max_results: int) -> list[dict]:
+    """Sort by SearXNG score (desc), drop duplicate URLs, cap at max_results.
+
+    Missing/invalid scores are treated as 0. First-seen wins on equal score so
+    engine interleaving remains stable.
+    """
+    if not results:
+        return []
+    # Stable sort: higher score first
+    ordered = sorted(
+        results,
+        key=lambda r: float(r.get("score") or 0),
+        reverse=True,
+    )
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in ordered:
+        url = r.get("url") or ""
+        key = _normalize_result_url(url)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+        if len(out) >= max_results:
+            break
+    return out
+
+
 @app.post("/search")
 async def search(req: SearchRequest):
     """Search the web via SearXNG and scrape the top URLs in parallel.
@@ -149,10 +195,15 @@ async def search(req: SearchRequest):
     time_range = req.time_range if req.time_range in ALLOWED_TIME_RANGES else None
 
     async def _fetch_page(client: httpx.AsyncClient, page_params: dict) -> list[dict]:
-        """Query SearXNG with pagination, fetching SAFE_LIMIT results at a time
-        and accumulating up to max_results. Inserts a wait between pages."""
+        """Query SearXNG with pagination, fetching SAFE_LIMIT results at a time.
+
+        Pulls a small oversample (up to 2x max_results, capped) so score-ranking
+        and URL-dedupe have enough candidates before scrape.
+        """
+        # Oversample for ranking quality; hard-capped to avoid long scrape queues
+        candidate_limit = min(max(req.max_results * 2, SEARXNG_SAFE_LIMIT), 20)
         accumulated: list[dict] = []
-        remaining = req.max_results
+        remaining = candidate_limit
         pageno = 1
         while remaining > 0:
             p = {**page_params, "pageno": pageno}
@@ -176,7 +227,7 @@ async def search(req: SearchRequest):
                 break
             if remaining > 0:
                 await asyncio.sleep(SCRAPE_BATCH_DELAY)
-        return accumulated[: req.max_results]
+        return accumulated[:candidate_limit]
 
     try:
         t_searxng = time.monotonic()
@@ -196,6 +247,8 @@ async def search(req: SearchRequest):
                     results = await _fetch_page(client, retry_params)
                 except Exception:
                     pass  # On retry failure, leave results empty
+        # Score-rank + URL-dedupe before scraping so we spend scrape budget on unique, relevant hits
+        results = rank_and_dedupe_results(results, req.max_results)
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results={len(results)}", flush=True)
     except Exception as e:
         print(f"[search-timing] searxng query={req.query} duration={(time.monotonic() - t_searxng) * 1000:.0f}ms results=0 (error)", flush=True)
@@ -214,6 +267,10 @@ async def search(req: SearchRequest):
         scrape_iter = iter(batch_results)
         for r in batch:
             url = r.get("url", "")
+            try:
+                score = float(r.get("score") or 0)
+            except (TypeError, ValueError):
+                score = 0.0
             entry = {
                 "url": url,
                 "title": r.get("title", ""),
@@ -222,6 +279,7 @@ async def search(req: SearchRequest):
                 "content": "",
                 "scrape_title": "",
                 "raw_content": (r.get("content", "") or "")[:1000],  # Full SearXNG content (fallback when scraping fails)
+                "score": score,
             }
             if url:
                 scraped_r = next(scrape_iter, None)

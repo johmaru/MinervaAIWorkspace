@@ -4,13 +4,16 @@ import { db } from "@/db";
 import { folders, threads, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// Mock searchWeb / upsertPage / decideSearch: verify sources event without SearXNG/DB/LLM side effects
-vi.mock("@/lib/scraper", () => ({
-  searchWeb: vi.fn(),
-  scrapeUrl: vi.fn(),
-  normalizeUrl: (u: string) => u,
-  SourceInfo: {} as never,
-}));
+// Mock searchWeb / scrapeUrl only — keep pure helpers (detectSearchLanguage, dedupeAndRankSearchResults)
+// from the real module so buildSearchContext ranking/language logic still runs.
+vi.mock("@/lib/scraper", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/scraper")>("@/lib/scraper");
+  return {
+    ...actual,
+    searchWeb: vi.fn(),
+    scrapeUrl: vi.fn(),
+  };
+});
 vi.mock("@/lib/pageStore", () => ({
   upsertPage: vi.fn().mockResolvedValue("mock-page-id"),
 }));
@@ -508,12 +511,12 @@ describe("POST /api/chat — time_range passthrough", () => {
     await sseChunks(res);
 
     // Verify searchWeb's 3rd argument (timeRange) matches body.timeRange
-    // and 4th argument (language) is derived from locale (default "ja" → "ja-JP")
+    // and 4th argument (language) follows the query text (ASCII → en-US), not UI locale
     expect(vi.mocked(searchWeb)).toHaveBeenCalled();
     const callArgs = vi.mocked(searchWeb).mock.calls[0];
     expect(callArgs[0]).toBe("latest news today");
     expect(callArgs[2]).toBe("week");
-    expect(callArgs[3]).toBe("ja-JP");
+    expect(callArgs[3]).toBe("en-US");
   }, 120_000);
 });
 

@@ -8,7 +8,13 @@ vi.mock("@/db", () => ({
 vi.mock("@/db/schema", () => ({ pages: {} }));
 vi.mock("@/lib/pageStore", () => ({ upsertPage: vi.fn().mockResolvedValue("id") }));
 vi.mock("@/lib/embed", () => ({ hashContent: vi.fn().mockReturnValue("hash") }));
-import { normalizeUrl, scrapeUrl, searchWeb } from "@/lib/scraper";
+import {
+  normalizeUrl,
+  scrapeUrl,
+  searchWeb,
+  detectSearchLanguage,
+  dedupeAndRankSearchResults,
+} from "@/lib/scraper";
 
 describe("normalizeUrl", () => {
   it("normalizes http URL", () => {
@@ -227,5 +233,51 @@ describe("searchWeb", () => {
     await searchWeb("test");
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.max_results).toBe(5);
+  });
+});
+
+describe("detectSearchLanguage", () => {
+  it("returns ja-JP for Japanese queries", () => {
+    expect(detectSearchLanguage("AI ニュース 2026年7月")).toBe("ja-JP");
+    expect(detectSearchLanguage("Project Motor Racing 評価")).toBe("ja-JP");
+  });
+
+  it("returns en-US for English/ASCII queries", () => {
+    expect(detectSearchLanguage("AI news July 2026")).toBe("en-US");
+    expect(detectSearchLanguage('"PMR 2.0" review site:store.steampowered.com')).toBe("en-US");
+  });
+});
+
+describe("dedupeAndRankSearchResults", () => {
+  it("dedupes by normalized URL and keeps higher score", () => {
+    const ranked = dedupeAndRankSearchResults([
+      { url: "https://example.com/a/", title: "low", score: 1, scraped: false, content: "" },
+      { url: "https://example.com/a", title: "high", score: 9, scraped: false, content: "" },
+      { url: "https://example.com/b", title: "mid", score: 5, scraped: false, content: "" },
+    ]);
+    expect(ranked.map((r) => r.title)).toEqual(["high", "mid"]);
+    expect(ranked[0].score).toBe(9);
+  });
+
+  it("on equal score prefers scraped content", () => {
+    const ranked = dedupeAndRankSearchResults([
+      { url: "https://example.com/x", score: 3, scraped: false, content: "" },
+      { url: "https://example.com/x", score: 3, scraped: true, content: "body" },
+    ]);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].scraped).toBe(true);
+    expect(ranked[0].content).toBe("body");
+  });
+
+  it("drops empty urls and sorts descending by score", () => {
+    const ranked = dedupeAndRankSearchResults([
+      { url: "", score: 100 },
+      { url: "https://example.com/low", score: 1 },
+      { url: "https://example.com/high", score: 10 },
+    ]);
+    expect(ranked.map((r) => r.url)).toEqual([
+      "https://example.com/high",
+      "https://example.com/low",
+    ]);
   });
 });

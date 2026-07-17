@@ -282,7 +282,7 @@ All configuration lives in `.env` (see `.env.example` as the source of truth). T
 | `EMBEDDER_URL`          | Python embedder URL (required when `EMBED_PROVIDER=http`; Docker sets automatically) | `http://localhost:8001`     |
 | `EMBEDDER_GPU_COUNT`    | GPU count for the Python embedder (0 = CPU fallback; nvidia only; Docker Compose only) | `0` |
 | `WEB_SEARCH_MAX_RESULTS`| Number of results fetched (and scraped) per chat send              | `3`                                                  |
-| `WEB_SEARCH_MAX_ROUNDS` | Maximum search rounds per response (1-5); caps how many of the search-decision LLM's queries are executed | `2`                                                  |
+| `WEB_SEARCH_MAX_ROUNDS` | Maximum search rounds per response (1-5); caps how many of the search-decision LLM's queries are executed | `3`                                                  |
 | `SCRAPER_URL`           | Scraper microservice URL                                           | `http://localhost:8000`                              |
 | `SEARXNG_URL`           | SearXNG URL                                                        | `http://localhost:8080`                              |
 | `TOR_PROXY`             | Tor proxy for the app (reference; empty = no Tor)                 | —                                                    |

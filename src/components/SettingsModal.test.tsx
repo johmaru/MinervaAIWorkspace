@@ -39,7 +39,7 @@ const baseSettings = {
   dbPageEmbeddingsDim: 1024,
   webSearchModel: "umans-qwen3.6-35b-a3b",
   webSearchMaxResults: 3,
-  webSearchMaxRounds: 2,
+  webSearchMaxRounds: 3,
   scraperUrl: "http://localhost:8000",
   searxngUrl: "http://localhost:8080",
   torProxy: "",

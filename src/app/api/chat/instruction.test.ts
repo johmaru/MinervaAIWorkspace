@@ -10,13 +10,15 @@ import { db } from "@/db";
 import { folders, threads } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// Mock searchWeb / upsertPage
-vi.mock("@/lib/scraper", () => ({
-  searchWeb: vi.fn().mockResolvedValue({ query: "", results: [] }),
-  scrapeUrl: vi.fn(),
-  normalizeUrl: (u: string) => u,
-  SourceInfo: {} as never,
-}));
+// Mock searchWeb / scrapeUrl only — keep pure helpers from the real module
+vi.mock("@/lib/scraper", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/scraper")>("@/lib/scraper");
+  return {
+    ...actual,
+    searchWeb: vi.fn().mockResolvedValue({ query: "", results: [] }),
+    scrapeUrl: vi.fn(),
+  };
+});
 vi.mock("@/lib/pageStore", () => ({
   upsertPage: vi.fn().mockResolvedValue("mock-page-id"),
 }));

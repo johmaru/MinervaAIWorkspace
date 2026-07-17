@@ -127,7 +127,7 @@ export async function GET(req: Request) {
     // Web search
     webSearchModel: process.env.WEB_SEARCH_MODEL || "umans-qwen3.6-35b-a3b",
     webSearchMaxResults: Number(process.env.WEB_SEARCH_MAX_RESULTS) || 3,
-    webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 2,
+    webSearchMaxRounds: Number(process.env.WEB_SEARCH_MAX_ROUNDS) || 3,
     scraperUrl: process.env.SCRAPER_URL || "http://localhost:8000",
     searxngUrl: process.env.SEARXNG_URL || "http://localhost:8080",
     // Tor proxy

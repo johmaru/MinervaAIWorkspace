@@ -342,7 +342,7 @@ All variables below are defined in `.env.example`. Values shown are defaults fro
 |----------|---------|-------------|
 | `WEB_SEARCH_MODEL` | `umans-qwen3.6-35b-a3b` | Model used for web search query generation and result summarization. Must be alphanumeric (`[a-zA-Z0-9._-]+`). |
 | `WEB_SEARCH_MAX_RESULTS` | `3` | Maximum number of search results per round. Range: 1–20. |
-| `WEB_SEARCH_MAX_ROUNDS` | `2` | Maximum number of search-scrape-reason cycles. Range: 1–5. Each query carries its own `time_range` (per-query, from the LLM query generator) that overrides the global UI toggle when non-null. |
+| `WEB_SEARCH_MAX_ROUNDS` | `3` | Maximum number of search queries executed per response (1–5). Caps how many of the query-generator's queries run. Each query carries its own `time_range` (per-query, from the LLM query generator) that overrides the global UI toggle when non-null. Language is chosen per query from the query text (CJK → `ja-JP`, else `en-US`). |
 
 ### Scraper & SearXNG
 
@@ -351,7 +351,7 @@ All variables below are defined in `.env.example`. Values shown are defaults fro
 | `SCRAPER_URL` | *(empty)* | URL of the Scrapling FastAPI scraper microservice. Empty = disabled in standalone mode (chat still works). Docker Compose sets this to `http://scraper:8000`. |
 | `SEARXNG_URL` | *(empty)* | URL of the SearXNG meta-search instance. Empty = disabled in standalone mode. Docker Compose sets this to `http://searxng:8080`. |
 | `SCRAPE_TIMEOUT` | `30` | Timeout in seconds for scraping a single page. Read by the scraper container. Changing this via the GUI pushes the update to the scraper at runtime via its `/config` endpoint. |
-| `SEARXNG_LANGUAGE` | *(auto)* | BCP47 language tag passed to SearXNG's `language` param (e.g. `ja-JP`, `en-US`). Derived automatically from the user's locale at request time; not set via `.env`. When `None`, SearXNG uses auto-locale detection. |
+| `SEARXNG_LANGUAGE` | *(auto)* | BCP47 language tag passed to SearXNG's `language` param (e.g. `ja-JP`, `en-US`). Chosen **per search query** from the query text (CJK characters → `ja-JP`, otherwise `en-US`); not set via `.env`. When `None`, SearXNG uses auto-locale detection. |
 
 ### Tor proxy
 

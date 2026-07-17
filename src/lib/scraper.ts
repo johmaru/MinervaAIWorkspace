@@ -56,12 +56,60 @@ export type WebSearchResult = {
   content: string; // Scraped body text (empty when scraped=false)
   scrapeTitle: string;
   raw_content: string; // SearXNG full content (fallback when scraping fails)
+  /** SearXNG relevance score (higher is better). Optional for backward compat. */
+  score?: number;
 };
 
 export type WebSearchResponse = {
   query: string;
   results: WebSearchResult[];
 };
+
+/**
+ * Pick SearXNG language from the query text (not UI locale).
+ * CJK-heavy queries → ja-JP; otherwise en-US so English keyword queries
+ * are not forced through a Japanese locale filter.
+ */
+export function detectSearchLanguage(query: string): "ja-JP" | "en-US" {
+  return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(query) ? "ja-JP" : "en-US";
+}
+
+type RankableSearchHit = {
+  url: string;
+  score?: number;
+  scraped?: boolean;
+  content?: string;
+};
+
+/**
+ * Deduplicate by normalized URL and rank by SearXNG score (desc).
+ * On score ties, prefer entries that already have scraped body text.
+ * Empty / invalid URLs are dropped.
+ */
+export function dedupeAndRankSearchResults<T extends RankableSearchHit>(results: T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const r of results) {
+    if (!r.url || !r.url.trim()) continue;
+    const key = (normalizeUrl(r.url) || r.url).toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, r);
+      continue;
+    }
+    const existingScore = existing.score ?? 0;
+    const newScore = r.score ?? 0;
+    if (newScore > existingScore) {
+      byKey.set(key, r);
+      continue;
+    }
+    if (newScore === existingScore) {
+      const existingQuality = existing.scraped && existing.content ? 1 : 0;
+      const newQuality = r.scraped && r.content ? 1 : 0;
+      if (newQuality > existingQuality) byKey.set(key, r);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+}
 
 /**
  * For displaying source references in the chat UI. Uses scrapeTitle if available.
