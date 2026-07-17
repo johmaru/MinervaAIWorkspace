@@ -1972,12 +1972,14 @@ async function streamCompletion({
         } else if (tc.name === "search_web" && parsedArgs.query) {
           send?.("status", { label: t(locale, "chat.statusToolSearch") });
           const tTool = Date.now();
+          // Narrow once so nested callbacks see string (not string | undefined)
+          const searchQuery = parsedArgs.query;
           try {
             const response = await searchWeb(
-              parsedArgs.query,
+              searchQuery,
               searchMaxResults,
               timeRange,
-              detectSearchLanguage(parsedArgs.query),
+              detectSearchLanguage(searchQuery),
             );
             const rankedToolResults = applyDomainQualityFilter(
               dedupeAndRankSearchResults(response.results),
@@ -1992,14 +1994,14 @@ async function streamCompletion({
             toolContent = rankedToolResults
               .map((r) => {
                 const body = r.scraped
-                  ? sliceContentAroundQuery(r.content, parsedArgs.query, SEARCH_RESULT_CONTENT_SLICE)
+                  ? sliceContentAroundQuery(r.content, searchQuery, SEARCH_RESULT_CONTENT_SLICE)
                   : r.snippet;
                 return `<${r.url}>\n${r.scrapeTitle || r.title}\n${body}`;
               })
               .join("\n\n");
             if (!toolContent) toolContent = "No results found.";
           } catch {
-            toolContent = `Search failed for: ${parsedArgs.query}`;
+            toolContent = `Search failed for: ${searchQuery}`;
           }
           logger.info("search-timing", "tool", { tool: "search_web", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "search_wikipedia" && parsedArgs.query) {

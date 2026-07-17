@@ -74,26 +74,25 @@ export function applyDomainQualityFilter<T extends DomainRankable>(
   maxPerDomain = 2,
 ): T[] {
   if (results.length === 0) return [];
-  const adjusted = results
-    .map((r) => {
-      const host = hostnameOf(r.url);
-      if (isLowQualityHost(host)) return null;
-      let score = r.score ?? 0;
-      if (isSoftDemoteHost(host)) score *= 0.4;
-      return { ...r, score, _host: host };
-    })
-    .filter((r): r is T & { _host: string } => r !== null)
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+  type Adjusted = { item: T; score: number; host: string };
+  const adjusted: Adjusted[] = [];
+  for (const r of results) {
+    const host = hostnameOf(r.url);
+    if (isLowQualityHost(host)) continue;
+    let score = r.score ?? 0;
+    if (isSoftDemoteHost(host)) score *= 0.4;
+    adjusted.push({ item: { ...r, score }, score, host });
+  }
+  adjusted.sort((a, b) => b.score - a.score);
 
   const counts = new Map<string, number>();
   const out: T[] = [];
-  for (const r of adjusted) {
-    const host = r._host || hostnameOf(r.url);
+  for (const { item, host } of adjusted) {
     const n = counts.get(host) ?? 0;
     if (host && n >= maxPerDomain) continue;
     if (host) counts.set(host, n + 1);
-    const { _host: _, ...rest } = r as T & { _host: string };
-    out.push(rest as T);
+    out.push(item);
   }
   return out;
 }
