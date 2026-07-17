@@ -115,7 +115,7 @@ Cuckoo Sandbox のオーケストレータは決定的コードで固定パイ�
 | 翻訳モデル | 低〜中（敵対的 raw を見るがツール無し） | スキーマ抽出のみ |
 | バックAI | 中（ツール出力を見ない） | hard veto のみ。実行権限なし |
 
-**未決（配置）**: Lifecycle Manager を Next.js ワーカーにするか、Docker Compose の別サービスにするか、exe 同梱の子プロセスにするかは §12。論理上は「チャット AI と同一権限空間に置かない」ことだけを必須とする。
+**配置（D2）**: v0.4 は app プロセス内（Next / Node / exe server）に Lifecycle Manager を置く。Docker socket は app が持つが、**LLM ツールから Docker を直接触らせない**（manager のプリセット API のみ）。実装は `SandboxLifecycle` 相当のインターフェース越しにし、後から Compose 別サービス（HTTP 実装差し替え）へ移行可能にする。
 
 ---
 
@@ -396,7 +396,7 @@ VM: 実行後自動破棄
   - [ ] 軽量出力サニタイズ（長さ上限・制御文字除去・untrusted マーク）
 - [ ] Tier 型・インターフェース枠のみ（Tier 2/3 拡張ポイント）
 - [ ] マジックナンバーによる Tier 強制判定（最低限 PE/ELF → 拒否 or Tier3 相当）
-- [ ] Lifecycle Manager の骨格（AI と権限分離）
+- [ ] Lifecycle Manager の骨格（app 内実装 + `SandboxLifecycle` インターフェース。LLM は Docker 非接触）
 
 ### v0.5+
 
@@ -406,6 +406,7 @@ VM: 実行後自動破棄
   - [ ] バックAI dual control
   - [ ] syscall トレース等
 - [ ] （任意）microVM 等への隔離強化
+- [ ] Lifecycle Manager を Compose 別サービスへ移行（D2 の B フェーズ。Docker socket を app から外す）
 
 ### インフラ要件（現状メモ）
 
@@ -427,6 +428,7 @@ VM: 実行後自動破棄
 | ID | 日付 | 決定 | 理由・帰結 |
 |----|------|------|------------|
 | **D1**（旧 Q2） | 2026-07-17 | **v0.4 隔離は Docker のみ。プロセス隔離フォールバックなし。Docker が無い環境ではサンドボックス機能オフ** | 設計原則が「隔離」である以上、弱い隔離をサンドボックスと呼ぶと期待と実態がずれる。既存の Docker 配布（app/scraper/embedder）と整合。exe は Docker 利用可能時のみ有効。導入ハードルは DX（Q14）で緩和し、安全宣言は薄めない |
+| **D2**（旧 Q1） | 2026-07-17 | **v0.4: Lifecycle Manager は app プロセス内。後で Compose 別サービスへ移行可能にする** | 実験速度を優先。権限分離は「LLM → プリセット API のみ」（Docker 非接触）で確保。`SandboxLifecycle` インターフェースで実装を差し替え可能にし、本番強化時は B（別サービス + socket を app から外す）へ移す |
 
 ### 12.2 未決（Open Questions）
 
@@ -434,8 +436,7 @@ VM: 実行後自動破棄
 
 | ID | 論点 | 選択肢・メモ |
 |----|------|--------------|
-| Q1 | Lifecycle Manager の配置 | Next 内ワーカー / Compose 別サービス / exe 子プロセス。配布形態ごとに分岐しうる。**次に決める候補** |
-| Q3 | チャットへの露出 | `STREAM_TOOLS` 直載せ / 内部 API + 薄いツール / MCP |
+| Q3 | チャットへの露出 | `STREAM_TOOLS` 直載せ / 内部 API + 薄いツール / MCP。**次に決める候補** |
 | Q4 | 長時間ジョブ | 同期（SSE ブロック） vs 非同期ジョブ + 進捗イベント |
 | Q5 | 隔離単位 | user / thread / request。マルチユーザー時の横漏れ防止 |
 | Q6 | 添付のステージング | user data root 配下? 一時 dir? capability 参照の形 |
@@ -500,3 +501,5 @@ VM: 実行後自動破棄
 3. **2026-07-17 構造リライト**: セクション分割（脅威モデル / システム構成 / 統合接点 / Open Questions）、Tier×プリセット優先順位の明文化、`run_command` 併存の明確化。実装未決は §12 に集約し本文の原則と分離。
 
 4. **D1（隔離方式）**: v0.4 は Docker のみ・フォールバックなし・未導入時は機能オフ。導入 DX は Q14（専用インストール支援コンテキスト）として分離。
+
+5. **D2（Lifecycle 配置）**: v0.4 は app 内 Manager + 差し替え可能なインターフェース。Compose 別サービス化は後続。
