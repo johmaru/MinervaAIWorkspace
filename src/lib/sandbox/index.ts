@@ -5,11 +5,15 @@
  *
  *   1. Feature gate / Docker availability  (dockerDetect)
  *   2. Deterministic policy gate           (policy — Tier enforcement D7)
- *   3. Host-resource admission            (admission — mem % + concurrent D4)
- *   4. Image presence check               (dockerDetect)
- *   5. Staging dir + code file            (staging — D5)
- *   6. Container execution                (lifecycle — Docker CLI)
- *   7. Output sanitization                (sanitize — Tier 1 light D4)
+ *   3. Host-resource admission              (admission — mem % + concurrent D4)
+ *   4. Image presence check                 (dockerDetect)
+ *   5. Container execution                  (lifecycle — Docker CLI + named volumes)
+ *   6. Output sanitization                  (sanitize — Tier 1 light D4)
+ *
+ * Staging uses Docker named volumes (not bind mounts) so the orchestrator
+ * works regardless of whether the app runs natively, in Docker Compose,
+ * or as a standalone exe. The lifecycle creates a volume, writes code into
+ * it via a throwaway container, runs the code, and removes the volume.
  *
  * All failures return a structured `SandboxRunResult` with a stable error
  * code; `runSandbox` itself never throws.
@@ -29,7 +33,6 @@ import {
   getSandboxImage,
   shouldExposeSandboxTool,
 } from "./dockerDetect";
-import { createRunStaging, writeRunCode, removeRunStaging, filenameForLanguage } from "./staging";
 import { sanitizeToolOutput } from "./sanitize";
 import { DockerLifecycle } from "./dockerLifecycle";
 import { sandboxFail, type SandboxRunResult } from "./types";
@@ -90,24 +93,20 @@ export async function runSandbox(args: unknown): Promise<SandboxRunResult> {
   const admission = checkAdmission();
   if (admission) return admission;
 
-  // 6. Execute under the concurrent slot, with staging cleanup in finally.
+  // 6. Execute under the concurrent slot. Lifecycle handles volume
+  //    create/write/run/rm internally.
   const runId = newRunId();
   const maxChars = getStdoutMaxBytes();
   const timeoutSec = getDefaultTimeoutSec();
   const lifecycle = new DockerLifecycle();
 
   return withSandboxSlot(async (): Promise<SandboxRunResult> => {
-    let stagingDir: string | null = null;
     try {
-      stagingDir = await createRunStaging(runId);
-      const filename = filenameForLanguage(policy.language);
-      await writeRunCode(stagingDir, filename, policy.code);
-
       const exec = await lifecycle.exec({
         runId,
         image,
         language: policy.language,
-        hostStagingDir: stagingDir,
+        code: policy.code,
         timeoutSec,
         memLimitMb: 256,
       });
@@ -148,10 +147,6 @@ export async function runSandbox(args: unknown): Promise<SandboxRunResult> {
         "internal_error",
         err instanceof Error ? err.message : String(err),
       );
-    } finally {
-      if (stagingDir) {
-        await removeRunStaging(stagingDir).catch(() => { /* best-effort */ });
-      }
     }
   });
 }

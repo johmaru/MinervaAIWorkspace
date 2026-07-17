@@ -1,34 +1,26 @@
 /**
  * Docker CLI implementation of `SandboxLifecycle` (spec §5.2 D2 / §7 D4).
  *
- * Builds and runs:
+ * Uses Docker named volumes instead of bind mounts so it works regardless
+ * of whether the app runs natively, in Docker Compose, or as an exe.
+ * Bind mounts require the host Docker daemon to see the staging path, which
+ * fails in Docker-in-Docker sibling patterns (container paths ≠ host paths).
  *
- *   docker run --rm \
- *     --network none \
- *     --memory <memLimitMb>m \
- *     --pids-limit 64 \
- *     --read-only \
- *     --tmpfs /tmp:rw,noexec,nosuid,size=64m \
- *     -v <hostStagingDir>:/work:ro \
- *     -w /work \
- *     <image> \
- *     <command>
+ * Flow per exec:
+ *   1. `docker volume create sandbox-staging-<runId>`
+ *   2. `docker run --rm -v sandbox-staging-<runId>:/work:rw <image> \
+ *        sh -c "echo '<base64>' | base64 -d > /work/<file>"`
+ *      (writes inline code into the volume via a throwaway container)
+ *   3. `docker run --rm --network none --memory ... --read-only ... \
+ *        -v sandbox-staging-<runId>:/work:ro <image> <command>`
+ *   4. `docker volume rm sandbox-staging-<runId>`
  *
  * Language commands (image provides python + node runtimes):
  *   python:     python main.py
  *   javascript: node main.js
  *
- * Timeout: the spawned `docker run` is killed on `timeoutSec`. The container
- * itself is `--rm`, so killing the client-side `docker run` process is not
- * enough to tear down the container — we additionally `docker stop`/`kill`
- * the container if we still have its id. In v0.4 we use a simpler approach:
- * spawn with a Node-side timer and, on expiry, send SIGKILL to the child and
- * rely on `docker run --rm` to clean up. This is documented in the plan as
- * acceptable for v0.4.
- *
  * The `runCommand` function is injectable so tests can verify argv shape
- * without spawning Docker. The default implementation spawns the real `docker`
- * binary.
+ * without spawning Docker.
  */
 
 import type { SandboxExecRequest, SandboxExecSuccess, SandboxLifecycle } from "./lifecycle";
@@ -43,6 +35,18 @@ const PIDS_LIMIT = 64;
 /** tmpfs /tmp size. */
 const TMPFS_SIZE = "64m";
 
+/** Language → staging filename. */
+function filenameForLanguage(language: SandboxExecRequest["language"]): string {
+  switch (language) {
+    case "python":
+      return "main.py";
+    case "javascript":
+      return "main.js";
+    default:
+      return "main.txt";
+  }
+}
+
 /** Language → container command argv (appended after image name). */
 function languageCommand(language: SandboxExecRequest["language"]): string[] {
   switch (language) {
@@ -51,29 +55,22 @@ function languageCommand(language: SandboxExecRequest["language"]): string[] {
     case "javascript":
       return ["node", "main.js"];
     default:
-      // Unreachable: policy rejects other languages. Defensive.
       return ["python", "main.py"];
   }
 }
 
-/**
- * Convert a host staging path to a form Docker Desktop accepts as a bind-mount
- * source. On Windows hosts, Docker Desktop accepts `C:\path\to\dir` in most
- * recent versions but historically needed `/c/path/to/dir`. We pass the native
- * path through; if a user hits a conversion issue, they can set
- * `SANDBOX_IMAGE` and run on a Linux host. Documented in the install skill.
- */
-function toDockerVolumePath(hostPath: string): string {
-  return hostPath;
+/** Volume name for a run. */
+function volumeName(runId: string): string {
+  return `sandbox-staging-${runId}`;
 }
 
 /**
- * Build the `docker run` argv for a sandbox execution request.
+ * Build the `docker run` argv for the code-execution container (step 3).
  * Exported so tests can assert the argv shape without spawning Docker.
  */
 export function buildDockerRunArgv(req: SandboxExecRequest): string[] {
   const memMb = req.memLimitMb ?? DEFAULT_MEM_LIMIT_MB;
-  const vol = toDockerVolumePath(req.hostStagingDir);
+  const vol = volumeName(req.runId);
   return [
     "run",
     "--rm",
@@ -91,13 +88,38 @@ export function buildDockerRunArgv(req: SandboxExecRequest): string[] {
 }
 
 /**
+ * Build the argv to write code into the volume via a throwaway container
+ * (step 2). The code is base64-encoded to avoid shell injection from user
+ * code. base64 output is [A-Za-z0-9+/=] only — safe inside single quotes.
+ */
+export function buildWriteCodeArgv(req: SandboxExecRequest): string[] {
+  const vol = volumeName(req.runId);
+  const filename = filenameForLanguage(req.language);
+  const codeB64 = Buffer.from(req.code, "utf8").toString("base64");
+  return [
+    "run",
+    "--rm",
+    "--network", "none",
+    "-v", `${vol}:/work:rw`,
+    "-w", "/work",
+    req.image,
+    "sh", "-c", `echo '${codeB64}' | base64 -d > /work/${filename}`,
+  ];
+}
+
+/** Build the `docker volume create` argv (step 1). */
+export function buildVolumeCreateArgv(runId: string): string[] {
+  return ["volume", "create", volumeName(runId)];
+}
+
+/** Build the `docker volume rm` argv (step 4). */
+export function buildVolumeRmArgv(runId: string): string[] {
+  return ["volume", "rm", volumeName(runId)];
+}
+
+/**
  * Run `docker run` with a wall-clock timeout. Returns exec success.
  * Never throws — errors are surfaced via `exitCode: -1` + `stderr`.
- *
- * The timeout is a race between `runCommand` and a timer promise. The timer
- * handle is always cleared in `finally` so a fast success does not leave a
- * dangling reject promise (which would surface as an unhandled rejection
- * when the timer eventually fires).
  */
 async function execDockerRun(
   argv: string[],
@@ -136,8 +158,8 @@ async function execDockerRun(
 /**
  * Concrete `SandboxLifecycle` backed by the `docker` CLI.
  *
- * Constructed with an optional injectable `runCommand` (tests). The default
- * runner (`defaultRunCommand` from dockerDetect.ts) spawns the real `docker`.
+ * Uses named volumes for staging so it works in Docker-in-Docker sibling
+ * patterns (app in Compose, sandbox spawned via host Docker socket).
  */
 export class DockerLifecycle implements SandboxLifecycle {
   private runCommand: RunCommandFn;
@@ -147,8 +169,41 @@ export class DockerLifecycle implements SandboxLifecycle {
   }
 
   async exec(req: SandboxExecRequest): Promise<SandboxExecSuccess> {
-    const argv = buildDockerRunArgv(req);
     const timeoutMs = req.timeoutSec * 1000;
-    return execDockerRun(argv, timeoutMs, this.runCommand);
+    const writeTimeoutMs = Math.min(timeoutMs, 10_000);
+
+    // Step 1: create the named volume.
+    const createArgv = buildVolumeCreateArgv(req.runId);
+    const createResult = await this.runCommand(createArgv, { timeoutMs: 10_000 });
+    if (createResult.exitCode !== 0) {
+      return {
+        exitCode: -1,
+        stdout: "",
+        stderr: `failed to create staging volume: ${createResult.stderr}`,
+        timedOut: false,
+      };
+    }
+
+    try {
+      // Step 2: write code into the volume via a throwaway container.
+      const writeArgv = buildWriteCodeArgv(req);
+      const writeResult = await this.runCommand(writeArgv, { timeoutMs: writeTimeoutMs });
+      if (writeResult.exitCode !== 0) {
+        return {
+          exitCode: -1,
+          stdout: "",
+          stderr: `failed to write code to staging volume: ${writeResult.stderr}`,
+          timedOut: false,
+        };
+      }
+
+      // Step 3: run the code.
+      const runArgv = buildDockerRunArgv(req);
+      return await execDockerRun(runArgv, timeoutMs, this.runCommand);
+    } finally {
+      // Step 4: always clean up the volume.
+      const rmArgv = buildVolumeRmArgv(req.runId);
+      await this.runCommand(rmArgv, { timeoutMs: 10_000 }).catch(() => { /* best-effort */ });
+    }
   }
 }

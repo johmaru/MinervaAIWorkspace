@@ -15,8 +15,8 @@ export type SandboxExecRequest = {
   image: string;
   /** Language chosen by the policy gate (python | javascript in v0.4). */
   language: "python" | "javascript";
-  /** Host-side staging dir to bind-mount read-only at /work. */
-  hostStagingDir: string;
+  /** Inline source code to write into the sandbox volume. */
+  code: string;
   /** Hard wall-clock timeout in seconds. Container is killed on expiry. */
   timeoutSec: number;
   /** Container memory cap in MB (e.g. 256). */

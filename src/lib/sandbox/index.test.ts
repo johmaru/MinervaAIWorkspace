@@ -1,8 +1,5 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 // Mock node:os: keep all real exports, only override freemem/totalmem so
 // admission control sees plentiful memory. Mocking wholesale breaks tmpdir.
@@ -15,12 +12,6 @@ vi.mock("node:os", async (importOriginal) => {
   };
 });
 
-// Mock staging so we don't touch the real data dir.
-const tempRoot = mkdtempSync(join(tmpdir(), "sandbox-orch-test-"));
-vi.mock("@/lib/user-data", () => ({
-  getDataDir: () => tempRoot,
-}));
-
 // Mock dockerDetect: injectable availability + image presence + runner.
 // All sandbox-detect behaviour is driven by `sandboxState` so tests can flip
 // flags without re-mocking between cases.
@@ -28,12 +19,16 @@ const sandboxState = vi.hoisted(() => ({
   dockerAvailable: true,
   imagePresent: true,
   forcedOff: false,
+  // The result of the actual code-run step (step 3 of lifecycle).
   runResult: { exitCode: 0, stdout: "hi\n", stderr: "" } as {
     exitCode: number; stdout: string; stderr: string;
   },
   notFound: false,
   shouldHang: false,
   capturedArgv: null as string[] | null,
+  // Track all docker calls for cleanup verification.
+  volumeCreated: false,
+  volumeRemoved: false,
 }));
 vi.mock("./dockerDetect", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./dockerDetect")>();
@@ -49,9 +44,22 @@ vi.mock("./dockerDetect", async (importOriginal) => {
     },
     getSandboxImage: () => "umanschat-sandbox-python:v0.4",
     defaultRunCommand: async (argv: string[]) => {
+      // Track volume create/rm for cleanup tests.
+      if (argv[0] === "volume" && argv[1] === "create") {
+        sandboxState.volumeCreated = true;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (argv[0] === "volume" && argv[1] === "rm") {
+        sandboxState.volumeRemoved = true;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      // Write-code step (volume mounted rw).
+      if (argv[0] === "run" && argv.some(a => a.includes(":/work:rw"))) {
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      // The actual code run — capture argv, return result or hang.
       sandboxState.capturedArgv = argv;
       if (sandboxState.shouldHang) {
-        // Never resolves — simulates a container that hangs until timeout.
         return new Promise(() => { /* never resolves */ });
       }
       const r = sandboxState.runResult;
@@ -64,7 +72,6 @@ vi.mock("./dockerDetect", async (importOriginal) => {
 
 import { runSandbox, getSandboxToolsForRequest } from "./index";
 import { _resetForTesting as resetAdmission } from "./admission";
-import { getSandboxStagingRoot } from "./staging";
 
 beforeEach(() => {
   sandboxState.dockerAvailable = true;
@@ -74,6 +81,8 @@ beforeEach(() => {
   sandboxState.notFound = false;
   sandboxState.shouldHang = false;
   sandboxState.capturedArgv = null;
+  sandboxState.volumeCreated = false;
+  sandboxState.volumeRemoved = false;
   resetAdmission();
   vi.stubEnv("SANDBOX_ENABLED", "auto");
   vi.stubEnv("SANDBOX_DEFAULT_TIMEOUT_SEC", "30");
@@ -84,7 +93,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  rmSync(tempRoot, { recursive: true, force: true });
 });
 
 describe("runSandbox — policy gate failures (no Docker touched)", () => {
@@ -213,8 +221,6 @@ describe("runSandbox — success path", () => {
 
 describe("runSandbox — timeout", () => {
   it("returns timeout error code when container times out", async () => {
-    // timeoutSec 1 → 1000ms; the hung runner never resolves, so the race's
-    // timer fires after ~1s. (0 is treated as invalid → defaults to 30s.)
     vi.stubEnv("SANDBOX_DEFAULT_TIMEOUT_SEC", "1");
     sandboxState.shouldHang = true;
     const r = await runSandbox({ preset: "code_run", code: "while True: pass" });
@@ -223,30 +229,27 @@ describe("runSandbox — timeout", () => {
   });
 });
 
-describe("runSandbox — staging cleanup", () => {
-  it("cleans up staging dir after success", async () => {
+describe("runSandbox — volume cleanup", () => {
+  it("creates and removes the staging volume on success", async () => {
     sandboxState.runResult = { exitCode: 0, stdout: "ok", stderr: "" };
     await runSandbox({ preset: "code_run", code: "print(1)" });
-    const root = getSandboxStagingRoot();
-    const entries = existsSync(root) ? readdirSync(root) : [];
-    expect(entries.length).toBe(0);
+    expect(sandboxState.volumeCreated).toBe(true);
+    expect(sandboxState.volumeRemoved).toBe(true);
   });
 
-  it("cleans up staging dir even on container failure", async () => {
+  it("removes the volume even on container failure", async () => {
     sandboxState.runResult = { exitCode: 1, stdout: "", stderr: "error" };
     await runSandbox({ preset: "code_run", code: "print(x)" });
-    const root = getSandboxStagingRoot();
-    const entries = existsSync(root) ? readdirSync(root) : [];
-    expect(entries.length).toBe(0);
+    expect(sandboxState.volumeCreated).toBe(true);
+    expect(sandboxState.volumeRemoved).toBe(true);
   });
 
-  it("cleans up staging dir even on timeout", async () => {
+  it("removes the volume even on timeout", async () => {
     vi.stubEnv("SANDBOX_DEFAULT_TIMEOUT_SEC", "1");
     sandboxState.shouldHang = true;
     await runSandbox({ preset: "code_run", code: "while True: pass" });
-    const root = getSandboxStagingRoot();
-    const entries = existsSync(root) ? readdirSync(root) : [];
-    expect(entries.length).toBe(0);
+    expect(sandboxState.volumeCreated).toBe(true);
+    expect(sandboxState.volumeRemoved).toBe(true);
   });
 });
 

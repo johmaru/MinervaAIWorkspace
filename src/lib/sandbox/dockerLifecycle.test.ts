@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { buildDockerRunArgv, DockerLifecycle } from "./dockerLifecycle";
+import {
+  buildDockerRunArgv,
+  buildWriteCodeArgv,
+  buildVolumeCreateArgv,
+  buildVolumeRmArgv,
+  DockerLifecycle,
+} from "./dockerLifecycle";
 import type { SandboxExecRequest } from "./lifecycle";
 import type { RunCommandFn } from "./dockerDetect";
 
@@ -8,10 +14,45 @@ const baseReq: SandboxExecRequest = {
   runId: "run_abc123",
   image: "umanschat-sandbox-python:v0.4",
   language: "python",
-  hostStagingDir: "/tmp/sandbox-staging/run_abc123",
+  code: "print('hello')",
   timeoutSec: 30,
   memLimitMb: 256,
 };
+
+describe("buildVolumeCreateArgv", () => {
+  it("creates the named volume", () => {
+    expect(buildVolumeCreateArgv("run_abc123")).toEqual([
+      "volume", "create", "sandbox-staging-run_abc123",
+    ]);
+  });
+});
+
+describe("buildVolumeRmArgv", () => {
+  it("removes the named volume", () => {
+    expect(buildVolumeRmArgv("run_abc123")).toEqual([
+      "volume", "rm", "sandbox-staging-run_abc123",
+    ]);
+  });
+});
+
+describe("buildWriteCodeArgv", () => {
+  it("uses the named volume mounted rw and writes to main.py for python", () => {
+    const argv = buildWriteCodeArgv(baseReq);
+    expect(argv).toContain("run");
+    expect(argv).toContain("--rm");
+    const volIdx = argv.indexOf("-v");
+    expect(argv[volIdx + 1]).toBe("sandbox-staging-run_abc123:/work:rw");
+    // The last element is the sh -c command
+    const cmd = argv[argv.length - 1];
+    expect(cmd).toContain("/work/main.py");
+  });
+
+  it("writes to main.js for javascript", () => {
+    const argv = buildWriteCodeArgv({ ...baseReq, language: "javascript" });
+    const cmd = argv[argv.length - 1];
+    expect(cmd).toContain("/work/main.js");
+  });
+});
 
 describe("buildDockerRunArgv", () => {
   it("includes --rm and container name", () => {
@@ -61,10 +102,10 @@ describe("buildDockerRunArgv", () => {
     expect(argv[idx + 1]).toBe("/tmp:rw,noexec,nosuid,size=64m");
   });
 
-  it("bind-mounts staging dir read-only at /work", () => {
+  it("mounts the named volume read-only at /work", () => {
     const argv = buildDockerRunArgv(baseReq);
     const idx = argv.indexOf("-v");
-    expect(argv[idx + 1]).toBe("/tmp/sandbox-staging/run_abc123:/work:ro");
+    expect(argv[idx + 1]).toBe("sandbox-staging-run_abc123:/work:ro");
   });
 
   it("sets working dir to /work", () => {
@@ -91,67 +132,126 @@ describe("buildDockerRunArgv", () => {
   });
 });
 
+/**
+ * Fake runner that distinguishes the 4 lifecycle steps by argv shape:
+ *   - argv[0] === "volume"  → volume create or rm
+ *   - argv[0] === "run" && mount contains ":rw" → write-code step
+ *   - argv[0] === "run" && mount contains ":ro" → code-exec step (the real run)
+ */
+function makeFakeRunner(opts: {
+  volumeCreateExit?: number;
+  writeExit?: number;
+  runExit?: number;
+  runStdout?: string;
+  runStderr?: string;
+  hangOnRun?: boolean;
+}): RunCommandFn {
+  return async (argv) => {
+    // Volume create / rm
+    if (argv[0] === "volume") {
+      if (argv[1] === "create") {
+        return { exitCode: opts.volumeCreateExit ?? 0, stdout: "", stderr: "" };
+      }
+      // rm
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
+    // Write-code step: mount has :rw
+    const volMount = argv.find((a) => a.includes(":/work:"));
+    if (argv[0] === "run" && volMount?.includes(":rw")) {
+      return { exitCode: opts.writeExit ?? 0, stdout: "", stderr: "" };
+    }
+    // Code-exec step: mount has :ro
+    if (opts.hangOnRun) {
+      return new Promise(() => { /* never resolves */ });
+    }
+    return {
+      exitCode: opts.runExit ?? 0,
+      stdout: opts.runStdout ?? "",
+      stderr: opts.runStderr ?? "",
+    };
+  };
+}
+
 describe("DockerLifecycle.exec", () => {
-  it("invokes runCommand with the built argv", async () => {
-    let captured: string[] | null = null;
+  it("creates volume, writes code, runs container, removes volume", async () => {
+    const calls: string[][] = [];
     const fake: RunCommandFn = async (argv) => {
-      captured = argv;
-      return { exitCode: 0, stdout: "hi\n", stderr: "" };
+      calls.push(argv);
+      return makeFakeRunner({ runStdout: "" })(argv);
     };
     const lc = new DockerLifecycle(fake);
     const result = await lc.exec(baseReq);
-    expect(captured).not.toBeNull();
-    expect(captured).toEqual(buildDockerRunArgv(baseReq));
+
+    // Step 1: volume create
+    expect(calls[0]).toEqual(["volume", "create", "sandbox-staging-run_abc123"]);
+    // Step 2: write code (volume mounted rw)
+    expect(calls[1]).toContain("sandbox-staging-run_abc123:/work:rw");
+    // Step 3: docker run (volume mounted ro)
+    expect(calls[2]).toContain("sandbox-staging-run_abc123:/work:ro");
+    // Step 4: volume rm
+    expect(calls[3]).toEqual(["volume", "rm", "sandbox-staging-run_abc123"]);
+
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("hi\n");
     expect(result.timedOut).toBe(false);
   });
 
-  it("passes timeoutMs derived from timeoutSec", async () => {
-    let capturedTimeout: number | undefined;
-    const fake: RunCommandFn = async (_argv, opts) => {
-      capturedTimeout = opts?.timeoutMs;
-      return { exitCode: 0, stdout: "", stderr: "" };
+  it("returns failure when volume create fails", async () => {
+    const lc = new DockerLifecycle(makeFakeRunner({ volumeCreateExit: 1 }));
+    const result = await lc.exec(baseReq);
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr).toContain("failed to create staging volume");
+    expect(result.timedOut).toBe(false);
+  });
+
+  it("returns failure when code write fails", async () => {
+    const lc = new DockerLifecycle(makeFakeRunner({ writeExit: 1 }));
+    const result = await lc.exec(baseReq);
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr).toContain("failed to write code");
+  });
+
+  it("still removes the volume even when code write fails", async () => {
+    const calls: string[][] = [];
+    const fake: RunCommandFn = async (argv) => {
+      calls.push(argv);
+      return makeFakeRunner({ writeExit: 1 })(argv);
     };
     const lc = new DockerLifecycle(fake);
-    await lc.exec({ ...baseReq, timeoutSec: 45 });
-    expect(capturedTimeout).toBe(45_000);
+    await lc.exec(baseReq);
+    const last = calls[calls.length - 1];
+    expect(last).toEqual(["volume", "rm", "sandbox-staging-run_abc123"]);
   });
 
   it("returns timedOut=true when the run exceeds the timeout", async () => {
-    // Runner that never resolves → the race's timeout branch wins.
-    const fake: RunCommandFn = () => new Promise(() => { /* never resolves */ });
-    const lc = new DockerLifecycle(fake);
+    const lc = new DockerLifecycle(makeFakeRunner({ hangOnRun: true }));
     const result = await lc.exec({ ...baseReq, timeoutSec: 0 });
-    // timeoutSec 0 → timeoutMs 0 → setTimeout fires immediately.
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).toBe(-1);
     expect(result.stderr).toMatch(/timed out/);
   });
 
-  it("surfaces a non-zero exit code on container failure", async () => {
-    const fake: RunCommandFn = async () => ({
-      exitCode: 1,
-      stdout: "",
-      stderr: "python: can't open file 'main.py': [Errno 2] No such file or directory",
-    });
+  it("still removes the volume after timeout", async () => {
+    const calls: string[][] = [];
+    const fake: RunCommandFn = async (argv) => {
+      calls.push(argv);
+      return makeFakeRunner({ hangOnRun: true })(argv);
+    };
     const lc = new DockerLifecycle(fake);
-    const result = await lc.exec(baseReq);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("No such file");
-    expect(result.timedOut).toBe(false);
+    await lc.exec({ ...baseReq, timeoutSec: 0 });
+    const last = calls[calls.length - 1];
+    expect(last).toEqual(["volume", "rm", "sandbox-staging-run_abc123"]);
   });
 
-  it("surfaces notFound as exitCode -1 with stderr", async () => {
-    const fake: RunCommandFn = async () => ({
-      exitCode: -1,
-      stdout: "",
-      stderr: "docker: command not found",
-      notFound: true,
-    });
-    const lc = new DockerLifecycle(fake);
+  it("surfaces stdout from the run", async () => {
+    const lc = new DockerLifecycle(makeFakeRunner({ runStdout: "hello\n" }));
     const result = await lc.exec(baseReq);
-    expect(result.exitCode).toBe(-1);
-    expect(result.timedOut).toBe(false);
+    expect(result.stdout).toBe("hello\n");
+  });
+
+  it("surfaces non-zero exit code", async () => {
+    const lc = new DockerLifecycle(makeFakeRunner({ runExit: 1, runStderr: "NameError" }));
+    const result = await lc.exec(baseReq);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("NameError");
   });
 });
