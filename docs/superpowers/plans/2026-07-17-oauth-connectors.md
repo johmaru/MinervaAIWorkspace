@@ -776,14 +776,14 @@ Ask user before `git push` unless they already authorized push.
 
 | Area | Status | Notes |
 |------|--------|--------|
-| Phase 0 | Pending | |
-| Phase 1 | Pending | |
-| Phase 2 GitHub | Pending | |
-| Phase 3 Google | Pending | |
-| Phase 4 Microsoft | Pending | |
-| Phase 5 UI | Pending | |
-| Phase 6 Docs | Pending | |
-| Phase 7 Verify | Pending | |
+| Phase 0 | Done | All 3 provider families verified, §20 filled |
+| Phase 1 | Done | Schema, provider-map, multi-provider dispatch, access-only persist |
+| Phase 2 GitHub | Done | OAuth App (no refresh), 4 tools, 18 tests |
+| Phase 3 Google | Done | 3 products, shared google-oauth helper, 16 tests |
+| Phase 4 Microsoft | Done | 2 products, shared microsoft-oauth helper, 11 tests |
+| Phase 5 UI | Done | SettingsModal multi-provider, ChatWindow labels |
+| Phase 6 Docs | Done | tool-calling, glossary, database, api-routes, README EN/JA |
+| Phase 7 Verify | Done | 89 test files / 1122 pass, typecheck clean, grep guards pass |
 
 ---
 
