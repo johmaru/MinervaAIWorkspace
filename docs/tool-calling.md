@@ -147,6 +147,50 @@ When `probeToolSupport` returns `{ supported: true }`, the search system message
 
 These tool names **never** contain `__` (the MCP separator), which is how built-in tools are distinguished from MCP tools during dispatch.
 
+### Sandbox tool (`sandbox_run`) — v0.4
+
+**Files:** `src/lib/sandbox/` (orchestrator in `index.ts`), wired in route.ts
+(tool list merge + dispatch case).
+
+Unlike the static `STREAM_TOOLS`, `sandbox_run` is conditionally exposed: the
+chat route calls `getSandboxToolsForRequest()` per request, which probes
+Docker availability and the prebuilt image. When Docker is off (or the image
+is missing, or `SANDBOX_ENABLED=false`), the tool is **not** in the list sent
+to the LLM — there is no runtime error, the tool simply doesn't exist for
+that turn.
+
+When exposed, `sandbox_run` is appended to `extraTools` alongside MCP and
+connection tools:
+
+```ts
+extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools, ...sandboxTools]
+```
+
+| Parameter | Type | Notes |
+|-----------|------|-------|
+| `preset` | `"code_run"` | Only `code_run` is implemented in v0.4. |
+| `language` | `"python" \| "javascript"` | Defaults to `python`. `typescript`/`bash` rejected by policy. |
+| `code` | `string` | Inline source. Required. Max 100k chars. |
+
+**Dispatch:** the route calls `runSandbox(parsedArgs)` and prefixes the
+returned JSON with `[sandbox untrusted output]\n` so the model treats
+stdout/stderr as data, not instructions (Tier 1 light sanitize, spec §7.1).
+
+**Error codes** (stable, in the result's `error.code`):
+`docker_unavailable`, `image_missing`, `insufficient_host_memory`,
+`concurrent_limit`, `invalid_args`, `preset_unknown`, `tier_forbidden`,
+`unsupported_input`, `staging_failed`, `timeout`, `container_failed`,
+`internal_error`.
+
+**Relationship to `run_command`:** the sandbox does **not** replace
+`run_command` (spec §8.1). `run_command` runs whitelisted read-only commands
+on the host; `sandbox_run` runs arbitrary inline code in an isolated,
+network-less container. Both coexist in `STREAM_TOOLS` / `extraTools`.
+
+See [Sandbox Architecture](./superpowers/specs/2026-07-15-sandbox-architecture-design.md)
+and [Install Skill](../.agents/skills/umanschat-install/SKILL.md) for the full
+design and setup.
+
 ### The `streamCompletion()` tool-use loop
 
 **File:** route.ts:1099–1367

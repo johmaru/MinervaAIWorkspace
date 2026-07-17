@@ -44,6 +44,13 @@ services:
       CHAT_EXPORT_PATH: ${CHAT_EXPORT_HOST_PATH:+/app/chat-export}
     ports:
       - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
+    # Optional: Sandbox (v0.4) — allow the app to spawn sibling sandbox
+    # containers via the host Docker socket. Uncomment to enable sandbox_run
+    # when the app itself runs in Compose. Without this, the tool is auto-off.
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
+    # environment:
+    #   SANDBOX_ENABLED: "auto"
 
   # Cloudflare Tunnel: expose the app over public HTTPS via a named tunnel.
   # When TUNNEL_TOKEN is not set, this does not start; access directly via localhost:3001.

@@ -50,6 +50,7 @@ import { appendChatExport } from "@/lib/chatExport";
 import { readWorkspaceFile, writeWorkspaceFile, listWorkspaceDirectory, runWorkspaceCommand } from "@/lib/workspace";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
+import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -467,6 +468,10 @@ export async function POST(req: Request) {
             // The probe was started early in the POST body (warmupToolProbe + early call).
             // Here we just await the result (overlapped with parallel processing for latency hiding).
             const toolSupport: ToolSupport | null = await toolSupportPromise;
+            // Probe sandbox availability (Docker + image) in parallel with the
+            // tool-use probe so the sandbox_run tool is only offered when the
+            // host can actually serve it. Returns [] when Docker is off.
+            const sandboxTools = await getSandboxToolsForRequest().catch(() => []);
             // In tool-use mode, exclude the pre-search system message:
             // the "search complete, do not re-search" message hinders the LLM's tool call result reference.
             const effectiveMessages = toolSupport?.supported
@@ -495,7 +500,7 @@ export async function POST(req: Request) {
               },
               toolSupport,
               send,
-              extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools],
+              extraTools: [...mcpToolsToOpenAIFormat(mcpTools), ...connectionTools, ...sandboxTools],
               mcpConnections,
               connectionRows,
               timeRange: body.timeRange,
@@ -1943,9 +1948,9 @@ async function streamCompletion({
       // Execute each tool call and append the result as a tool role message
       for (const tc of toolCalls) {
         let toolContent: string;
-        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string };
+        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string };
         try {
-          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string };
+          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string };
         } catch {
           parsedArgs = {};
         }
@@ -2059,6 +2064,20 @@ async function streamCompletion({
             toolContent = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "run_command", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "sandbox_run") {
+          send?.("status", { label: t(locale, "chat.statusToolSandboxRun") });
+          const tTool = Date.now();
+          try {
+            // runSandbox accepts unknown and validates via the policy gate.
+            // Pass the full parsed args; never pass host paths through.
+            const result = await runSandbox(parsedArgs);
+            // Mark the output as untrusted so the model treats stdout/stderr
+            // as data, not instructions (Tier 1 light sanitize, spec §7.1).
+            toolContent = "[sandbox untrusted output]\n" + JSON.stringify(result);
+          } catch (err) {
+            toolContent = `Sandbox failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "sandbox_run", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "read_logs") {
           send?.("status", { label: t(locale, "chat.statusToolReadLogs") });
           const tTool = Date.now();

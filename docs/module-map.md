@@ -98,6 +98,11 @@ chat route and other API routes.
 - **`tunnel.ts`** — Cloudflare Tunnel binary management. Borderline 🔴 — see below.
 - **`toolProbe.ts`** / **`toolCallSanitizer.ts`** — tool support detection.
 - **`urlExtract.ts`** / **`wikipedia.ts`** / **`clientFetch.ts`** — utility clients.
+- **`sandbox/`** — isolated code execution (Tier 1 `code_run` only in v0.4).
+  Docker-backed; `runSandbox()` orchestrates policy → admission → staging →
+  lifecycle → sanitize. Read [Sandbox Architecture](./superpowers/specs/2026-07-15-sandbox-architecture-design.md)
+  and [Tool Calling](./tool-calling.md) first. `🟡` — wired into the chat
+  route; changing the `sandbox_run` tool shape or error codes affects the LLM.
 
 ### `src/db/schema.ts`
 
