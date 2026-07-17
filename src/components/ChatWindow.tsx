@@ -8,6 +8,7 @@ import { AttachmentBar } from "@/components/AttachmentBar";
 import { McpPanel } from "@/components/McpPanel";
 import { useI18n } from "@/components/I18nProvider";
 import { clientFetch } from "@/lib/clientFetch";
+import { PROVIDER_LABEL } from "@/lib/connections/provider-map";
 import { MotionButton, Accordion } from "@/components/ui/motion";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -392,7 +393,7 @@ export const ChatWindow = memo(function ChatWindow({
                                   );
                                 }}
                               />
-                              <span>{conn.workspaceName ?? "Notion"}</span>
+                              <span>{conn.workspaceName ?? PROVIDER_LABEL[conn.provider as keyof typeof PROVIDER_LABEL] ?? conn.provider}</span>
                               <span className="text-muted-foreground">({conn.provider})</span>
                             </label>
                           ))}

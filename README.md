@@ -47,8 +47,8 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 
 - **Workspace tools** — model can read/write files, list dirs, run shell commands, and read app logs during streaming
 - **Sandbox code execution (experimental, v0.4)** — isolated `sandbox_run` tool (Python/JS) via Docker; auto-off when Docker/image missing. See [Sandbox](#sandbox-code-execution-optional)
-- **MCP server integration** — Streamable HTTP / legacy SSE / stdio; optional request headers; connection test; SSRF-guarded URLs (`MCP_ALLOW_PRIVATE_URLS` for self-host). Google Drive, GitHub, Slack, etc. via remote MCP
-- **Connections (Notion)** — OAuth; `notion_search` / `notion_get_page` / `notion_get_blocks`; per-thread enable via ＋ menu
+- **MCP server integration** — Streamable HTTP / legacy SSE / stdio; optional request headers; connection test; SSRF-guarded URLs (`MCP_ALLOW_PRIVATE_URLS` for self-host)
+- **Connections (OAuth)** — Notion, GitHub, Gmail, Google Drive, Google Calendar, Outlook Mail, Outlook Calendar; per-thread enable via ＋ menu
 - **Todo list** — sidebar ✓ UI + AI tools for create/list/update/delete (priority, due dates, embeddings)
 
 ### Personalization & skills
@@ -326,6 +326,9 @@ For Docker HTTP embedder, set `EMBED_PROVIDER=http`, `EMBED_MODEL=LiquidAI/LFM2.
 | `ALLOWED_REGISTRATION_IPS` | Comma-separated IPs/CIDRs (empty = any; fail-closed if IP unknown) | — |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional Google OAuth | — |
 | `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` | Notion Connections OAuth | — |
+| `GITHUB_CONNECTIONS_CLIENT_ID` / `GITHUB_CONNECTIONS_CLIENT_SECRET` | GitHub Connections OAuth | — |
+| `GOOGLE_CONNECTIONS_CLIENT_ID` / `GOOGLE_CONNECTIONS_CLIENT_SECRET` | Gmail / Drive / Calendar Connections OAuth (separate from login) | — |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` | Outlook Mail / Calendar Connections OAuth | — / `common` |
 | `TUNNEL_TOKEN` | Cloudflare Tunnel token | — |
 | `MCP_ALLOW_PRIVATE_URLS` | Allow http + private IPs for remote MCP (self-host/dev) | `false` |
 
@@ -340,14 +343,29 @@ For Docker HTTP embedder, set `EMBED_PROVIDER=http`, `EMBED_MODEL=LiquidAI/LFM2.
 | `SANDBOX_DEFAULT_TIMEOUT_SEC` | Wall-clock timeout | `30` |
 | `SANDBOX_STDOUT_MAX_BYTES` | stdout/stderr cap after sanitize | `4096` |
 
-## Notion Connection Setup
+## OAuth Connection Setup
 
-1. Create a **public** integration at [notion.so/developers](https://www.notion.so/developers).
-2. Redirect URI: `http://localhost:3001/api/connections/notion/callback` (adjust host for deploy).
-3. Set `NOTION_CLIENT_ID`, `NOTION_CLIENT_SECRET`, and `AUTH_URL` in `.env`.
-4. Restart / recreate app if needed.
-5. Settings → Connections → Connect Notion.
-6. Per-thread: ＋ → Connections → enable Notion.
+Connections let the AI access external services during chat. Seven providers are supported:
+Notion, GitHub, Gmail, Google Drive, Google Calendar, Outlook Mail, Outlook Calendar.
+
+### General steps
+
+1. Create OAuth credentials at the provider's developer console.
+2. Set redirect URIs to `{AUTH_URL}/api/connections/{provider}/callback` for each provider.
+3. Set the env vars (see table above) in `.env` and save in Settings.
+4. Settings → Connections → click Connect for each provider.
+5. Per-thread: ＋ → Connections → enable the connections you want active.
+
+### Provider-specific notes
+
+| Provider | Console | Redirect URI path | Env vars |
+|----------|---------|--------------------|----------|
+| Notion | [notion.so/developers](https://www.notion.so/developers) | `/api/connections/notion/callback` | `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` |
+| GitHub | [github.com/settings/developers](https://github.com/settings/developers) | `/api/connections/github/callback` | `GITHUB_CONNECTIONS_CLIENT_ID` / `GITHUB_CONNECTIONS_CLIENT_SECRET` |
+| Gmail / Drive / Calendar | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | `/api/connections/{gmail,google_drive,google_calendar}/callback` | `GOOGLE_CONNECTIONS_CLIENT_ID` / `GOOGLE_CONNECTIONS_CLIENT_SECRET` |
+| Outlook Mail / Calendar | [Microsoft Entra ID](https://entra.microsoft.com) | `/api/connections/{outlook,outlook_calendar}/callback` | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` |
+
+> **Google Connections ≠ login**: `GOOGLE_CONNECTIONS_CLIENT_ID` is separate from `GOOGLE_CLIENT_ID` (Auth.js login). Create a distinct OAuth client.
 
 List both localhost and tunnel callback URLs if you use dual access.
 

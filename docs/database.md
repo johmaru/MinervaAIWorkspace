@@ -249,20 +249,22 @@ Per-user MCP (Model Context Protocol) server connection definitions. Enabled/dis
 
 ### `connections`
 
-External services OAuth-authorized by the user (e.g. Notion). The `provider` enum is extensible (currently only `notion`). Enabled/disabled per thread via `threads.connection_ids`.
+External services OAuth-authorized by the user. The `provider` enum includes: `notion`, `gmail`, `google_drive`, `google_calendar`, `github`, `outlook`, `outlook_calendar`. Enabled/disabled per thread via `threads.connection_ids`.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | text PK | UUID |
 | `user_id` | text NOT NULL | FK → `users.id`, `CASCADE` |
-| `provider` | text NOT NULL | enum: `notion` |
-| `access_token` | text NOT NULL | only for rows with obtained tokens |
-| `refresh_token` | text NOT NULL | |
-| `workspace_name` | text | display metadata |
-| `workspace_icon` | text | display metadata |
-| `bot_id` | text | |
-| `owner_name` | text | display metadata |
-| `owner_email` | text | display metadata |
+| `provider` | text NOT NULL | enum: `notion`, `gmail`, `google_drive`, `google_calendar`, `github`, `outlook`, `outlook_calendar` |
+| `access_token` | text NOT NULL | OAuth access token |
+| `refresh_token` | text | nullable — GitHub OAuth App tokens don't expire (no refresh token); Google/Microsoft may have one |
+| `scopes` | text | space-separated granted scopes (nullable; legacy Notion rows have none) |
+| `expires_at` | integer | timestamp_ms; access-token expiry (nullable; GitHub tokens don't expire) |
+| `workspace_name` | text | display metadata (e.g. "Gmail", GitHub login, mailbox name) |
+| `workspace_icon` | text | display metadata (avatar URL when available) |
+| `bot_id` | text | provider user ID string |
+| `owner_name` | text | display name / login |
+| `owner_email` | text | account email when known |
 | `created_at` | integer NOT NULL | timestamp_ms, default now |
 | `updated_at` | integer NOT NULL | timestamp_ms, default now |
 

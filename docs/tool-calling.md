@@ -435,11 +435,23 @@ For stdio servers, `conn.client.close()` terminates the child process. Connectio
 
 ## Connections (OAuth-Based Providers)
 
-**Files:** `src/lib/connections/index.ts`, `src/lib/connections/notion.ts`
+**Files:** `src/lib/connections/index.ts`, `src/lib/connections/provider-map.ts`, `src/lib/connections/types.ts`, per-provider modules (`notion.ts`, `github.ts`, `gmail.ts`, `google-drive.ts`, `google-calendar.ts`, `outlook.ts`, `outlook-calendar.ts`), shared OAuth helpers (`google-oauth.ts`, `microsoft-oauth.ts`)
 
 Connections are OAuth-based integrations with external services. Unlike MCP (which connects to tool servers), connections wrap a provider's REST API behind tool definitions, with automatic token management.
 
-Currently, **Notion** is the only implemented provider.
+Seven providers are implemented:
+
+| Provider | Tool prefix | Scopes | OAuth client env |
+|----------|-------------|--------|-------------------|
+| Notion | `notion_` | (Notion internal) | `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` |
+| GitHub | `github_` | `read:user repo` | `GITHUB_CONNECTIONS_CLIENT_ID` / `GITHUB_CONNECTIONS_CLIENT_SECRET` |
+| Gmail | `gmail_` | `gmail.readonly` | `GOOGLE_CONNECTIONS_CLIENT_ID` / `GOOGLE_CONNECTIONS_CLIENT_SECRET` |
+| Google Drive | `gdrive_` | `drive.readonly` | (same Google env) |
+| Google Calendar | `gcal_` | `calendar.readonly calendar.events` | (same Google env) |
+| Outlook (Mail) | `outlook_` | `offline_access User.Read Mail.Read` | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` |
+| Outlook Calendar | `outcal_` | `offline_access User.Read Calendars.Read Calendars.ReadWrite` | (same Microsoft env) |
+
+**Google Connections credentials are separate from Auth.js login** (`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`). Do not reuse login credentials for API connectors.
 
 ### Notion OAuth flow
 
@@ -491,10 +503,14 @@ All Notion API calls use `Notion-Version: 2026-03-11` header and `Bearer {access
 **Persistence:** When `dispatchConnectionTool` returns refreshed tokens, the chat route persists them to the DB (route.ts:1333–1341):
 
 ```typescript
-if (result.newAccessToken && result.newRefreshToken) {
-  await db.update(connections)
-    .set({ accessToken: result.newAccessToken, refreshToken: result.newRefreshToken, updatedAt: new Date() })
-    .where(eq(connections.id, conn.id));
+if (result.newAccessToken) {
+  const updates: Record<string, unknown> = {
+    accessToken: result.newAccessToken,
+    updatedAt: new Date(),
+  };
+  if (result.newRefreshToken) updates.refreshToken = result.newRefreshToken;
+  if (result.newExpiresAt) updates.expiresAt = result.newExpiresAt;
+  await db.update(connections).set(updates).where(eq(connections.id, conn.id));
 }
 ```
 
@@ -513,12 +529,12 @@ Unlike MCP, connections are **stateless** HTTP APIs — no persistent connection
 
 ### Dispatch during streaming
 
-When the model calls a connection tool (route.ts:1318–1344):
+When the model calls a connection tool:
 
-1. Check if the tool name starts with `notion_`.
-2. Use the first matching connection row (Notion is currently the only provider).
-3. `dispatchConnectionTool(conn, tc.name, connArgs)` — routes to `dispatchNotionTool` based on `conn.provider`.
-4. If refreshed tokens are returned, persist them to the DB.
+1. `resolveProviderFromToolName(tc.name)` — matches the tool name against provider prefixes (`notion_`, `gmail_`, `gdrive_`, `gcal_`, `github_`, `outlook_`, `outcal_`).
+2. Find the matching connection row: `connectionRows.find((c) => c.provider === provider)`.
+3. `dispatchConnectionTool(conn, tc.name, connArgs)` — routes to the provider-specific dispatch function based on `conn.provider`.
+4. If refreshed tokens are returned (`newAccessToken`), persist to DB: access-only persist allowed; `refreshToken` and `expiresAt` updated only when present.
 
 ---
 

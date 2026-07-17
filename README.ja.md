@@ -47,8 +47,8 @@
 
 - **ワークスペースツール** — ストリーミング中にファイル読み書き、ディレクトリ一覧、シェル実行、アプリログ読み取り
 - **サンドボックスコード実行（実験的、v0.4）** — Docker 隔離の `sandbox_run`（Python/JS）。Docker/イメージが無い場合は自動オフ。[サンドボックス](#サンドボックスコード実行任意) を参照
-- **MCP サーバー統合** — Streamable HTTP / レガシー SSE / stdio。任意のリクエストヘッダー、接続テスト、SSRF ガード（`MCP_ALLOW_PRIVATE_URLS` でセルフホスト緩和）。Google Drive / GitHub / Slack 等はリモート MCP 経由
-- **コネクション（Notion）** — OAuth。`notion_search` / `notion_get_page` / `notion_get_blocks`。スレッド単位で＋メニューから有効化
+- **MCP サーバー統合** — Streamable HTTP / レガシー SSE / stdio。任意のリクエストヘッダー、接続テスト、SSRF ガード（`MCP_ALLOW_PRIVATE_URLS` でセルフホスト緩和）
+- **コネクション（OAuth）** — Notion、GitHub、Gmail、Google Drive、Google Calendar、Outlook Mail、Outlook Calendar。スレッド単位で＋メニューから有効化
 - **Todo リスト** — サイドバー ✓ UI + AI ツールでの作成/一覧/更新/削除（優先度・期限・埋め込み）
 
 ### パーソナライズ・スキル
@@ -326,6 +326,9 @@ Docker の HTTP embedder を使う場合: `EMBED_PROVIDER=http`、`EMBED_MODEL=L
 | `ALLOWED_REGISTRATION_IPS` | 登録許可 IP/CIDR（空 = 全許可。IP 不明時は拒否） | — |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 任意の Google OAuth | — |
 | `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` | Notion コネクション用 OAuth | — |
+| `GITHUB_CONNECTIONS_CLIENT_ID` / `GITHUB_CONNECTIONS_CLIENT_SECRET` | GitHub コネクション用 OAuth | — |
+| `GOOGLE_CONNECTIONS_CLIENT_ID` / `GOOGLE_CONNECTIONS_CLIENT_SECRET` | Gmail / Drive / Calendar コネクション用 OAuth（ログインとは別） | — |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` | Outlook Mail / Calendar コネクション用 OAuth | — / `common` |
 | `TUNNEL_TOKEN` | Cloudflare Tunnel トークン | — |
 | `MCP_ALLOW_PRIVATE_URLS` | リモート MCP で http とプライベート IP を許可（セルフホスト/開発） | `false` |
 
@@ -340,14 +343,29 @@ Docker の HTTP embedder を使う場合: `EMBED_PROVIDER=http`、`EMBED_MODEL=L
 | `SANDBOX_DEFAULT_TIMEOUT_SEC` | 壁時計タイムアウト | `30` |
 | `SANDBOX_STDOUT_MAX_BYTES` | サニタイズ後の stdout/stderr 上限 | `4096` |
 
-## Notion 連携設定
+## OAuth コネクション設定
 
-1. [notion.so/developers](https://www.notion.so/developers) で **public** インテグレーションを作成。
-2. リダイレクト URI: `http://localhost:3001/api/connections/notion/callback`（デプロイに合わせて調整）。
-3. `.env` に `NOTION_CLIENT_ID`、`NOTION_CLIENT_SECRET`、`AUTH_URL` を設定。
-4. 必要ならアプリを再作成/再起動。
-5. 設定 → コネクション → Notion に接続。
-6. スレッド単位: ＋ → コネクション → Notion をオン。
+コネクション機能を使うと、チャット中に AI が外部サービスにアクセスできます。7 つのプロバイダーに対応:
+Notion、GitHub、Gmail、Google Drive、Google Calendar、Outlook Mail、Outlook Calendar。
+
+### 共通手順
+
+1. 各プロバイダーの開発者コンソールで OAuth クレデンシャルを作成。
+2. リダイレクト URI を `{AUTH_URL}/api/connections/{provider}/callback` に設定。
+3. 上記の環境変数を `.env` に設定し、設定画面で保存。
+4. 設定 → コネクション → 各プロバイダーの「接続」をクリック。
+5. スレッド単位: ＋ → コネクション → 有効にしたいものをオン。
+
+### プロバイダー別メモ
+
+| プロバイダー | コンソール | リダイレクト URI パス | 環境変数 |
+|----------|---------|--------------------|----------|
+| Notion | [notion.so/developers](https://www.notion.so/developers) | `/api/connections/notion/callback` | `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` |
+| GitHub | [github.com/settings/developers](https://github.com/settings/developers) | `/api/connections/github/callback` | `GITHUB_CONNECTIONS_CLIENT_ID` / `GITHUB_CONNECTIONS_CLIENT_SECRET` |
+| Gmail / Drive / Calendar | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | `/api/connections/{gmail,google_drive,google_calendar}/callback` | `GOOGLE_CONNECTIONS_CLIENT_ID` / `GOOGLE_CONNECTIONS_CLIENT_SECRET` |
+| Outlook Mail / Calendar | [Microsoft Entra ID](https://entra.microsoft.com) | `/api/connections/{outlook,outlook_calendar}/callback` | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` |
+
+> **Google Connections ≠ ログイン**: `GOOGLE_CONNECTIONS_CLIENT_ID` は `GOOGLE_CLIENT_ID`（Auth.js ログイン）とは別物です。別の OAuth クライアントを作成してください。
 
 デュアルアクセス時は localhost とトンネル両方のコールバック URL を登録。
 

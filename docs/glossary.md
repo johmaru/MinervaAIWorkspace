@@ -240,14 +240,17 @@ See: [Tool Calling](./tool-calling.md)
 
 ### Connection
 
-An external service integration (currently: Notion). Enabled per-thread via
+An external service integration. Enabled per-thread via
 `thread.connectionIds`. Uses OAuth for authentication.
+
+**Implemented providers:** Notion, GitHub, Gmail, Google Drive, Google Calendar,
+Outlook Mail, Outlook Calendar. Each has its own tool-name prefix (e.g. `notion_`,
+`gmail_`, `github_`) and dispatches via `resolveProviderFromToolName`.
 
 **Remote MCP vs OAuth Connection:** Remote MCP servers own their own OAuth/tokens
 (the MCP server handles auth, UmansChat only passes static headers). OAuth
-Connections (Notion pattern) store tokens in UmansChat and expose hardcoded
-tools. Use remote MCP for Google Drive, GitHub, Slack, etc. — do not build
-first-party OAuth Connection providers for each SaaS.
+Connections store tokens in UmansChat and expose hardcoded tools. Use remote MCP
+for services not in the provider list above.
 
 DB table: `connections`
 

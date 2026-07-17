@@ -18,7 +18,7 @@ All routes live under `src/app/api/`. Each route file exports `runtime` and `dyn
 | `src/app/api/skills/` | `route.ts`, `[id]/route.ts` |
 | `src/app/api/skill-candidates/` | `route.ts`, `[id]/route.ts` |
 | `src/app/api/mcp-servers/` | `route.ts`, `[id]/route.ts`, `test/route.ts` |
-| `src/app/api/connections/` | `route.ts`, `notion/authorize/route.ts`, `notion/callback/route.ts` |
+| `src/app/api/connections/` | `route.ts`, `{provider}/authorize/route.ts`, `{provider}/callback/route.ts` for each of: `notion`, `github`, `gmail`, `google_drive`, `google_calendar`, `outlook`, `outlook_calendar` |
 | `src/app/api/tunnel/` | `route.ts` |
 | `src/app/api/tor/` | `route.ts` |
 | `src/app/api/global-instructions/` | `route.ts`, `[id]/route.ts` |
@@ -1096,7 +1096,7 @@ Note: `transport` can now be changed. When switching to `stdio`, `url`/`headers`
 
 ## Connections
 
-OAuth-based connections to external services (currently Notion). See [Tool Calling](./tool-calling.md).
+OAuth-based connections to external services (Notion, GitHub, Gmail, Google Drive, Google Calendar, Outlook Mail, Outlook Calendar). See [Tool Calling](./tool-calling.md).
 
 ### `GET /api/connections` — List connections
 
