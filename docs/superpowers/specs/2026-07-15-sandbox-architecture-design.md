@@ -304,9 +304,9 @@ PE/ELF 実行可能バイナリ → Tier 3 強制
 
 ### 8.4 添付・データ配置
 
-- 解析対象ファイルのステージング場所、Docker（`:memory:` ビルド）と exe（user data root）でのパス差は未決（§12.2 Q6）。
 - **隔離単位（D4）**: セマンティクスは **request 単位**（1 `sandbox_run` = 1 寿命。実行間で状態を共有しない）。
-- 原則: サンドボックスに渡すパスは Lifecycle Manager が発行する capability 付き参照とし、AI にホスト絶対パスを自由指定させない。
+- **ステージング（D5）**: run ごと一時ディレクトリ。Lifecycle のみが実パスを知る。コンテナへは **read-only bind mount**。終了時（成功・失敗・タイムアウト問わず）に削除。
+- 原則: ツール引数は `inputRef` / `attachmentId` / インライン `code` 等のみ。**AI にホスト絶対パスを自由指定させない**。
 
 ---
 
@@ -327,10 +327,11 @@ type SandboxPreset = {
 ### code_run (Tier 1)
 
 ```
-ツール: sandbox_run_code(language, code)
+ツール: sandbox_run(preset=code_run, language, code?, inputRef?)
 防衛層: コンテナ隔離 + タイムアウト + リソース制限 + 軽量出力サニタイズ
 ネットワーク: 無し
 タイムアウト: 30秒
+入力: インライン code および/または staging 上のファイル（D5, ro mount）
 ```
 
 ### file_inspect (Tier 2)
@@ -394,6 +395,7 @@ VM: 実行後自動破棄
   - [ ] **request 単位寿命**（1 run = create→run→destroy。状態非共有 — D4）
   - [ ] **prebuilt イメージのみ**（実行時の汎用 `pip install` 禁止 — D4）
   - [ ] **入場制御**: ホスト空きメモリが閾値未満なら `sandbox_run` を失敗させる（D4）
+  - [ ] **run ごと staging dir** + ro mount + 終了時削除（D5）。ツールは path ではなく ref / インライン code
   - [ ] 軽量出力サニタイズ（長さ上限・制御文字除去・untrusted マーク）
 - [ ] Tier 型・インターフェース枠のみ（Tier 2/3 拡張ポイント）
 - [ ] マジックナンバーによる Tier 強制判定（最低限 PE/ELF → 拒否 or Tier3 相当）
@@ -433,6 +435,7 @@ VM: 実行後自動破棄
 | **D2**（旧 Q1） | 2026-07-17 | **v0.4: Lifecycle Manager は app プロセス内。後で Compose 別サービスへ移行可能にする** | 実験速度を優先。権限分離は「LLM → プリセット API のみ」（Docker 非接触）で確保。`SandboxLifecycle` インターフェースで実装を差し替え可能にし、本番強化時は B（別サービス + socket を app から外す）へ移す |
 | **D3**（旧 Q3） | 2026-07-17 | **薄いツール面 + 内部 Lifecycle。チャットは `sandbox_run` 相当の少数ツールのみ** | route に実行ロジックを直書きしない。引数はプリセット + 入力に閉じる。Docker オフ時はツール非露出。MCP は後追いオプション |
 | **D4**（旧 Q5） | 2026-07-17 | **隔離セマンティクスは request 単位。prebuilt イメージ必須。warm pool は将来最適化。入場制御でホスト空きメモリ閾値未満ならツール失敗** | 実行間の状態共有なし（横漏れ最小化）。遅延の主因は都度 install / pull なので実行時パッケージ導入は禁止しイメージを事前用意。pool は「きれいな環境」セマンティクスを壊さず start コストだけ削る。モデルが無制限にコンテナを立てないよう、空きメモリが `SANDBOX_MIN_FREE_MEM_PERCENT`（仮）等の閾値を下回ったら `sandbox_run` を即座に失敗（ツール結果で理由を返す）。同時実行数上限も併せて検討（実装詳細） |
+| **D5**（旧 Q6） | 2026-07-17 | **最初から run ごと staging。ro bind mount。終了時削除。AI は実パス不可** | 「後で A」にするより v0.4 から枠を持つ方が、添付・ファイル入力の拡張が楽。寿命は D4 の request と一致。配置の既定は実装で `data/sandbox-staging/<runId>/` または OS temp + 確実な掃除。配布形態差は Lifecycle 内に閉じる |
 
 **D4 補足 — 入場制御（admission control）**
 
@@ -449,8 +452,7 @@ VM: 実行後自動破棄
 
 | ID | 論点 | 選択肢・メモ |
 |----|------|--------------|
-| Q6 | 添付のステージング | user data root 配下? 一時 dir? capability 参照の形。**次に決める候補** |
-| Q4 | 長時間ジョブ | 同期（SSE ブロック） vs 非同期ジョブ + 進捗イベント |
+| Q4 | 長時間ジョブ | 同期（SSE ブロック） vs 非同期ジョブ + 進捗イベント。**次に決める候補**（v0.4 は短タイムアウトなら同期でも可） |
 | Q7 | スクリプトの Tier | `.py` 等を常に Tier 1 でよいか。攻撃ペイロードのスクリプトは? |
 | Q8 | 翻訳モデルのモデル選択 | メイン LLM と同一 / 安価・小モデル。レイテンシとコスト |
 | Q9 | バックAI hard veto の UX | ユーザーへの表示文言、リトライ可否、ログ |
@@ -519,3 +521,5 @@ VM: 実行後自動破棄
 6. **D3（チャット露出）**: 薄いツール面（`sandbox_run` 相当）→ Policy Gate → SandboxLifecycle。MCP は将来。
 
 7. **D4（隔離単位 + 入場制御）**: request セマンティクス + prebuilt 必須 + 将来 warm pool。空きメモリ閾値未満および（推奨）同時実行上限で `sandbox_run` 失敗。
+
+8. **D5（ステージング）**: run ごと一時 dir + ro mount + 終了時削除。ツール引数は ref / インライン code のみ。
