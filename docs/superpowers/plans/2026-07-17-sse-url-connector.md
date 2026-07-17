@@ -3,7 +3,7 @@
 > **For agentic workers:** Implement task-by-task. Steps use checkbox (`- [ ]` / `- [x]`) syntax for tracking.  
 > **Status:** **Done** — all phases shipped, committed to `develop` (cf79d4f).  
 > **Created:** 2026-07-17  
-> **Last progress update:** 2026-07-17 (implementation complete)
+> **Last progress update:** 2026-07-17 (task checkboxes audited against cf79d4f)
 
 **Goal:** Make remote MCP over URL a production-quality “connector”: Streamable HTTP + explicit legacy SSE, optional request headers (Bearer / API key), connection test, SSRF guard, and UI that can register `https://…/mcp` or `https://…/sse` servers. Do **not** implement first-party OAuth Connection providers (Google Drive, etc.) in this plan — those stay on remote/stdio MCP.
 
@@ -15,8 +15,8 @@
 | Phase 1 — Schema + URL guard + connect core | **Done** | `headers` column + `sse` transport (migration 0013); `mcpUrlGuard.ts`; fresh Client per fallback attempt |
 | Phase 2 — API (CRUD + test) | **Done** | POST/PATCH accept sse+headers; GET masks as `hasHeaders`; `POST /api/mcp-servers/test` with 15s timeout |
 | Phase 3 — UI + i18n | **Done** | McpPanel: SSE option, headers textarea, Test button, lock icon; JA+EN i18n keys |
-| Phase 4 — Docs + README | **Done** | tool-calling.md, database.md, api-routes.md, glossary.md, READMEs, `.env.example` |
-| Phase 5 — Verification | **Done** | 1044 tests pass (1 skipped), tsc clean, pushed to develop |
+| Phase 4 — Docs + README | **Done** (1 residual) | tool-calling.md, database.md, api-routes.md, glossary.md, READMEs, `.env.example`. **`docs/settings-env.md` still missing `MCP_ALLOW_PRIVATE_URLS`** |
+| Phase 5 — Verification | **Done** (1 residual) | 1044 tests pass (1 skipped), tsc clean, pushed to develop. **Manual live-MCP smoke not recorded** |
 | OAuth Connection providers (Drive, etc.) | **Out of scope** | Use remote MCP instead |
 | MCP OAuth 2.1 / Dynamic Client Registration | **Out of scope (v2)** | |
 
@@ -177,16 +177,16 @@ README.md, README.ja.md
 
 **What:** Confirm real SDK APIs before coding. Do not invent option names.
 
-- [ ] Read `node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse.d.ts` and `streamableHttp.d.ts`
-- [ ] Confirm how to attach `Authorization` to SSE (EventSource) **and** POST message path
-- [ ] Note if `authProvider` is required for any common remote servers (v1 still uses static headers only)
-- [ ] Re-read `docs/tool-calling.md` MCP section and `src/lib/mcpClient.ts` connect path
-- [ ] Write a short “Allowed APIs” note in the PR/commit body (which options carry headers)
+- [x] Read `node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse.d.ts` and `streamableHttp.d.ts`
+- [x] Confirm how to attach `Authorization` to SSE (EventSource) **and** POST message path
+- [x] Note if `authProvider` is required for any common remote servers (v1 still uses static headers only)
+- [x] Re-read `docs/tool-calling.md` MCP section and `src/lib/mcpClient.ts` connect path
+- [x] Write a short “Allowed APIs” note in the PR/commit body (which options carry headers)
 
 **Verification:**
 
-- [ ] Headers path documented for both Streamable and SSE
-- [ ] Anti-pattern list: no query-string tokens, no reusing one Client after failed connect
+- [x] Headers path documented for both Streamable and SSE
+- [x] Anti-pattern list: no query-string tokens, no reusing one Client after failed connect
 
 **Anti-patterns:**
 
@@ -199,42 +199,43 @@ README.md, README.ja.md
 
 ### Task 1.1 — Schema + migration
 
-- [ ] Add `headers` JSON column to `mcpServers` in `src/db/schema.ts`
-- [ ] Extend `transport` enum to include `"sse"`
-- [ ] Generate migration with `bunx drizzle-kit generate` (do not hand-edit old migrations)
-- [ ] Apply migration in dev (`bunx drizzle-kit migrate` or `predev` path)
+- [x] Add `headers` JSON column to `mcpServers` in `src/db/schema.ts`
+- [x] Extend `transport` enum to include `"sse"`
+- [x] Generate migration with `bunx drizzle-kit generate` (do not hand-edit old migrations)
+- [x] Apply migration in dev (`bunx drizzle-kit migrate` or `predev` path)
 
-**Copy patterns from:** `docs/patterns/db-migration.md`, existing `mcpServers` block in `src/db/schema.ts` (~lines 209–226)
+**Copy patterns from:** `docs/patterns/db-migration.md`, existing `mcpServers` block in `src/db/schema.ts` (~lines 209–226)  
+**Landed:** `drizzle/0013_nifty_blob.sql`
 
 ### Task 1.2 — `mcpUrlGuard.ts`
 
-- [ ] Export e.g. `assertMcpRemoteUrl(url: string): { ok: true; url: URL } | { ok: false; reason: string }`
-- [ ] Allow `https:` always for remote
-- [ ] Allow `http:` only for loopback when private URLs allowed, or document strict https-only + env override
-- [ ] Reject private IPv4/IPv6, link-local, metadata IP `169.254.169.254` by default
-- [ ] Honor `MCP_ALLOW_PRIVATE_URLS=true` to relax for self-host
-- [ ] Tests: happy https, reject private, reject weird schemes, env override
+- [x] Export e.g. `assertMcpRemoteUrl(url: string): { ok: true; url: URL } | { ok: false; reason: string }`
+- [x] Allow `https:` always for remote
+- [x] Allow `http:` only for loopback when private URLs allowed, or document strict https-only + env override
+- [x] Reject private IPv4/IPv6, link-local, metadata IP `169.254.169.254` by default
+- [x] Honor `MCP_ALLOW_PRIVATE_URLS=true` to relax for self-host
+- [x] Tests: happy https, reject private, reject weird schemes, env override
 
 **File:** `src/lib/mcpUrlGuard.ts`, `src/lib/mcpUrlGuard.test.ts`  
 **Env for tests:** `// @vitest-environment node`
 
 ### Task 1.3 — `connectMcpServer` upgrade
 
-- [ ] Extend `McpServerConfig` with `headers: Record<string, string> | null` and `transport: "http" | "sse" | "stdio"`
-- [ ] `transport === "sse"`: single path using `SSEClientTransport` + headers; no Streamable attempt
-- [ ] `transport === "http"`: Streamable with headers on **new** Client; on failure log warn, **new** Client + SSE + headers
-- [ ] Pass headers via SDK `requestInit` (and EventSource custom fetch if Phase 0 requires it)
-- [ ] Never log header values (log only `hasHeaders: boolean` / server name)
-- [ ] stdio path unchanged; ignore headers
-- [ ] Unit tests with mocked transports or injectable connect hooks if pure unit is hard — at minimum test pure helpers (name parse already exists; add tests for config validation / header stripping of empty keys)
+- [x] Extend `McpServerConfig` with `headers: Record<string, string> | null` and `transport: "http" | "sse" | "stdio"`
+- [x] `transport === "sse"`: single path using `SSEClientTransport` + headers; no Streamable attempt
+- [x] `transport === "http"`: Streamable with headers on **new** Client; on failure log warn, **new** Client + SSE + headers
+- [x] Pass headers via SDK `requestInit` (and EventSource custom fetch if Phase 0 requires it)
+- [x] Never log header values (log only `hasHeaders: boolean` / server name)
+- [x] stdio path unchanged; ignore headers
+- [x] Unit tests with mocked transports or injectable connect hooks if pure unit is hard — at minimum test pure helpers (name parse already exists; add tests for config validation / header stripping of empty keys)
 
 **File:** `src/lib/mcpClient.ts`, expand `src/lib/mcpClient.test.ts`
 
 **Verification:**
 
-- [ ] `sse` never constructs `StreamableHTTPClientTransport`
-- [ ] `http` fallback constructs two separate Client lifecycles
-- [ ] Guard rejects bad URLs before network
+- [x] `sse` never constructs `StreamableHTTPClientTransport`
+- [x] `http` fallback constructs two separate Client lifecycles
+- [x] Guard rejects bad URLs before network
 
 **Anti-patterns:**
 
@@ -248,32 +249,32 @@ README.md, README.ja.md
 
 ### Task 2.1 — Create / update validation
 
-- [ ] `POST /api/mcp-servers`: accept `transport: "sse"`, `headers?: Record<string, string>`
-- [ ] `sse` and `http` require non-empty `url`; run `assertMcpRemoteUrl`
-- [ ] Normalize headers: trim keys/values; drop empty; optional max entry count (e.g. 20)
-- [ ] `stdio` must not persist headers (force null)
-- [ ] `PATCH /api/mcp-servers/[id]`: same rules
-- [ ] GET list: **do not return raw header values** — return `hasHeaders: boolean` (and omit `headers` or always null in JSON). Document that edit flows re-submit full headers if changing auth.
+- [x] `POST /api/mcp-servers`: accept `transport: "sse"`, `headers?: Record<string, string>`
+- [x] `sse` and `http` require non-empty `url`; run `assertMcpRemoteUrl`
+- [x] Normalize headers: trim keys/values; drop empty; optional max entry count (e.g. 20)
+- [x] `stdio` must not persist headers (force null)
+- [x] `PATCH /api/mcp-servers/[id]`: same rules
+- [x] GET list: **do not return raw header values** — return `hasHeaders: boolean` (and omit `headers` or always null in JSON). Document that edit flows re-submit full headers if changing auth.
 
 **Patterns:** `docs/patterns/api-route.md`, existing `src/app/api/mcp-servers/route.ts`
 
 ### Task 2.2 — Connection test route
 
-- [ ] Add `POST /api/mcp-servers/test`
-- [ ] Body: `{ name?, transport, url?, command?, args?, env?, headers? }` (same shape as create; id optional if testing saved server later)
-- [ ] Auth: `getSessionUser()` required
-- [ ] For remote: guard URL → `connectMcpServer` → `listMcpTools` → close client
-- [ ] Response 200: `{ ok: true, transportUsed: "http" | "sse" | "stdio", tools: [{ name, description }] }`
-- [ ] Soft failure 200 or 400: `{ ok: false, error: string }` — no stack traces to client
-- [ ] Timeout: reasonable upper bound (e.g. 15s) so hung SSE does not pin the request forever
-- [ ] Tests: 401 unauthenticated, 400 missing url, mock connect success/failure
+- [x] Add `POST /api/mcp-servers/test`
+- [x] Body: `{ name?, transport, url?, command?, args?, env?, headers? }` (same shape as create; id optional if testing saved server later)
+- [x] Auth: `getSessionUser()` required
+- [x] For remote: guard URL → `connectMcpServer` → `listMcpTools` → close client
+- [x] Response 200: `{ ok: true, transportUsed: "http" | "sse" | "stdio", tools: [{ name, description }] }`
+- [x] Soft failure 200 or 400: `{ ok: false, error: string }` — no stack traces to client
+- [x] Timeout: reasonable upper bound (e.g. 15s) so hung SSE does not pin the request forever
+- [x] Tests: 401 unauthenticated, 400 missing url, mock connect success/failure
 
 **File:** `src/app/api/mcp-servers/test/route.ts`, `test/route.test.ts`
 
 **Verification:**
 
-- [ ] Route tests green under node env
-- [ ] Existing http/stdio create still works
+- [x] Route tests green under node env
+- [x] Existing http/stdio create still works
 
 **Anti-patterns:**
 
@@ -286,31 +287,32 @@ README.md, README.ja.md
 
 ### Task 3.1 — `McpPanel`
 
-- [ ] Transport select: HTTP (Streamable / auto SSE), SSE (legacy URL), stdio
-- [ ] When http/sse: URL field placeholders `https://example.com/mcp` and `https://example.com/sse`
-- [ ] Headers UI (minimal viable): one textarea `Header-Name: value` per line, or key/value rows — parse client-side into object
-- [ ] “Test connection” button → `POST /api/mcp-servers/test` → show tool count or error inline
-- [ ] On successful add, clear sensitive fields from form state
-- [ ] List row: show transport badge; show lock/icon if `hasHeaders` without printing secrets
-- [ ] Delete / per-thread checkbox behavior unchanged
+- [x] Transport select: HTTP (Streamable / auto SSE), SSE (legacy URL), stdio
+- [x] When http/sse: URL field placeholders `https://example.com/mcp` and `https://example.com/sse`
+- [x] Headers UI (minimal viable): one textarea `Header-Name: value` per line, or key/value rows — parse client-side into object
+- [x] “Test connection” button → `POST /api/mcp-servers/test` → show tool count or error inline
+- [x] On successful add, clear sensitive fields from form state
+- [x] List row: show transport badge; show lock/icon if `hasHeaders` without printing secrets
+- [x] Delete / per-thread checkbox behavior unchanged
 
 **File:** `src/components/McpPanel.tsx`  
-**Pattern:** existing panel structure; `docs/patterns/component.md` if needed
+**Pattern:** existing panel structure; `docs/patterns/component.md` if needed  
+**Note:** HTTP option label is `HTTP (URL)` in i18n (behavior is Streamable + auto SSE).
 
 ### Task 3.2 — i18n
 
-- [ ] Add keys to Japanese first, then English mirror in `src/lib/i18n/dictionaries.ts`
-- [ ] Suggested keys: transport SSE label, headers label, headers placeholder, test button, test success/fail, hasHeaders indicator
+- [x] Add keys to Japanese first, then English mirror in `src/lib/i18n/dictionaries.ts`
+- [x] Suggested keys: transport SSE label, headers label, headers placeholder, test button, test success/fail, hasHeaders indicator
 
 ### Task 3.3 — Component tests
 
-- [ ] Submit body includes `transport: "sse"` and parsed `headers` when filled
-- [ ] Test button calls `/api/mcp-servers/test`
+- [x] Submit body includes `transport: "sse"` and parsed `headers` when filled
+- [x] Test button calls `/api/mcp-servers/test`
 
 **Verification:**
 
-- [ ] Manual smoke: register SSE URL → Test → enable on thread → tool call in chat (if a test MCP is available)
-- [ ] Component tests pass
+- [ ] Manual smoke: register SSE URL → Test → enable on thread → tool call in chat (if a test MCP is available) — **not recorded in commit notes**
+- [x] Component tests pass (`McpPanel.test.tsx`)
 
 **Anti-patterns:**
 
@@ -321,17 +323,17 @@ README.md, README.ja.md
 
 ## Phase 4 — Documentation + README
 
-- [ ] `docs/tool-calling.md` — document `sse` transport, headers, test API, Client-per-attempt fallback, request-scoped lifecycle
-- [ ] `docs/database.md` — `headers` column + transport enum
-- [ ] `docs/api-routes.md` — POST body fields, GET `hasHeaders`, `POST .../test`
-- [ ] `docs/glossary.md` — short “Remote MCP / SSE URL connector” under Tools & Integrations; clarify vs OAuth Connection
-- [ ] `docs/settings-env.md` — `MCP_ALLOW_PRIVATE_URLS` if documented env is the project norm
-- [ ] `README.md` + `README.ja.md` — how to add a remote MCP URL connector; note Drive/etc. via MCP not built-in OAuth; dual-file parity per `skill://readme-update-guide`
+- [x] `docs/tool-calling.md` — document `sse` transport, headers, test API, Client-per-attempt fallback, request-scoped lifecycle
+- [x] `docs/database.md` — `headers` column + transport enum
+- [x] `docs/api-routes.md` — POST body fields, GET `hasHeaders`, `POST .../test`
+- [x] `docs/glossary.md` — short “Remote MCP / SSE URL connector” under Tools & Integrations; clarify vs OAuth Connection
+- [ ] `docs/settings-env.md` — `MCP_ALLOW_PRIVATE_URLS` if documented env is the project norm — **still missing; only `.env.example` documents it**
+- [x] `README.md` + `README.ja.md` — how to add a remote MCP URL connector; note Drive/etc. via MCP not built-in OAuth; dual-file parity per `skill://readme-update-guide`
 
 **Verification:**
 
-- [ ] EN/JA README say the same things
-- [ ] No claim that Google Drive is a first-party Connection
+- [x] EN/JA README say the same things
+- [x] No claim that Google Drive is a first-party Connection
 
 ---
 
@@ -344,25 +346,27 @@ bun run test
 
 Checklist:
 
-- [ ] stdio MCP still connects and dispatches
-- [ ] Streamable HTTP URL works with `transport=http`
-- [ ] Legacy SSE URL works with `transport=sse`
-- [ ] Headers applied (mock server asserting Authorization, or integration against a known remote)
-- [ ] Private IP URLs rejected unless `MCP_ALLOW_PRIVATE_URLS=true`
-- [ ] GET list does not leak header values
-- [ ] Chat tool loop still uses `name__tool` and closes clients in `finally`
-- [ ] `git status --short` clean; commit message in English; push `develop` per AGENTS.md
-- [ ] No secrets committed
+- [x] stdio MCP still connects and dispatches (path unchanged; unit allowlist tests retained)
+- [x] Streamable HTTP URL works with `transport=http` (mocked transport tests in `mcpClient.test.ts`)
+- [x] Legacy SSE URL works with `transport=sse` (mocked transport tests)
+- [x] Headers applied (requestInit headers wired; unit coverage)
+- [x] Private IP URLs rejected unless `MCP_ALLOW_PRIVATE_URLS=true` (`mcpUrlGuard.test.ts`)
+- [x] GET list does not leak header values (`hasHeaders` masking in route)
+- [x] Chat tool loop still uses `name__tool` and closes clients in `finally` (`route.ts` passes `headers`)
+- [x] `git status --short` clean; commit message in English; push `develop` per AGENTS.md (`cf79d4f`)
+- [x] No secrets committed
+
+**Residual (optional follow-up):** live remote MCP smoke against a real `/sse` or `/mcp` server not recorded.
 
 ---
 
 ## Milestones (cost-aware)
 
-| Milestone | Phases | Outcome |
-|-----------|--------|---------|
-| **M1** | 0–2 | Headless: API + core can connect SSE/HTTP with headers and test |
-| **M2** | 3 | Users can configure from UI |
-| **M3** | 4–5 | Docs + release-ready verification |
+| Milestone | Phases | Outcome | Status |
+|-----------|--------|---------|--------|
+| **M1** | 0–2 | Headless: API + core can connect SSE/HTTP with headers and test | **Done** |
+| **M2** | 3 | Users can configure from UI | **Done** |
+| **M3** | 4–5 | Docs + release-ready verification | **Done** (residuals: settings-env.md + live smoke) |
 
 Implementers may ship M1 first if another model/session continues UI later.
 
