@@ -327,7 +327,7 @@ type SandboxPreset = {
 }
 ```
 
-ツールごとの I/O スキーマ・拒否理由コードは実装 plan で定義する（本 spec では名前と防衛レベルのみ）。
+ツール I/O と拒否コードのざっくり契約は **§12.1 D8 / D9**。実装 plan で TypeScript 型に落とす。
 
 ### code_run (Tier 1)
 
@@ -428,7 +428,7 @@ VM: 実行後自動破棄
 | exe 配布 | Docker Engine が使えるときのみサンドボックス有効。無ければ機能オフ |
 | 継続コスト | PE 解析・syscall トレース等のツールメンテ |
 
-**導入障壁**: Docker 必須はオンボーディングコストになる。対策として「インストール／Docker セットアップを案内する専用 AI コンテキスト」（例: `INSTALL.agents.md` や skills）を別途用意する案がある（§12.2 Q14）。サンドボックス本体の脅威モデルとは独立した DX 施策。
+**導入障壁**: Docker 必須はオンボーディングコストになる。対策は **D10** — `.agents/skills/umanschat-install/SKILL.md`（サンドボックス本体の脅威モデルとは独立した DX）。
 
 ---
 
@@ -445,6 +445,9 @@ VM: 実行後自動破棄
 | **D5**（旧 Q6） | 2026-07-17 | **最初から run ごと staging。ro bind mount。終了時削除。AI は実パス不可** | 「後で A」にするより v0.4 から枠を持つ方が、添付・ファイル入力の拡張が楽。寿命は D4 の request と一致。配置の既定は実装で `data/sandbox-staging/<runId>/` または OS temp + 確実な掃除。配布形態差は Lifecycle 内に閉じる |
 | **D6**（旧 Q4） | 2026-07-17 | **v0.4 は同期のみ。将来は heartbeat 同期 / 非同期ジョブを追加し設定で選択** | 30s 級の code_run は既存 tool loop で足りる。長時間（Tier 2/3・重い解析）向けにモードを増やすが、既定は同期のまま。設定は env および/または Settings UI（実装時に名前固定） |
 | **D7**（旧 Q7 + Q11） | 2026-07-17 | **インライン code → Tier 1 可。添付スクリプト → 最低 Tier 2。PE/ELF → Tier 3。プリセットが強制 Tier 未満なら拒否（自動格上げなし）** | 拡張子だけでは「ユーザーのコード」と「攻撃ペイロード」を区別できない。入力チャネルで分ける。v0.4 で Tier2/3 未実装なら該当入力は拒否。矛盾時の黙降格・自動格上げはしない |
+| **D8**（旧 Q12） | 2026-07-17 | **`sandbox_run` / 結果 /（将来）翻訳出力のざっくり JSON 契約を固定** | 下記 §12.1 D8 補足。実装でフィールド追加は可だが、破壊的変更は error code と同様に慎重に |
+| **D9**（旧 Q13） | 2026-07-17 | **ゲート・Lifecycle の安定 error `code` 一覧（初期セット）** | 下記 §12.1 D9 補足。ツール失敗は常に構造化 `{ ok:false, error:{ code, message } }` |
+| **D10**（旧 Q14） | 2026-07-17 | **導入支援は `.agents/skills/umanschat-install/SKILL.md`（新規）。AGENTS.md 本体には混ぜない** | Docker / 初回セットアップ / サンドボックス有効化手順を AI が案内するための dev skill。ランタイムの DB skills や AGENTS.md のコーディングルールと分離 |
 
 **D4 補足 — 入場制御（admission control）**
 
@@ -455,18 +458,97 @@ VM: 実行後自動破棄
 - 既定値・設定名は実装時に固定（環境変数 or settings）。閾値 N% は運用で調整可能にする。
 - 推奨の併用: **同時実行数上限**（例: 1〜2）。メモリ % だけだと瞬間的な奪い合いを取りこぼすことがある。
 
+**D8 補足 — I/O スキーマ（ざっくり）**
+
+`sandbox_run` **引数**（フロントAI → ゲート）:
+
+```typescript
+type SandboxRunArgs = {
+  preset: "code_run" | "file_inspect" | "malware_analysis"
+  language?: "python" | "javascript" | "typescript" | "bash" // code_run
+  code?: string          // インライン（D7: Tier 1 可）
+  inputRef?: string      // 添付 / ステージング参照 ID（実パス不可）
+}
+// code と inputRef は少なくとも一方（preset により必須条件はゲートが検証）
+```
+
+`sandbox_run` **結果**（ゲート/Lifecycle → フロントAI）:
+
+```typescript
+type SandboxRunResult =
+  | {
+      ok: true
+      preset: string
+      tier: 0 | 1 | 2 | 3
+      durationMs: number
+      // code_run (Tier 1) — いずれも軽量サニタイズ済み・長さ上限あり
+      exitCode?: number
+      stdout?: string
+      stderr?: string
+      stdoutTruncated?: boolean
+      stderrTruncated?: boolean
+      // Tier 2+ は減衰済みオブジェクト（翻訳モデル後）。v0.4 では未使用
+      analysis?: Record<string, unknown>
+    }
+  | {
+      ok: false
+      error: { code: SandboxErrorCode; message: string }
+    }
+```
+
+**翻訳モデル出力**（Tier 2+・§6.3 と同系。v0.4 では未使用）:
+
+```typescript
+type SandboxTranslatedOutput = {
+  files_created: string[]
+  files_written_count: number
+  registry_writes: string[]
+  network_connections: { host: string; port: number }[]
+  processes_created: string[]
+  suspicious_behavior_detected: boolean
+  behavior_categories: string[]
+  // raw buffer / 任意長文字列は含めない
+}
+```
+
+**D9 補足 — `SandboxErrorCode` 初期セット**
+
+| code | 意味 |
+|------|------|
+| `docker_unavailable` | Docker 未検出・到達不可（機能オフ相当） |
+| `image_missing` | 必要 prebuilt イメージが無い |
+| `insufficient_host_memory` | 空きメモリ閾値未満（D4） |
+| `concurrent_limit` | 同時実行上限 |
+| `invalid_args` | 引数欠落・型不正 |
+| `preset_unknown` | 未知プリセット |
+| `tier_forbidden` | 入力の強制 Tier に対しプリセット不足 / v0.4 未実装 Tier（D7） |
+| `unsupported_input` | 種別判定不能・禁止入力 |
+| `staging_failed` | staging 作成・コピー失敗（D5） |
+| `timeout` | preset / vm タイムアウト |
+| `container_failed` | 起動失敗・非ゼロで異常終了の包括（詳細は message） |
+| `internal_error` | その他 |
+
+ツール結果の `message` は人間可読（短文）。`code` はクライアント・ログ・将来 i18n の安定キー。
+
+**D10 補足 — 導入支援 skill**
+
+| 項目 | 内容 |
+|------|------|
+| パス | `.agents/skills/umanschat-install/SKILL.md`（未作成。実装/DX タスクで追加） |
+| 対象読者 | セットアップを手伝う AI（Codex / Cursor 等）と、それを起動する開発者 |
+| 含めるもの | Docker Desktop / Engine 前提、compose 起動、サンドボックス用イメージ、exe で Docker がある場合の有効条件、よくある失敗（WSL2・socket・メモリ） |
+| 含めないもの | アプリ本体のコーディング規約（→ `AGENTS.md`）、ランタイムの会話 skills（→ DB） |
+| README | 短い「AI にセットアップさせるならこの skill」リンクを後で足してよい（ユーザー向け手順の重複は最小に） |
+
 ### 12.2 未決（Open Questions）
 
-実装・次の設計イテレーションで決める項目。
+実装・次の設計イテレーションで決める項目（主に **v0.5+**）。
 
 | ID | 論点 | 選択肢・メモ |
 |----|------|--------------|
-| Q8 | 翻訳モデルのモデル選択 | メイン LLM と同一 / 安価・小モデル。レイテンシとコスト（**v0.5+**） |
+| Q8 | 翻訳モデルのモデル選択 | メイン LLM と同一 / 安価・小モデル。レイテンシとコスト |
 | Q9 | バックAI hard veto の UX | ユーザーへの表示文言、リトライ可否、ログ |
-| Q10 | VT API | キー管理・課金・オフライン時のフォールバック（スキップでよいか）（**v0.5+**） |
-| Q12 | ツール I/O スキーマ | 翻訳モデル入出力・sandbox_run 結果の JSON Schema（実装 plan で固定可） |
-| Q13 | 拒否理由コード | ゲートが返す安定した error code 一覧（実装 plan で固定可） |
-| Q14 | 導入支援 AI コンテキスト | Docker / アプリ導入を案内する専用 `*.md`（AGENTS 系）や skill。障壁低減用。サンドボックス実装本体とは分離してよい |
+| Q10 | VT API | キー管理・課金・オフライン時のフォールバック（スキップでよいか） |
 
 ---
 
@@ -532,4 +614,6 @@ VM: 実行後自動破棄
 
 9. **D6（実行モード）**: v0.4 同期のみ。将来 heartbeat / async を追加し設定で選択（既定は同期）。
 
-10. **D7（Tier 強制）**: インライン code = Tier 1 可。添付スクリプト ≥2。PE/ELF = 3。
+10. **D7（Tier 強制）**: インライン code = Tier 1 可。添付スクリプト ≥2。PE/ELF = 3。矛盾時は拒否。
+
+11. **D8–D10**: sandbox I/O ざっくり契約、安定 error code、導入 skill を `.agents/skills/umanschat-install/` に置く（本体未作成）。
