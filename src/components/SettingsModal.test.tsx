@@ -40,6 +40,7 @@ const baseSettings = {
   webSearchModel: "umans-qwen3.6-35b-a3b",
   webSearchMaxResults: 3,
   webSearchMaxRounds: 3,
+  webSearchThinkingEffort: "none",
   scraperUrl: "http://localhost:8000",
   searxngUrl: "http://localhost:8080",
   torProxy: "",

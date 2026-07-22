@@ -276,6 +276,7 @@ Google リダイレクト URI: `https://your-tunnel.example.com/api/auth/callbac
 | `LLM_FALLBACK_MODEL` | TTFT フォールバック先モデル id（空 = 無効） | — |
 | `LLM_FALLBACK_TIMEOUT_MS` | 最初のトークンを待つミリ秒 | `10000` |
 | `THINKING_EFFORT` | 推論レベル（`none`/`low`/`medium`/`high`/`max`） | `medium` |
+| `WEB_SEARCH_THINKING_EFFORT` | 検索結果要約時の推論レベル（`none`/`low`/`medium`/`high`/`max`） | `none` |
 | `TRANSLATE_TIMEOUT` | 翻訳 LLM タイムアウト（秒） | `30` |
 
 ### 埋め込み

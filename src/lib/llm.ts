@@ -25,6 +25,14 @@ export function defaultSearchModel(): string {
   return process.env.WEB_SEARCH_MODEL || "umans-qwen3.6-35b-a3b";
 }
 
+/**
+ * Thinking effort for the search/summarize model.
+ * Falls back to "none" (fastest) since search summarization does not need deep reasoning.
+ */
+export function searchThinkingEffort(): string {
+  return process.env.WEB_SEARCH_THINKING_EFFORT || "none";
+}
+
 export function embedModel(): string {
   return process.env.EMBED_MODEL ?? "text-embedding-3-small";
 }

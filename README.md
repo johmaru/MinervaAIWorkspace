@@ -276,6 +276,7 @@ All settings live in `.env` (`.env.example` is the source of truth). Most can be
 | `LLM_FALLBACK_MODEL` | TTFT fallback model id (empty = disabled) | — |
 | `LLM_FALLBACK_TIMEOUT_MS` | ms to wait for first token before fallback | `10000` |
 | `THINKING_EFFORT` | Reasoning level (`none`/`low`/`medium`/`high`/`max`) | `medium` |
+| `WEB_SEARCH_THINKING_EFFORT` | Reasoning level for search result summarization (`none`/`low`/`medium`/`high`/`max`) | `none` |
 | `TRANSLATE_TIMEOUT` | Translation LLM timeout (seconds) | `30` |
 
 ### Embeddings

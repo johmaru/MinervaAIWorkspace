@@ -117,6 +117,7 @@ export async function GET(req: Request) {
     llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
     llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS) || 10000,
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
+    webSearchThinkingEffort: process.env.WEB_SEARCH_THINKING_EFFORT || "none",
     // Embeddings
     embedModel: process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M",
     embedDim: Number(process.env.EMBED_DIM) || 1024,
@@ -199,6 +200,7 @@ type SettingsBody = {
   llmModel?: string;
   llmFallbackModel?: string;
   llmFallbackTimeoutMs?: number;
+  webSearchThinkingEffort?: string;
   thinkingEffort?: string;
   // Embeddings
   embedModel?: string;
@@ -280,6 +282,9 @@ export async function POST(req: Request) {
   }
   if (body.thinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.thinkingEffort)) {
     return new Response("thinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
+  }
+  if (body.webSearchThinkingEffort !== undefined && !/^[a-z0-9]+$/i.test(body.webSearchThinkingEffort)) {
+    return new Response("webSearchThinkingEffort must be alphanumeric (e.g. none, low, medium, high, max)", { status: 400 });
   }
   if (body.translateTimeout !== undefined && (body.translateTimeout < 5 || body.translateTimeout > 300)) {
     return new Response("translateTimeout must be 5-300 (seconds)", { status: 400 });
@@ -397,6 +402,7 @@ export async function POST(req: Request) {
     if (body.llmFallbackModel !== undefined) updates.LLM_FALLBACK_MODEL = body.llmFallbackModel;
     if (body.llmFallbackTimeoutMs !== undefined) updates.LLM_FALLBACK_TIMEOUT_MS = String(body.llmFallbackTimeoutMs);
     if (body.thinkingEffort !== undefined) updates.THINKING_EFFORT = body.thinkingEffort;
+    if (body.webSearchThinkingEffort !== undefined) updates.WEB_SEARCH_THINKING_EFFORT = body.webSearchThinkingEffort;
     // Embeddings
     if (body.embedModel !== undefined) updates.EMBED_MODEL = body.embedModel;
     if (body.embedDim !== undefined) updates.EMBED_DIM = String(body.embedDim);

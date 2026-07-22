@@ -20,6 +20,7 @@ type SettingsResponse = {
   llmFallbackModel: string;
   llmFallbackTimeoutMs: number;
   thinkingEffort: string;
+  webSearchThinkingEffort: string;
   // Embeddings
   embedModel: string;
   embedDim: number;
@@ -312,6 +313,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     settings.dbVectorDim > 0 &&
     selectedOption.dim !== settings.dbVectorDim;
 
+  const searchReasoningLevels = modelReasoningLevels[form.webSearchModel ?? ""] ?? ["none", "low", "medium", "high", "max"];
   const currentReasoningLevels = modelReasoningLevels[form.llmModel ?? ""] ?? ["none", "low", "medium", "high", "max"];
 
   const handleSave = useCallback(async () => {
@@ -909,6 +911,33 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 )}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.webSearchThinkingEffort")}</span>
+              </label>
+              <select
+                value={searchReasoningLevels.length === 0 ? "" : (form.webSearchThinkingEffort ?? "none")}
+                onChange={(e) => update("webSearchThinkingEffort", e.target.value)}
+                disabled={searchReasoningLevels.length === 0}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20 disabled:opacity-50"
+              >
+                {searchReasoningLevels.length === 0 ? (
+                  <option value="" disabled>(not controllable)</option>
+                ) : (
+                  searchReasoningLevels.map((lvl) => (
+                    <option key={lvl} value={lvl}>{lvl}</option>
+                  ))
+                )}
+                {searchReasoningLevels.length > 0 && !searchReasoningLevels.includes(form.webSearchThinkingEffort ?? "none") && form.webSearchThinkingEffort && (
+                  <option value={form.webSearchThinkingEffort}>{form.webSearchThinkingEffort} (stale)</option>
+                )}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {searchReasoningLevels.length === 0
+                  ? t("settings.thinkingEffortNotControllable")
+                  : t("settings.webSearchThinkingEffortDesc")}
+              </p>
             </div>
             <div>
               <label className="mb-1 block">

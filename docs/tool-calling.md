@@ -242,7 +242,7 @@ The function runs a `while (true)` loop (line 1143):
 
 ### Reasoning suppression during tool rounds
 
-When tools are active (`useToolsThisRound` is true), `disableReasoningParams` is used instead of `reasoning_effort` (route.ts:1150–1157). This suppresses thinking tokens during tool rounds to reduce latency. Reasoning is re-enabled for the final answer stream (after the round limit is reached).
+When tools are active (`useToolsThisRound` is true), `disableReasoningParams` is used instead of `reasoning_effort` (route.ts:1150–1157). This suppresses thinking tokens during tool rounds to reduce latency. For the final answer stream, `disableReasoningParams` is also used when `reasoningEffort === "none"` — this ensures GLM-5.2 actually disables thinking (it ignores `reasoning_effort: "none"`, but `enable_thinking: false` works). For `high`/`max`, `reasoning_effort` is sent as before.
 
 ---
 

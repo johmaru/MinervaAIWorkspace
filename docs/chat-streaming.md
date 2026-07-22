@@ -376,7 +376,7 @@ Constructs an OpenAI SDK client with the hardcoded `baseURL = 'https://api.code.
   2. else if `levels` includes `'none'` → `{ reasoning_effort: 'none' }`
   3. else `{}` (not controllable)
 
-Used in `decideSearch`, tool-use rounds (`route.ts:1151`), and (dormant) compaction to suppress thinking tokens for latency.
+Used in `decideSearch`, tool-use rounds (`route.ts:1151`), and the final answer stream when `reasoningEffort === "none"` to suppress thinking tokens for latency.
 
 ### `completeText()` (`route.ts:1028`)
 

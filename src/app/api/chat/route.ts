@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, defaultSearchModel, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, fallbackModel, fallbackTimeoutMs } from "@/lib/llm";
+import { createLLM, defaultModel, defaultSearchModel, searchThinkingEffort, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, fallbackModel, fallbackTimeoutMs } from "@/lib/llm";
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions, folders } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
@@ -1554,13 +1554,18 @@ async function completeText(
   messagesForModel: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
   options?: { maxTokens?: number; reasoningEffort?: OpenAI.ReasoningEffort | null; disableThinking?: boolean },
 ): Promise<string> {
-  const disableParams = options?.disableThinking ? await buildDisableReasoningParams(model) : {};
+  const shouldDisable = options?.disableThinking || options?.reasoningEffort === "none";
+  const disableParams = shouldDisable ? await buildDisableReasoningParams(model) : {};
   const completion = await llm.chat.completions.create({
     model,
     messages: messagesForModel,
     stream: false,
     ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
-    ...(options?.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
+    ...(shouldDisable
+      ? {}
+      : options?.reasoningEffort
+        ? { reasoning_effort: options.reasoningEffort }
+        : {}),
     ...disableParams,
   } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
   return completion.choices[0]?.message?.content?.trim() ?? "";
@@ -1846,7 +1851,7 @@ async function streamCompletion({
         model: modelToUse,
         messages: currentMessages,
         stream: true,
-        ...(useToolsThisRound
+        ...(useToolsThisRound || reasoningEffort === "none"
           ? disableReasoningParams
           : reasoningEffort
             ? { reasoning_effort: reasoningEffort }
@@ -1998,7 +2003,7 @@ async function streamCompletion({
                 snippet: r.snippet,
               });
             }
-            toolContent = rankedToolResults
+            const rawContent = rankedToolResults
               .map((r) => {
                 const body = r.scraped
                   ? sliceContentAroundQuery(r.content, searchQuery, SEARCH_RESULT_CONTENT_SLICE)
@@ -2006,7 +2011,33 @@ async function streamCompletion({
                 return `<${r.url}>\n${r.scrapeTitle || r.title}\n${body}`;
               })
               .join("\n\n");
-            if (!toolContent) toolContent = "No results found.";
+            if (!rawContent) {
+              toolContent = "No results found.";
+            } else {
+              // Summarize search results with the search model (thinking=none for speed).
+              // On summarization failure, fall back to raw search results.
+              try {
+                const sModel = defaultSearchModel();
+                const sEffort = searchThinkingEffort();
+                toolContent = await completeText(
+                  llm,
+                  sModel,
+                  [
+                    {
+                      role: "system",
+                      content: "You are a search result summarizer. Given web search results, extract the key facts and information relevant to the user's query. Be concise but preserve all important details, URLs, and sources. Output only the summarized findings in clear text.",
+                    },
+                    {
+                      role: "user",
+                      content: `Query: ${searchQuery}\n\nSearch results:\n${rawContent}`,
+                    },
+                  ],
+                  { reasoningEffort: sEffort as OpenAI.ReasoningEffort | null },
+                );
+              } catch {
+                toolContent = rawContent;
+              }
+            }
           } catch {
             toolContent = `Search failed for: ${searchQuery}`;
           }

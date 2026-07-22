@@ -324,6 +324,7 @@ All variables below are defined in `.env.example`. Values shown are defaults fro
 | `LLM_API_KEY` | `your-api-key-here` | **Required.** API key for UmansAI. Never returned in plaintext by the API. |
 | `LLM_MODEL` | `umans-glm-5.2` | Default model used for chat completions. |
 | `THINKING_EFFORT` | `medium` | LLM reasoning strength. Accepts `none`, `low`, `medium`, `high`, `max` (support varies per model). |
+| `WEB_SEARCH_THINKING_EFFORT` | `none` | Reasoning strength for search result summarization. Same levels as `THINKING_EFFORT`. |
 
 ### Embeddings
 
