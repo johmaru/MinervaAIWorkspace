@@ -11,7 +11,7 @@
  *
  * Env vars (all optional, read at call time):
  *   LOG_LEVEL          — threshold, default "info"
- *   LOG_FILE_ENABLED   — "true"/""false", auto-default (exe→true, Docker→false)
+ *   LOG_FILE_ENABLED   — "true"/"false", auto-enabled except when NODE_ENV=test
  *   LOG_FILE_MAX_SIZE  — bytes, default 5242880 (5MB)
  *
  * No external dependencies. Server-side only.
@@ -78,9 +78,15 @@ function getMinLevel(): number {
 }
 
 function isFileEnabled(): boolean {
+  // Tests run with NODE_ENV="test" but some test files (e.g. contextCompaction.test.ts,
+  // db/index.test.ts) don't call _setLogDirForTest or set LOG_FILE_ENABLED=false.
+  // Without this gate, their logger.error/warn calls contaminate the production log file
+  // (data/logs/umanschat.log), producing false-positive corruption/compaction errors
+  // that confuse AI self-analysis tools reading the log file later.
+  if (process.env.NODE_ENV === "test" && process.env.LOG_FILE_ENABLED !== "true") return false;
   const env = process.env.LOG_FILE_ENABLED;
   if (env === "false") return false;
-  return true; // Always enabled: Docker (no socket) and exe both need file logs
+  return true; // Always enabled in production: Docker (no socket) and exe both need file logs
 }
 
 function getMaxFileSize(): number {
