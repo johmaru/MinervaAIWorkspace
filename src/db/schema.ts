@@ -178,6 +178,9 @@ export const skillCandidates = sqliteTable("skill_candidates", {
     .default(sql`'[]'`),
   confidence: real("confidence").notNull().default(0.5),
   reason: text("reason"),
+  contentHash: text("content_hash"),
+  duplicateOfId: text("duplicate_of_id"),
+  duplicateOfType: text("duplicate_of_type", { enum: ["skill", "candidate"] }),
   status: text("status", {
     enum: ["draft", "approved", "rejected", "merged"],
   }).notNull().default("draft"),

@@ -31,6 +31,10 @@ type Candidate = {
   proposedTags: string[];
   confidence: number;
   reason: string | null;
+  contentHash: string | null;
+  duplicateOfId: string | null;
+  duplicateOfType: "skill" | "candidate" | null;
+  duplicateOfName: string | null;
   status: string;
   createdAt: string;
 };
@@ -222,6 +226,27 @@ export function SkillManagerModal({ open, onClose }: Props) {
       setSaving(false);
     }
   }, [candName, candKind, candTrigger, candTags, candContent, fetchAll, t]);
+
+  const handleMerge = useCallback(async (id: string, mergeAction: "replace" | "append") => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await clientFetch(`/api/skill-candidates/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "approved", mergeAction }),
+      });
+      if (!res.ok) {
+        setError(t("skills.error"));
+        return;
+      }
+      await fetchAll();
+    } catch {
+      setError(t("skills.error"));
+    } finally {
+      setSaving(false);
+    }
+  }, [fetchAll, t]);
 
   const handleReject = useCallback(async (id: string) => {
     setError(null);
@@ -497,16 +522,48 @@ export function SkillManagerModal({ open, onClose }: Props) {
                       {c.reason && (
                         <p className="text-xs text-muted-foreground italic">{c.reason}</p>
                       )}
+                      {c.duplicateOfId && c.duplicateOfType === "skill" && (
+                        <div className="flex items-center gap-1 rounded-lg bg-amber-500/10 px-2 py-1 text-xs text-amber-600 dark:text-amber-400">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                            <path d="M12 7v5l3 3" />
+                          </svg>
+                          {t("skills.duplicateOf")}「{c.duplicateOfName ?? c.duplicateOfId}」
+                        </div>
+                      )}
                       <p className="text-sm text-muted-foreground">{c.proposedContent}</p>
-                      <div className="flex gap-1 pt-1">
-                        <MotionButton
-                          type="button"
-                          onClick={() => handleApprove(c.id)}
-                          className="rounded-xl bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
-                          whileTap={{ scale: 0.97 }}
-                        >
-                          {t("skills.approve")}
-                        </MotionButton>
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {c.duplicateOfId && c.duplicateOfType === "skill" ? (
+                          <>
+                            <MotionButton
+                              type="button"
+                              onClick={() => handleMerge(c.id, "replace")}
+                              disabled={saving}
+                              className="rounded-xl bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                              whileTap={{ scale: 0.97 }}
+                            >
+                              {t("skills.replace")}
+                            </MotionButton>
+                            <MotionButton
+                              type="button"
+                              onClick={() => handleMerge(c.id, "append")}
+                              disabled={saving}
+                              className="rounded-xl bg-primary/70 px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                              whileTap={{ scale: 0.97 }}
+                            >
+                              {t("skills.append")}
+                            </MotionButton>
+                          </>
+                        ) : (
+                          <MotionButton
+                            type="button"
+                            onClick={() => handleApprove(c.id)}
+                            className="rounded-xl bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+                            whileTap={{ scale: 0.97 }}
+                          >
+                            {t("skills.approve")}
+                          </MotionButton>
+                        )}
                         <MotionButton
                           type="button"
                           onClick={() => startCandidateEdit(c)}

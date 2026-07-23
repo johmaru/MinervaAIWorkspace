@@ -578,6 +578,9 @@ const ja = {
     name: "名前",
     lastUsed: "最終使用",
     never: "未使用",
+    duplicateOf: "既存スキルの更新候補",
+    replace: "置換",
+    append: "追記",
   },
   memoryViewer: {
     title: "メモリマネージャー",
@@ -1262,6 +1265,9 @@ const en: typeof ja = {
     name: "Name",
     lastUsed: "Last used",
     never: "Never",
+    duplicateOf: "Update candidate for existing skill",
+    replace: "Replace",
+    append: "Append",
   },
   memoryViewer: {
     title: "Memory Manager",

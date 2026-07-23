@@ -15,6 +15,9 @@ type PatchBody = {
   proposedTrigger?: string;
   proposedTags?: string[];
   proposedContent?: string;
+  // When duplicateOfId is set and status="approved", update the existing skill instead of creating a new one.
+  // mergeAction: "replace" = overwrite content, "append" = append to existing content.
+  mergeAction?: "replace" | "append";
 };
 
 /**
@@ -56,7 +59,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return Response.json({ id, status: "rejected" });
   }
 
-  // approved: promote to skills table
+  // approved: resolve override fields
   const name = body.proposedName?.trim() || candidate.proposedName;
   const content = body.proposedContent?.trim() || candidate.proposedContent;
   const kind = body.proposedKind || candidate.proposedKind;
@@ -65,7 +68,71 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     ? body.proposedTags.filter((t): t is string => typeof t === "string")
     : candidate.proposedTags;
 
-  // Generate embedding: name + trigger + tags + content
+  // If the candidate was flagged as a semantic duplicate of an existing skill,
+  // and the user chose to update the existing skill (mergeAction set),
+  // replace or append the existing skill's content instead of creating a new skill.
+  // This runs before the embedding call to avoid a wasted API call.
+  if (candidate.duplicateOfId && candidate.duplicateOfType === "skill" && body.mergeAction) {
+    const [existing] = await db
+      .select()
+      .from(skills)
+      .where(and(eq(skills.id, candidate.duplicateOfId), eq(skills.userId, user.id)))
+      .limit(1);
+    if (!existing) {
+      return new Response("Referenced skill not found", { status: 404 });
+    }
+
+    const mergedContent =
+      body.mergeAction === "append"
+        ? `${existing.content}\n\n${content}`
+        : content;
+    const mergedName = body.proposedName?.trim() || existing.name;
+    const mergedKind = body.proposedKind || existing.kind;
+    const mergedTrigger = body.proposedTrigger?.trim() || existing.trigger || "";
+    const mergedTags = body.proposedTags
+      ? body.proposedTags.filter((t): t is string => typeof t === "string")
+      : existing.tags;
+
+    const mergedEmbedSource = [mergedName, mergedTrigger, mergedTags.join(", "), mergedContent]
+      .filter(Boolean).join("\n");
+    const mergedVector = await embedText(mergedEmbedSource, "document");
+    if (mergedVector.length === 0) {
+      return new Response("Embedding failed", { status: 503 });
+    }
+    const mergedHash = hashContent(mergedContent);
+
+    const [updated] = await db
+      .update(skills)
+      .set({
+        name: mergedName,
+        content: mergedContent,
+        embedding: mergedVector,
+        contentHash: mergedHash,
+        kind: mergedKind,
+        trigger: mergedTrigger,
+        tags: mergedTags,
+        version: existing.version + 1,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(skills.id, existing.id), eq(skills.userId, user.id)))
+      .returning({
+        id: skills.id,
+        name: skills.name,
+        content: skills.content,
+        kind: skills.kind,
+        trigger: skills.trigger,
+        tags: skills.tags,
+      });
+
+    await db
+      .update(skillCandidates)
+      .set({ status: "merged", updatedAt: new Date() })
+      .where(eq(skillCandidates.id, id));
+
+    return Response.json({ candidate: { id, status: "merged" }, skill: updated });
+  }
+
+  // Normal approve: generate embedding for the new skill
   const embedSource = [name, trigger, tags.join(", "), content].filter(Boolean).join("\n");
   const vector = await embedText(embedSource, "document");
   if (vector.length === 0) {

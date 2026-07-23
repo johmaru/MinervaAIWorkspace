@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { skillCandidates } from "@/db/schema";
+import { skillCandidates, skills } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
@@ -32,11 +32,16 @@ export async function GET(req: Request) {
       proposedTags: skillCandidates.proposedTags,
       confidence: skillCandidates.confidence,
       reason: skillCandidates.reason,
+      contentHash: skillCandidates.contentHash,
+      duplicateOfId: skillCandidates.duplicateOfId,
+      duplicateOfType: skillCandidates.duplicateOfType,
+      duplicateOfName: skills.name,
       status: skillCandidates.status,
       createdAt: skillCandidates.createdAt,
       updatedAt: skillCandidates.updatedAt,
     })
     .from(skillCandidates)
+    .leftJoin(skills, eq(skillCandidates.duplicateOfId, skills.id))
     .where(and(eq(skillCandidates.userId, user.id), eq(skillCandidates.status, status)))
     .orderBy(desc(skillCandidates.createdAt)).limit(100);
   return Response.json(rows);

@@ -1,8 +1,11 @@
 import type OpenAI from "openai";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, skillCandidates, threads } from "@/db/schema";
+import { messages, skillCandidates, skills, threads } from "@/db/schema";
+import { hashContent, embedText, embedTexts } from "@/lib/embed";
+import { toVecBuffer, cosineSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
+import { sql } from "drizzle-orm";
 
 /**
  * Skill candidate extraction — automatically extracts reusable skill candidates from conversations.
@@ -35,6 +38,7 @@ Do NOT extract:
 If no concrete reusable skill exists in this conversation, return an empty array: []
 
 Maximum 3 candidates per conversation. Each candidate must be genuinely reusable across future conversations.
+Do NOT produce multiple candidates that cover the same topic from slightly different angles — merge overlapping candidates into a single, comprehensive one.
 
 Respond in JSON only:
 [{"name": "short skill name (2-5 words)", "kind": "workflow|bugfix|project_rule|tool_usage|coding_pattern|debugging", "trigger": "when to apply this skill (natural language)", "tags": ["tag1"], "content": "reusable instructions in second person (You should... / When X happens, do Y)", "confidence": 0.0-1.0, "reason": "why this skill is worth saving"}]`;
@@ -97,6 +101,139 @@ export function parseCandidates(raw: string | null | undefined): ExtractedCandid
   }
 }
 
+/** Similarity threshold for intra-batch semantic dedup. */
+const DEDUP_SIMILARITY_THRESHOLD = 0.88;
+
+/**
+ * Removes semantically duplicate candidates within the same extraction batch.
+ *
+ * Batch-embeds all candidate contents, then pairwise-compares via cosine
+ * similarity. When two candidates exceed the threshold, the lower-confidence
+ * one (or the shorter one if confidence is equal) is dropped.
+ *
+ * Max 3 candidates → at most 3 comparisons. Negligible cost.
+ */
+async function dedupWithinBatch(
+  candidates: ExtractedCandidate[],
+): Promise<ExtractedCandidate[]> {
+  if (candidates.length <= 1) return candidates;
+
+  const texts = candidates.map(
+    (c) => [c.name, c.trigger, c.tags.join(", "), c.content].filter(Boolean).join("\n"),
+  );
+  const vectors = await embedTexts(texts, "document");
+  // If any vector is empty (embed failure), skip dedup to be safe.
+  if (vectors.some((v) => v.length === 0)) return candidates;
+
+  const dropped = new Set<number>();
+  for (let i = 0; i < candidates.length; i++) {
+    if (dropped.has(i)) continue;
+    for (let j = i + 1; j < candidates.length; j++) {
+      if (dropped.has(j)) continue;
+      const sim = cosineSimilarity(vectors[i], vectors[j]);
+      if (sim < DEDUP_SIMILARITY_THRESHOLD) continue;
+      // Pick the survivor: higher confidence, tie-break by longer content.
+      const ci = candidates[i];
+      const cj = candidates[j];
+      const keepI =
+        ci.confidence !== cj.confidence
+          ? ci.confidence > cj.confidence
+          : ci.content.length >= cj.content.length;
+      dropped.add(keepI ? j : i);
+      logger.info("skill-candidate", "intra-batch dedup", {
+        kept: keepI ? ci.name : cj.name,
+        dropped: keepI ? cj.name : ci.name,
+        similarity: Number(sim.toFixed(3)),
+      });
+    }
+  }
+  return candidates.filter((_, idx) => !dropped.has(idx));
+}
+
+/** Result of checking a candidate against existing drafts/skills. */
+type DedupResult = {
+  /** The candidate to insert (null = skip insertion entirely). */
+  candidate: ExtractedCandidate | null;
+  contentHash: string;
+  /** When candidate is non-null, flags which existing record it duplicates. */
+  duplicateOfId: string | null;
+  duplicateOfType: "skill" | "candidate" | null;
+};
+
+/**
+ * Checks a single candidate against existing drafts and active skills.
+ *
+ * Tier 1: contentHash against existing drafts (cheap, no embedding).
+ * Tier 2: contentHash against active skills (cheap, no embedding).
+ * Tier 3: embedding cosine similarity against active skills (expensive,
+ *   only when contentHash doesn't match). If similarity > threshold,
+ *   mark as duplicate of that skill.
+ *
+ * Never modifies existing skills or candidates — only flags the new one.
+ */
+async function checkDuplicate(
+  candidate: ExtractedCandidate,
+  userId: string,
+): Promise<DedupResult> {
+  const contentHash = hashContent(candidate.content);
+
+  // Tier 1: existing draft with same contentHash
+  const [existingDraft] = await db
+    .select({ id: skillCandidates.id })
+    .from(skillCandidates)
+    .where(
+      and(
+        eq(skillCandidates.userId, userId),
+        eq(skillCandidates.contentHash, contentHash),
+        eq(skillCandidates.status, "draft"),
+      ),
+    )
+  if (existingDraft) {
+    // Byte-identical to an existing draft — skip entirely.
+    return { candidate: null, contentHash, duplicateOfId: existingDraft.id, duplicateOfType: "candidate" };
+  }
+
+  // Tier 2: existing active skill with same contentHash
+  const [existingSkill] = await db
+    .select({ id: skills.id })
+    .from(skills)
+    .where(and(eq(skills.userId, userId), eq(skills.contentHash, contentHash)))
+    .limit(1);
+  if (existingSkill) {
+    // Byte-identical to an existing active skill — skip entirely.
+    return { candidate: null, contentHash, duplicateOfId: existingSkill.id, duplicateOfType: "skill" };
+  }
+
+  // Tier 3: semantic similarity against active skills
+  const embedSource = [candidate.name, candidate.trigger, candidate.tags.join(", "), candidate.content]
+    .filter(Boolean)
+    .join("\n");
+  const queryVector = await embedText(embedSource, "query");
+  if (queryVector.length > 0) {
+    const queryBuf = toVecBuffer(queryVector);
+    const rows = await db.all(sql`
+      SELECT id,
+             vec_distance_cosine(embedding, ${queryBuf}) AS distance
+      FROM skills
+      WHERE user_id = ${userId}
+        AND status = 'active'
+        AND vec_distance_cosine(embedding, ${queryBuf}) < ${1 - DEDUP_SIMILARITY_THRESHOLD}
+      ORDER BY distance
+      LIMIT 1
+    `) as { id: string; distance: number }[];
+    if (rows.length > 0) {
+      return {
+        candidate,
+        contentHash,
+        duplicateOfId: rows[0].id,
+        duplicateOfType: "skill",
+      };
+    }
+  }
+
+  return { candidate, contentHash, duplicateOfId: null, duplicateOfType: null };
+}
+
 /**
  * Extracts skill candidates from a thread's conversation and saves them as drafts.
  *
@@ -154,9 +291,24 @@ export async function extractSkillCandidates(
 
   if (!candidates || candidates.length === 0) return;
 
-  // Insert each candidate as a draft
+  // Step 1: Intra-batch semantic dedup (contentHash can't catch near-duplicates)
+  candidates = await dedupWithinBatch(candidates);
+  if (candidates.length === 0) return;
+
+  // Step 2: Check each candidate against existing drafts/skills, then insert
+  let insertedCount = 0;
   for (const c of candidates) {
     try {
+      const result = await checkDuplicate(c, userId);
+      // Byte-identical to existing draft/skill → skip insertion entirely.
+      if (result.candidate === null) {
+        logger.info("skill-candidate", "skipped byte-identical duplicate", {
+          name: c.name,
+          duplicateOfId: result.duplicateOfId,
+          duplicateOfType: result.duplicateOfType,
+        });
+        continue;
+      }
       await db.insert(skillCandidates).values({
         userId,
         threadId,
@@ -167,12 +319,16 @@ export async function extractSkillCandidates(
         proposedTags: c.tags,
         confidence: c.confidence,
         reason: c.reason,
+        contentHash: result.contentHash,
+        duplicateOfId: result.duplicateOfId,
+        duplicateOfType: result.duplicateOfType,
         status: "draft",
       });
+      insertedCount++;
     } catch (err) {
       logger.error("skill-candidate", "failed to insert candidate", { name: c.name, error: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  logger.info("skill-candidate", "extracted candidates", { count: candidates.length, threadId });
+  logger.info("skill-candidate", "extracted candidates", { count: insertedCount, threadId });
 }
