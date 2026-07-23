@@ -140,6 +140,7 @@ async function dedupWithinBatch(
           ? ci.confidence > cj.confidence
           : ci.content.length >= cj.content.length;
       dropped.add(keepI ? j : i);
+      if (!keepI) break;
       logger.info("skill-candidate", "intra-batch dedup", {
         kept: keepI ? ci.name : cj.name,
         dropped: keepI ? cj.name : ci.name,
