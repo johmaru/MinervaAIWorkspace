@@ -21,7 +21,7 @@ import { searchWikipedia } from "@/lib/wikipedia";
 import type { WikipediaResult } from "@/lib/wikipedia";
 import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
-import { buildSkillContext, attachUsageMessageIds, type InjectedSkillInfo } from "@/lib/skillStore";
+import { buildSkillContext, attachUsageMessageIds, listSkills, createSkill, deleteSkill, updateSkillContent, type InjectedSkillInfo } from "@/lib/skillStore";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
@@ -1820,6 +1820,71 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "skill_list",
+      description: "List the user's saved skills (reusable behavior instructions). Set include_duplicates=true to also detect semantically similar skill pairs for cleanup. Use when the user asks to see, review, or deduplicate their skills.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["active", "archived", "all"], description: "Filter by status (default: all)" },
+          include_duplicates: { type: "boolean", description: "If true, annotate each skill with a 'duplicates' array listing similar skills (similarity >= 0.88). Use for detecting redundant skills to clean up." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "skill_create",
+      description: "Create a new skill (reusable instruction that will be automatically injected into future conversations when relevant). Use when the user asks to save, create, or register a skill. Returns error if an identical skill already exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Short skill name (2-5 words)" },
+          content: { type: "string", description: "The skill instructions in second person (You should... / When X happens, do Y)" },
+          kind: { type: "string", enum: ["workflow", "bugfix", "project_rule", "tool_usage", "coding_pattern", "debugging"], description: "Skill category (default: workflow)" },
+          trigger: { type: "string", description: "When to apply this skill (natural language)" },
+          tags: { type: "array", items: { type: "string" }, description: "Tags for searchability" },
+        },
+        required: ["name", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "skill_update",
+      description: "Update an existing skill's content, name, trigger, tags, or status. Use when the user asks to modify, refine, or archive a skill. Content changes re-embed and increment version.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The skill id" },
+          name: { type: "string", description: "New name" },
+          content: { type: "string", description: "New content instructions" },
+          trigger: { type: "string", description: "New trigger condition" },
+          tags: { type: "array", items: { type: "string" }, description: "New tags" },
+          status: { type: "string", enum: ["active", "archived"], description: "Set to 'archived' to archive, 'active' to restore" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "skill_delete",
+      description: "Delete a skill permanently. Use when the user asks to remove a skill, especially redundant duplicates identified via skill_list with include_duplicates.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The skill id to delete" },
+        },
+        required: ["id"],
+      },
+    },
+  },
 ];
 
 const MAX_TOOL_ROUNDS = 3;
@@ -2006,9 +2071,9 @@ async function streamCompletion({
       // Execute each tool call and append the result as a tool role message
       for (const tc of toolCalls) {
         let toolContent: string;
-        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string };
+        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean };
         try {
-          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string };
+          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean };
         } catch {
           parsedArgs = {};
         }
@@ -2203,6 +2268,53 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolTodoDelete") });
           await deleteTodo(userId, parsedArgs.id);
           toolContent = "Todo deleted";
+        } else if (tc.name === "skill_list") {
+          send?.("status", { label: t(locale, "chat.statusToolSkillList") });
+          const skillStatus = parsedArgs.status === "active" || parsedArgs.status === "archived" ? parsedArgs.status : undefined;
+          const includeDups = parsedArgs.include_duplicates === true;
+          const list = await listSkills(userId, skillStatus, includeDups);
+          toolContent = JSON.stringify(list);
+        } else if (tc.name === "skill_create" && parsedArgs.name && parsedArgs.content) {
+          send?.("status", { label: t(locale, "chat.statusToolSkillCreate") });
+          try {
+            const validKinds = ["workflow", "bugfix", "project_rule", "tool_usage", "coding_pattern", "debugging"] as const;
+            const created = await createSkill(userId, {
+              name: parsedArgs.name,
+              content: parsedArgs.content,
+              kind: parsedArgs.kind && (validKinds as readonly string[]).includes(parsedArgs.kind)
+                ? parsedArgs.kind as typeof validKinds[number]
+                : undefined,
+              trigger: parsedArgs.trigger,
+              tags: Array.isArray(parsedArgs.tags) ? parsedArgs.tags : undefined,
+            });
+            toolContent = "error" in created
+              ? "A skill with identical content already exists."
+              : JSON.stringify(created);
+          } catch (err) {
+            toolContent = `Failed to create skill: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        } else if (tc.name === "skill_update" && parsedArgs.id) {
+          send?.("status", { label: t(locale, "chat.statusToolSkillUpdate") });
+          const result = await updateSkillContent(parsedArgs.id, userId, {
+            content: parsedArgs.content,
+            name: parsedArgs.name,
+            trigger: parsedArgs.trigger,
+            tags: Array.isArray(parsedArgs.tags) ? parsedArgs.tags : undefined,
+            status: parsedArgs.status === "active" || parsedArgs.status === "archived" ? parsedArgs.status : undefined,
+          });
+          if (!result) {
+            toolContent = "Skill not found";
+          } else if ("error" in result) {
+            toolContent = result.error === "embed_failed"
+              ? "Failed to update skill: embedding service unavailable."
+              : "Skill was modified by another request. Please retry.";
+          } else {
+            toolContent = JSON.stringify(result);
+          }
+        } else if (tc.name === "skill_delete" && parsedArgs.id) {
+          send?.("status", { label: t(locale, "chat.statusToolSkillDelete") });
+          const deleted = await deleteSkill(userId, parsedArgs.id);
+          toolContent = deleted ? "Skill deleted" : "Skill not found";
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
           // MCP tool: function name format "{serverName}__{toolName}"
           const parsed = parseMcpToolFunctionName(tc.name);

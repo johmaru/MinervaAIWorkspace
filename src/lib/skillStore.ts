@@ -1,4 +1,4 @@
-import { and, eq, like, inArray, sql } from "drizzle-orm";
+import { and, eq, like, inArray, sql, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { skills, skillUsageEvents } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
@@ -327,4 +327,196 @@ export async function updateSkillContent(
   }
 
   return row;
+}
+
+/**
+ * List all skills for a user, optionally filtered by status.
+ * Excludes embedding; returns metadata only.
+ * Ordered by updatedAt desc, limit 100.
+ *
+ * When includeDuplicates is true, each skill is annotated with a `duplicates`
+ * array listing other active skills with similarity >= 0.88.
+ * This lets the AI identify and clean up redundant skills in a single call,
+ * conserving MAX_TOOL_ROUNDS (no separate find-duplicates round needed).
+ */
+export async function listSkills(
+  userId: string,
+  status?: "active" | "archived",
+  includeDuplicates = false,
+): Promise<
+  | {
+      id: string;
+      name: string;
+      content: string;
+      kind: string;
+      trigger: string | null;
+      tags: string[];
+      status: string;
+      version: number;
+      lastUsedAt: Date | null;
+      successCount: number;
+      failureCount: number;
+      createdAt: Date;
+      updatedAt: Date;
+      duplicates?: { id: string; name: string; similarity: number }[];
+    }[]
+> {
+  const whereClause = status
+    ? and(eq(skills.userId, userId), eq(skills.status, status))
+    : eq(skills.userId, userId);
+
+  const rows = await db
+    .select({
+      id: skills.id,
+      name: skills.name,
+      content: skills.content,
+      kind: skills.kind,
+      trigger: skills.trigger,
+      tags: skills.tags,
+      status: skills.status,
+      version: skills.version,
+      lastUsedAt: skills.lastUsedAt,
+      successCount: skills.successCount,
+      failureCount: skills.failureCount,
+      createdAt: skills.createdAt,
+      updatedAt: skills.updatedAt,
+    })
+    .from(skills)
+    .where(whereClause)
+    .orderBy(desc(skills.updatedAt))
+    .limit(100);
+
+  if (!includeDuplicates || rows.length === 0) return rows;
+
+  // Find all duplicate pairs via a single SQL self-join on stored embeddings.
+  // a.id < b.id avoids duplicate pairs and self-matches.
+  const pairs = await findAllDuplicatePairs(userId, 0.88);
+
+  // Build a lookup: skillId -> list of duplicate peers.
+  const dupMap = new Map<string, { id: string; name: string; similarity: number }[]>();
+  for (const p of pairs) {
+    if (!dupMap.has(p.aId)) dupMap.set(p.aId, []);
+    if (!dupMap.has(p.bId)) dupMap.set(p.bId, []);
+    dupMap.get(p.aId)!.push({ id: p.bId, name: p.bName, similarity: p.similarity });
+    dupMap.get(p.bId)!.push({ id: p.aId, name: p.aName, similarity: p.similarity });
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    duplicates: dupMap.get(row.id) ?? [],
+  }));
+}
+
+/**
+ * Create a new skill. Generates embedding + contentHash.
+ * Returns { error: "duplicate" } if contentHash matches an existing skill.
+ * Throws "name and content are required" if either is empty.
+ * Throws "Embedding failed" if embedText returns [].
+ */
+export async function createSkill(
+  userId: string,
+  data: {
+    name: string;
+    content: string;
+    kind?: "workflow" | "bugfix" | "project_rule" | "tool_usage" | "coding_pattern" | "debugging";
+    trigger?: string;
+    tags?: string[];
+  },
+): Promise<
+  | { id: string; name: string; content: string; kind: string; trigger: string | null; tags: string[]; status: string; version: number }
+  | { error: "duplicate" }
+> {
+  const name = data.name.trim();
+  const content = data.content.trim();
+  if (!name || !content) {
+    throw new Error("name and content are required");
+  }
+  const kind = data.kind ?? "workflow";
+  const trigger = data.trigger?.trim() || "";
+  const tags = Array.isArray(data.tags)
+    ? data.tags.filter((t): t is string => typeof t === "string")
+    : [];
+
+  const embedSource = [name, trigger, tags.join(", "), content].filter(Boolean).join("\n");
+  const vector = await embedText(embedSource, "document");
+  if (vector.length === 0) {
+    throw new Error("Embedding failed");
+  }
+  const contentHash = hashContent(content);
+
+  const [dup] = await db
+    .select({ id: skills.id })
+    .from(skills)
+    .where(and(eq(skills.userId, userId), eq(skills.contentHash, contentHash)))
+    .limit(1);
+  if (dup) return { error: "duplicate" as const };
+
+  const [row] = await db
+    .insert(skills)
+    .values({
+      userId,
+      name,
+      content,
+      embedding: vector,
+      contentHash,
+      kind,
+      trigger,
+      tags,
+    })
+    .returning({
+      id: skills.id,
+      name: skills.name,
+      content: skills.content,
+      kind: skills.kind,
+      trigger: skills.trigger,
+      tags: skills.tags,
+      status: skills.status,
+      version: skills.version,
+    });
+  return row;
+}
+
+/**
+ * Delete a skill (physical delete). Scoped by userId.
+ * Returns true if deleted, false if not found.
+ */
+export async function deleteSkill(userId: string, id: string): Promise<boolean> {
+  const [row] = await db
+    .delete(skills)
+    .where(and(eq(skills.id, id), eq(skills.userId, userId)))
+    .returning({ id: skills.id });
+  return !!row;
+}
+
+/**
+ * Find all duplicate pairs among a user's active skills via a single SQL self-join.
+ * Compares stored document embeddings pairwise (document-to-document, not query).
+ * a.id < b.id avoids self-matches and duplicate pairs.
+ * Returns [] if fewer than 2 skills exist.
+ */
+export async function findAllDuplicatePairs(
+  userId: string,
+  threshold = 0.88,
+): Promise<{ aId: string; aName: string; bId: string; bName: string; similarity: number }[]> {
+  const maxDistance = 1 - threshold;
+  const rows = await db.all(sql`
+    SELECT a.id AS a_id, a.name AS a_name,
+           b.id AS b_id, b.name AS b_name,
+           vec_distance_cosine(a.embedding, b.embedding) AS distance
+    FROM skills a
+    JOIN skills b ON a.user_id = b.user_id AND a.id < b.id
+    WHERE a.user_id = ${userId}
+      AND a.status = 'active'
+      AND b.status = 'active'
+      AND vec_distance_cosine(a.embedding, b.embedding) < ${maxDistance}
+    ORDER BY distance
+  `) as { a_id: string; a_name: string; b_id: string; b_name: string; distance: number }[];
+
+  return rows.map((r) => ({
+    aId: r.a_id,
+    aName: r.a_name,
+    bId: r.b_id,
+    bName: r.b_name,
+    similarity: Number(distanceToSimilarity(r.distance).toFixed(3)),
+  }));
 }
