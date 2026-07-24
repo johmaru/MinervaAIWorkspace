@@ -39,7 +39,27 @@ type Candidate = {
   createdAt: string;
 };
 
-type Tab = "active" | "drafts" | "archived";
+type EvolutionProposal = {
+  id: string;
+  skillId: string;
+  skillName: string | null;
+  baseVersion: number;
+  previousContent: string;
+  proposedContent: string;
+  proposedName: string | null;
+  proposedTrigger: string | null;
+  proposedTags: string[] | null;
+  patchSummary: string;
+  reason: string | null;
+  evidenceEventIds: string[];
+  contentHash: string;
+  status: "draft" | "approved" | "rejected" | "superseded" | "conflict";
+  appliedVersion: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type Tab = "active" | "drafts" | "evolution" | "archived";
 
 type Props = {
   open: boolean;
@@ -58,6 +78,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("active");
   const [skills, setSkills] = useState<Skill[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [evolutionProposals, setEvolutionProposals] = useState<EvolutionProposal[]>([]);
   const [archived, setArchived] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,16 +100,24 @@ export function SkillManagerModal({ open, onClose }: Props) {
   const [candTags, setCandTags] = useState("");
   const [candContent, setCandContent] = useState("");
 
+  // Evolution edit state
+  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
+  const [evoContent, setEvoContent] = useState("");
+  const [evoName, setEvoName] = useState("");
+  const [evoTrigger, setEvoTrigger] = useState("");
+  const [evoTags, setEvoTags] = useState("");
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [activeRes, draftRes, archivedRes] = await Promise.all([
+      const [activeRes, draftRes, archivedRes, evoRes] = await Promise.all([
         clientFetch("/api/skills"),
         clientFetch("/api/skill-candidates?status=draft"),
         clientFetch("/api/skills"),
+        clientFetch("/api/skill-evolution-proposals?status=draft"),
       ]);
-      if (!activeRes.ok || !draftRes.ok || !archivedRes.ok) {
+      if (!activeRes.ok || !draftRes.ok || !archivedRes.ok || !evoRes.ok) {
         setError(t("skills.error"));
         return;
       }
@@ -96,6 +125,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
       setSkills(allSkills.filter((s) => s.status === "active"));
       setArchived(allSkills.filter((s) => s.status === "archived"));
       setCandidates((await draftRes.json()) as Candidate[]);
+      setEvolutionProposals((await evoRes.json()) as EvolutionProposal[]);
     } catch {
       setError(t("skills.error"));
     } finally {
@@ -275,6 +305,117 @@ export function SkillManagerModal({ open, onClose }: Props) {
     setCandContent(c.proposedContent);
   };
 
+
+  const startProposalEdit = (p: EvolutionProposal) => {
+    setEditingProposalId(p.id);
+    setEvoName(p.proposedName ?? "");
+    setEvoTrigger(p.proposedTrigger ?? "");
+    setEvoTags(p.proposedTags?.join(", ") ?? "");
+    setEvoContent(p.proposedContent);
+  };
+
+  const handleApproveProposal = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      const res = await clientFetch(`/api/skill-evolution-proposals/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "approved" }),
+      });
+      if (!res.ok) {
+        setError(t("skills.error"));
+        return;
+      }
+      await fetchAll();
+    } catch {
+      setError(t("skills.error"));
+    }
+  }, [fetchAll, t]);
+
+  const handleEditAndApproveProposal = useCallback(async (id: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await clientFetch(`/api/skill-evolution-proposals/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "approved",
+          proposedContent: evoContent,
+          proposedName: evoName,
+          proposedTrigger: evoTrigger,
+          proposedTags: evoTags.split(",").map((t) => t.trim()).filter(Boolean),
+        }),
+      });
+      if (!res.ok) {
+        setError(t("skills.error"));
+        return;
+      }
+      setEditingProposalId(null);
+      await fetchAll();
+    } catch {
+      setError(t("skills.error"));
+    } finally {
+      setSaving(false);
+    }
+  }, [evoContent, evoName, evoTrigger, evoTags, fetchAll, t]);
+
+  const handleRejectProposal = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      const res = await clientFetch(`/api/skill-evolution-proposals/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "rejected" }),
+      });
+      if (!res.ok) {
+        setError(t("skills.error"));
+        return;
+      }
+      await fetchAll();
+    } catch {
+      setError(t("skills.error"));
+    }
+  }, [fetchAll, t]);
+
+  const handleDeleteProposal = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      const res = await clientFetch(`/api/skill-evolution-proposals/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        setError(t("skills.error"));
+        return;
+      }
+      await fetchAll();
+    } catch {
+      setError(t("skills.error"));
+    }
+  }, [fetchAll, t]);
+
+  const handleProposeEvolve = useCallback(async (skillId: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await clientFetch(`/api/skills/${skillId}/evolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok && res.status !== 409 && res.status !== 429) {
+        setError(t("skills.error"));
+        return;
+      }
+      // Switch to evolution tab to show the result
+      setTab("evolution");
+      await fetchAll();
+    } catch {
+      setError(t("skills.error"));
+    } finally {
+      setSaving(false);
+    }
+  }, [fetchAll, t]);
   return (
     <AnimateModal open={open} onClose={onClose} panelClassName="max-w-3xl" ariaLabel={t("skills.managerTitle")}>
       <div className="flex flex-col gap-4">
@@ -301,7 +442,7 @@ export function SkillManagerModal({ open, onClose }: Props) {
 
         {/* Tabs */}
         <div className="flex gap-2">
-          {(["active", "drafts", "archived"] as Tab[]).map((tb) => (
+          {(["active", "drafts", "evolution", "archived"] as Tab[]).map((tb) => (
             <button
               key={tb}
               type="button"
@@ -312,10 +453,15 @@ export function SkillManagerModal({ open, onClose }: Props) {
                   : "bg-muted text-muted-foreground hover:bg-muted/80"
               }`}
             >
-              {t(`skills.${tb}`)}
+              {tb === "evolution" ? t("skills.evolutionTab") : t(`skills.${tb}`)}
               {tb === "drafts" && candidates.length > 0 && (
                 <span className="ml-1.5 rounded-full bg-primary-foreground/20 px-1.5 text-xs">
                   {candidates.length}
+                </span>
+              )}
+              {tb === "evolution" && evolutionProposals.length > 0 && (
+                <span className="ml-1.5 rounded-full bg-primary-foreground/20 px-1.5 text-xs">
+                  {evolutionProposals.length}
                 </span>
               )}
             </button>
@@ -408,6 +554,14 @@ export function SkillManagerModal({ open, onClose }: Props) {
                           </button>
                           <button
                             type="button"
+                            onClick={() => handleProposeEvolve(s.id)}
+                            disabled={saving}
+                            className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                          >
+                            {t("skills.proposeEvolve")}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleArchive(s.id)}
                             className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                           >
@@ -426,6 +580,9 @@ export function SkillManagerModal({ open, onClose }: Props) {
                         </div>
                       )}
                       <p className="text-sm text-muted-foreground">{s.content}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {t("skills.successFailCounts", { success: s.successCount, failure: s.failureCount })}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {t("skills.lastUsed")}:{" "}
                         {s.lastUsedAt ? new Date(s.lastUsedAt).toLocaleDateString() : t("skills.never")}
@@ -580,6 +737,133 @@ export function SkillManagerModal({ open, onClose }: Props) {
                         >
                           {t("skills.reject")}
                         </MotionButton>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Evolution tab */}
+        {tab === "evolution" && !loading && (
+          <div className="flex flex-col gap-2">
+            {evolutionProposals.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("skills.evolutionEmpty")}</p>
+            ) : (
+              evolutionProposals.map((p) => (
+                <div key={p.id} className="rounded-xl bg-muted/50 p-3 ring-1 ring-border">
+                  {editingProposalId === p.id ? (
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        value={evoName}
+                        onChange={(e) => setEvoName(e.target.value)}
+                        placeholder={t("skills.name")}
+                        className="rounded-lg bg-background px-3 py-2 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
+                      />
+                      <input
+                        type="text"
+                        value={evoTrigger}
+                        onChange={(e) => setEvoTrigger(e.target.value)}
+                        placeholder={t("skills.trigger")}
+                        className="rounded-lg bg-background px-2 py-1 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
+                      />
+                      <input
+                        type="text"
+                        value={evoTags}
+                        onChange={(e) => setEvoTags(e.target.value)}
+                        placeholder={`${t("skills.tags")} (comma-separated)`}
+                        className="rounded-lg bg-background px-2 py-1 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
+                      />
+                      <textarea
+                        value={evoContent}
+                        onChange={(e) => setEvoContent(e.target.value)}
+                        rows={4}
+                        className="rounded-lg bg-background px-3 py-2 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary"
+                      />
+                      <div className="flex gap-2">
+                        <MotionButton
+                          type="button"
+                          onClick={() => handleEditAndApproveProposal(p.id)}
+                          disabled={saving}
+                          className="rounded-xl bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                          whileTap={{ scale: 0.97 }}
+                        >
+                          {t("skills.save")}
+                        </MotionButton>
+                        <MotionButton
+                          type="button"
+                          onClick={() => setEditingProposalId(null)}
+                          className="rounded-xl bg-muted px-3 py-1.5 text-sm hover:opacity-80"
+                          whileTap={{ scale: 0.97 }}
+                        >
+                          {t("skills.cancel")}
+                        </MotionButton>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{p.skillName ?? p.skillId}</span>
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">v{p.baseVersion}</span>
+                          {p.status === "conflict" && (
+                            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">
+                              {t("skills.evolutionFilterConflict")}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => startProposalEdit(p)}
+                            className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            {t("skills.evolutionEditApprove")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveProposal(p.id)}
+                            className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            {t("skills.evolutionApprove")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRejectProposal(p.id)}
+                            className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            {t("skills.evolutionReject")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProposal(p.id)}
+                            className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            {t("skills.evolutionDeleteDraft")}
+                          </button>
+                        </div>
+                      </div>
+                      {p.status === "conflict" && (
+                        <div className="rounded-lg bg-amber-500/10 px-2 py-1 text-xs text-amber-600 dark:text-amber-400">
+                          {t("skills.evolutionConflict")}
+                        </div>
+                      )}
+                      <p className="text-xs font-medium text-muted-foreground">{t("skills.evolutionSummary")}: {p.patchSummary}</p>
+                      {p.reason && (
+                        <p className="text-xs text-muted-foreground italic">{p.reason}</p>
+                      )}
+                      <div className="grid grid-cols-2 gap-2 mt-1">
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground mb-0.5">{t("skills.evolutionPrevious")}</p>
+                          <pre className="whitespace-pre-wrap rounded-lg bg-background p-2 text-xs text-muted-foreground line-clamp-4 overflow-hidden">{p.previousContent}</pre>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground mb-0.5">{t("skills.evolutionProposed")}</p>
+                          <pre className="whitespace-pre-wrap rounded-lg bg-background p-2 text-xs text-foreground line-clamp-4 overflow-hidden">{p.proposedContent}</pre>
+                        </div>
                       </div>
                     </div>
                   )}
