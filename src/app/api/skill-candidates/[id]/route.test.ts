@@ -275,7 +275,7 @@ describe("PATCH /api/skill-candidates/[id]", () => {
     expect(json.skill.version).toBe(4);
   });
 
-  it("returns 404 when referenced skill not found during merge", async () => {
+  it("falls through to normal approve when referenced skill was deleted", async () => {
     mockGetSessionUser.mockResolvedValue({ id: "u1" });
 
     const candidate = {
@@ -300,7 +300,7 @@ describe("PATCH /api/skill-candidates/[id]", () => {
 
     const { db } = await import("@/db");
 
-    // First select() returns candidate; second select() (for skill) returns []
+    // First select() returns candidate; second select() (for skill) returns [] (deleted).
     let callCount = 0;
     (db as { select: unknown }).select = vi.fn().mockImplementation(() => {
       callCount++;
@@ -312,12 +312,39 @@ describe("PATCH /api/skill-candidates/[id]", () => {
         }),
       };
     });
+    // update() for clearing stale duplicateOfId on candidate
+    (db as { update: unknown }).update = vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
+    // insert() for creating new skill (normal approve path)
+    const mockSkillRow = { id: "new-skill-id", name: "Ghost", content: "Content", kind: "workflow", trigger: "trigger", tags: [] };
+    (db as { insert: unknown }).insert = vi.fn().mockReturnValue({
+      values: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([mockSkillRow]),
+      }),
+    });
+    // Second update() for setting candidate status to "approved"
+    (db as { update: unknown }).update = vi.fn().mockReturnValueOnce({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    }).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      }),
+    });
 
     const res = await PATCH(
       patchReq("c3", { status: "approved", mergeAction: "replace" }),
       makeCtx("c3"),
     );
 
-    expect(res.status).toBe(404);
+    // Should NOT return 404 — falls through to normal approve
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidate.status).toBe("approved");
+    expect(json.skill.id).toBe("new-skill-id");
   });
 });

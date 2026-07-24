@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { skills } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
-import { updateSkillContent } from "@/lib/skillStore";
+import { updateSkillContent, deleteSkill } from "@/lib/skillStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,10 +117,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params;
   const user = await getSessionUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
-  const [row] = await db
-    .delete(skills)
-    .where(and(eq(skills.id, id), eq(skills.userId, user.id)))
-    .returning({ id: skills.id });
-  if (!row) return new Response("Not found", { status: 404 });
-  return Response.json({ id: row.id });
+  const deleted = await deleteSkill(user.id, id);
+  if (!deleted) return new Response("Not found", { status: 404 });
+  return Response.json({ id });
 }

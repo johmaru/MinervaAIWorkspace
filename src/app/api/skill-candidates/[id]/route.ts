@@ -78,58 +78,66 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       .from(skills)
       .where(and(eq(skills.id, candidate.duplicateOfId), eq(skills.userId, user.id)))
       .limit(1);
+    // Referenced skill was deleted (e.g., during a consolidation).
+    // Clear the stale reference and fall through to normal approve below.
     if (!existing) {
-      return new Response("Referenced skill not found", { status: 404 });
+      await db
+        .update(skillCandidates)
+        .set({ duplicateOfId: null, duplicateOfType: null, updatedAt: new Date() })
+        .where(eq(skillCandidates.id, id));
+      candidate.duplicateOfId = null;
+      candidate.duplicateOfType = null;
+      // Fall through to normal approve (create new skill).
+    } else {
+      const mergedContent =
+        body.mergeAction === "append"
+          ? `${existing.content}\n\n${content}`
+          : content;
+      const mergedName = body.proposedName?.trim() || existing.name;
+      const mergedKind = body.proposedKind || existing.kind;
+      const mergedTrigger = body.proposedTrigger?.trim() || existing.trigger || "";
+      const mergedTags = body.proposedTags
+        ? body.proposedTags.filter((t): t is string => typeof t === "string")
+        : existing.tags;
+
+      const mergedEmbedSource = [mergedName, mergedTrigger, mergedTags.join(", "), mergedContent]
+        .filter(Boolean).join("\n");
+      const mergedVector = await embedText(mergedEmbedSource, "document");
+      if (mergedVector.length === 0) {
+        return new Response("Embedding failed", { status: 503 });
+      }
+      const mergedHash = hashContent(mergedContent);
+
+      const [updated] = await db
+        .update(skills)
+        .set({
+          name: mergedName,
+          content: mergedContent,
+          embedding: mergedVector,
+          contentHash: mergedHash,
+          kind: mergedKind,
+          trigger: mergedTrigger,
+          tags: mergedTags,
+          version: existing.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(skills.id, existing.id), eq(skills.userId, user.id)))
+        .returning({
+          id: skills.id,
+          name: skills.name,
+          content: skills.content,
+          kind: skills.kind,
+          trigger: skills.trigger,
+          tags: skills.tags,
+        });
+
+      await db
+        .update(skillCandidates)
+        .set({ status: "merged", updatedAt: new Date() })
+        .where(eq(skillCandidates.id, id));
+
+      return Response.json({ candidate: { id, status: "merged" }, skill: updated });
     }
-
-    const mergedContent =
-      body.mergeAction === "append"
-        ? `${existing.content}\n\n${content}`
-        : content;
-    const mergedName = body.proposedName?.trim() || existing.name;
-    const mergedKind = body.proposedKind || existing.kind;
-    const mergedTrigger = body.proposedTrigger?.trim() || existing.trigger || "";
-    const mergedTags = body.proposedTags
-      ? body.proposedTags.filter((t): t is string => typeof t === "string")
-      : existing.tags;
-
-    const mergedEmbedSource = [mergedName, mergedTrigger, mergedTags.join(", "), mergedContent]
-      .filter(Boolean).join("\n");
-    const mergedVector = await embedText(mergedEmbedSource, "document");
-    if (mergedVector.length === 0) {
-      return new Response("Embedding failed", { status: 503 });
-    }
-    const mergedHash = hashContent(mergedContent);
-
-    const [updated] = await db
-      .update(skills)
-      .set({
-        name: mergedName,
-        content: mergedContent,
-        embedding: mergedVector,
-        contentHash: mergedHash,
-        kind: mergedKind,
-        trigger: mergedTrigger,
-        tags: mergedTags,
-        version: existing.version + 1,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(skills.id, existing.id), eq(skills.userId, user.id)))
-      .returning({
-        id: skills.id,
-        name: skills.name,
-        content: skills.content,
-        kind: skills.kind,
-        trigger: skills.trigger,
-        tags: skills.tags,
-      });
-
-    await db
-      .update(skillCandidates)
-      .set({ status: "merged", updatedAt: new Date() })
-      .where(eq(skillCandidates.id, id));
-
-    return Response.json({ candidate: { id, status: "merged" }, skill: updated });
   }
 
   // Normal approve: generate embedding for the new skill

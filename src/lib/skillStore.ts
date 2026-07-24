@@ -1,6 +1,6 @@
 import { and, eq, like, inArray, sql, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { skills, skillUsageEvents } from "@/db/schema";
+import { skills, skillUsageEvents, skillCandidates } from "@/db/schema";
 import { embedText, hashContent } from "@/lib/embed";
 import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
@@ -523,7 +523,29 @@ export async function deleteSkill(userId: string, id: string): Promise<boolean> 
     .delete(skills)
     .where(and(eq(skills.id, id), eq(skills.userId, userId)))
     .returning({ id: skills.id });
-  return !!row;
+  if (!row) return false;
+
+  // Cascade-clear stale duplicateOfId references on draft candidates that
+  // pointed at the deleted skill. Without this, replace/append buttons on
+  // those candidates would 404 when the referenced skill is gone.
+  try {
+    await db
+      .update(skillCandidates)
+      .set({ duplicateOfId: null, duplicateOfType: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(skillCandidates.userId, userId),
+          eq(skillCandidates.duplicateOfId, id),
+          eq(skillCandidates.status, "draft"),
+        ),
+      );
+  } catch (e) {
+    logger.error("skill", "cascade-clear duplicateOfId failed", {
+      deletedSkillId: id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+  return true;
 }
 
 /**
