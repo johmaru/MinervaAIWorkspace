@@ -152,6 +152,7 @@ export const skills = sqliteTable("skills", {
   lastUsedAt: ts("last_used_at"),
   successCount: integer("success_count").notNull().default(0),
   failureCount: integer("failure_count").notNull().default(0),
+  lastEvolutionAt: ts("last_evolution_at"), // nullable — last time an evolution proposal was approved & applied
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),
 });
@@ -207,6 +208,45 @@ export const skillUsageEvents = sqliteTable("skill_usage_events", {
     .default("unknown"),
   createdAt: tsNow("created_at"),
 });
+
+/**
+ * skill_evolution_proposals — bounded LLM-generated content patches for existing skills.
+ *
+ * Created when a skill accumulates enough negative feedback within an evolution window.
+ * Remains as draft until approved/rejected by the user. On approval, the skill content is
+ * updated via updateSkillContent (version bump + re-embed) and lastEvolutionAt is set.
+ *
+ * status: draft → approved / rejected / superseded / conflict
+ * One open draft per skill enforced by partial unique index (PR3 migration).
+ */
+export const skillEvolutionProposals = sqliteTable("skill_evolution_proposals", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  baseVersion: integer("base_version").notNull(),
+  previousContent: text("previous_content").notNull(),
+  proposedContent: text("proposed_content").notNull(),
+  proposedName: text("proposed_name"),
+  proposedTrigger: text("proposed_trigger"),
+  proposedTags: text("proposed_tags", { mode: "json" }).$type<string[]>(),
+  patchSummary: text("patch_summary").notNull(),
+  reason: text("reason"),
+  evidenceEventIds: text("evidence_event_ids", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  contentHash: text("content_hash").notNull(),
+  status: text("status", {
+    enum: ["draft", "approved", "rejected", "superseded", "conflict"],
+  }).notNull().default("draft"),
+  appliedVersion: integer("applied_version"),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
+}, (t) => ({
+  userSkillStatusIdx: index("skill_evo_user_skill_status_idx").on(
+    t.userId, t.skillId, t.status,
+  ),
+}));
 
 /**
  * mcpServers — per-user MCP (Model Context Protocol) server connection definitions.
