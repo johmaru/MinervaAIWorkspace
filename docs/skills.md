@@ -78,8 +78,8 @@ Defined in `src/db/schema.ts:107-129`:
 | `sourceThreadId` | `text` FK | NULL | Thread the skill was generated from. Set null on thread delete. |
 | `sourceMessageIds` | `text` (JSON) | NULL | `string[]` — message IDs that contributed (schema field; not populated in current generation flow) |
 | `lastUsedAt` | `timestamp` | NULL | Updated on each injection via `buildSkillContext()` |
-| `successCount` | `integer` NOT NULL | `0` | Reserved for future feedback-based success tracking (not currently incremented) |
-| `failureCount` | `integer` NOT NULL | `0` | Reserved for future feedback-based failure tracking (not currently incremented) |
+| `successCount` | `integer` NOT NULL | `0` | Lifetime count of `helpful` feedback outcomes (updated via `POST /api/skill-usage/[id]/feedback`) |
+| `failureCount` | `integer` NOT NULL | `0` | Lifetime count of `not_helpful` feedback outcomes (updated via `POST /api/skill-usage/[id]/feedback`) |
 | `createdAt` | `timestamp` | `now()` | Creation time |
 | `updatedAt` | `timestamp` | `now()` | Last modification time |
 
@@ -114,10 +114,10 @@ Defined in `src/db/schema.ts:166-178`. Records each skill injection event:
 | `skillId` | `text` NOT NULL FK | — | The skill that was injected. Cascade delete. |
 | `userId` | `text` NOT NULL FK | — | User who triggered the injection. Cascade delete. |
 | `threadId` | `text` NOT NULL FK | — | Thread where injection occurred. Cascade delete. |
-| `messageId` | `text` | NULL | Schema field; not currently populated |
+| `messageId` | `text` | NULL | Assistant message ID, attached after the assistant message is saved (via `attachUsageMessageIds`) |
 | `similarity` | `real` | NULL | Cosine similarity score at injection time |
 | `activationType` | `text` NOT NULL enum | — | `"semantic"` (search match) or `"manual"` (name-specified) |
-| `outcome` | `text` NOT NULL enum | `"unknown"` | `"unknown"` / `"helpful"` / `"not_helpful"` — reserved for future feedback |
+| `outcome` | `text` NOT NULL enum | `"unknown"` | `"unknown"` / `"helpful"` / `"not_helpful"` — set via `POST /api/skill-usage/[id]/feedback` |
 | `createdAt` | `timestamp` | `now()` | When the injection occurred |
 
 See [Database & Schema](./database.md) for the full schema reference.

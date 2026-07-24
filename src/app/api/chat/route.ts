@@ -21,8 +21,8 @@ import { searchWikipedia } from "@/lib/wikipedia";
 import type { WikipediaResult } from "@/lib/wikipedia";
 import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
+import { buildSkillContext, attachUsageMessageIds, type InjectedSkillInfo } from "@/lib/skillStore";
 import { buildMemoryContext } from "@/lib/memoryStore";
-import { buildSkillContext } from "@/lib/skillStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -246,13 +246,14 @@ export async function POST(req: Request) {
       let hyperTrace: HyperTrace | undefined;
       let mcpConnections: McpConnection[] = [];
       let councilTrace: CouncilTrace | undefined;
+      let injectedSkills: InjectedSkillInfo[] = [];
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
         // Run pre-stream processing in parallel to reduce first-token latency.
         // Each build* is wrapped with .catch(() => null) to isolate failures.
         // rapid mode skips all (null).
-        const [searchContextMessage, urlContextMessage, memoryMessage, skillMessage] =
+        const [searchContextMessage, urlContextMessage, memoryMessage, skillResult] =
           body.rapid
             ? [null, null, null, null]
             : await Promise.all([
@@ -294,6 +295,9 @@ export async function POST(req: Request) {
                   return null;
                 }),
               ]);
+
+        const skillMessage = skillResult?.message ?? null;
+        injectedSkills = skillResult?.injected ?? [];
 
         // MCP server connections: connect to servers enabled on the thread and fetch tools.
         // On failure, skip and continue chat (non-blocking).
@@ -563,16 +567,24 @@ export async function POST(req: Request) {
             role: "assistant",
             content: assistantContent,
             reasoning: assistantReasoning || null,
-            metadata: dualTrace
-              ? { dualTrace, model: finalModel, elapsedMs }
-              : hyperTrace
-                ? { hyperTrace, model: finalModel, elapsedMs }
-                : councilTrace
-                  ? { councilTrace, model: finalModel, elapsedMs }
-                  : { model: finalModel, elapsedMs },
+            metadata: buildAssistantMetadata({
+              finalModel,
+              elapsedMs,
+              dualTrace,
+              hyperTrace,
+              councilTrace,
+              injectedSkills,
+            }),
           })
           .returning();
         streamResult.assistantMessageId = assistantMsg.id;
+        if (injectedSkills.length > 0) {
+          await attachUsageMessageIds(
+            injectedSkills.map((s) => s.usageEventId),
+            assistantMsg.id,
+            user.id,
+          );
+        }
 
         await db
           .update(threads)
@@ -597,17 +609,25 @@ export async function POST(req: Request) {
                 parentId: prepared.userMessage.id,
                 role: "assistant",
                 content: assistantContent,
-                metadata: dualTrace
-                  ? { dualTrace, model: finalModel, elapsedMs: Date.now() - streamStartedAt }
-                  : hyperTrace
-                    ? { hyperTrace, model: finalModel, elapsedMs: Date.now() - streamStartedAt }
-                    : councilTrace
-                      ? { councilTrace, model: finalModel, elapsedMs: Date.now() - streamStartedAt }
-                      : { model: finalModel, elapsedMs: Date.now() - streamStartedAt },
+                metadata: buildAssistantMetadata({
+                  finalModel,
+                  elapsedMs: Date.now() - streamStartedAt,
+                  dualTrace,
+                  hyperTrace,
+                  councilTrace,
+                  injectedSkills,
+                }),
                 reasoning: assistantReasoning || null,
               })
               .returning();
             streamResult.assistantMessageId = partial.id;
+            if (injectedSkills.length > 0) {
+              await attachUsageMessageIds(
+                injectedSkills.map((s) => s.usageEventId),
+                partial.id,
+                user.id,
+              );
+            }
             await db
               .update(threads)
               .set({ currentLeafId: partial.id, updatedAt: new Date() })
@@ -1087,6 +1107,31 @@ function detectHostOs(): string {
   }
   detectedHostOs = result;
   return result;
+}
+
+/**
+ * Build assistant message metadata with spread merge — never replaces
+ * dual/hyper/council traces when adding injectedSkills.
+ * Used on both success and partial-error save paths.
+ */
+export function buildAssistantMetadata(args: {
+  finalModel: string;
+  elapsedMs: number;
+  dualTrace?: DualTrace;
+  hyperTrace?: HyperTrace;
+  councilTrace?: CouncilTrace;
+  injectedSkills: InjectedSkillInfo[];
+}) {
+  return {
+    model: args.finalModel,
+    elapsedMs: args.elapsedMs,
+    ...(args.dualTrace ? { dualTrace: args.dualTrace } : {}),
+    ...(args.hyperTrace ? { hyperTrace: args.hyperTrace } : {}),
+    ...(args.councilTrace ? { councilTrace: args.councilTrace } : {}),
+    ...(args.injectedSkills.length > 0
+      ? { injectedSkills: args.injectedSkills }
+      : {}),
+  };
 }
 
 function buildFinalMessages({

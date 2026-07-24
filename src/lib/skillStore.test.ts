@@ -9,7 +9,8 @@ vi.mock("@/lib/embed", () => ({
 }));
 
 // Mock the DB with insert spy so we can assert it is NOT called with an empty array.
-const insertValuesSpy = vi.fn(() => ({ catch: vi.fn() }));
+// Returning mock now includes .returning() chain for the multi-row insert.
+const insertValuesSpy = vi.fn(() => ({ returning: vi.fn(async () => []), catch: vi.fn() }));
 const updateSetWhereSpy = vi.fn(() => ({ catch: vi.fn() }));
 vi.mock("@/db", () => ({
   db: {

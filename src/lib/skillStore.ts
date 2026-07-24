@@ -1,4 +1,4 @@
-import { eq, like, and, sql } from "drizzle-orm";
+import { and, eq, like, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { skills, skillUsageEvents } from "@/db/schema";
 import { embedText } from "@/lib/embed";
@@ -10,7 +10,7 @@ import { logger } from "@/lib/logger";
  *
  * While memories are ephemeral context fragments per thread, skills are
  * permanent cross-thread persona / behavior / knowledge.
- * Searches for relevant skills via client-side cosine similarity and injects them as system messages.
+ * Searches for relevant skills via SQL vec_distance_cosine and injects them as system messages.
  * If the user says "use skill X", it is applied directly by name.
  */
 
@@ -20,6 +20,22 @@ export type ScoredSkill = {
   content: string;
   similarity: number;
 };
+
+/** Skill Evolution: info about an injected skill, persisted in messages.metadata.injectedSkills */
+export type InjectedSkillInfo = {
+  skillId: string;
+  name: string;
+  usageEventId: string;
+  similarity: number;
+  activationType: "semantic" | "manual";
+};
+
+/** Result of buildSkillContext — message for LLM context + injected skill metadata */
+export type SkillContextResult = {
+  message: { role: "system"; content: string };
+  injected: InjectedSkillInfo[];
+};
+
 
 /**
  * Searches for relevant skills by query string and user ID.
@@ -75,7 +91,7 @@ export async function buildSkillContext({
   content: string;
   userId: string;
   threadId?: string;
-}): Promise<{ role: "system"; content: string } | null> {
+}): Promise<SkillContextResult | null> {
   // Manual skill name extraction: Japanese skill-use pattern / "use X skill"
   const nameMatch =
     content.match(/(.+?)スキルを使っ(?:て|え)/) ??
@@ -125,8 +141,12 @@ export async function buildSkillContext({
     }
   }
 
-  // Skill usage log + lastUsedAt update (fire-and-forget)
-  if (threadId && merged.length > 0) {
+  if (merged.length === 0) return null;
+
+  // Skill usage log: multi-row insert + RETURNING (await — usageEventId is required
+  // for feedback and metadata persistence). Single lastUsedAt UPDATE via IN clause.
+  let injected: InjectedSkillInfo[] = [];
+  if (threadId) {
     const usageEntries = merged.map((s) => ({
       skillId: s.id,
       userId,
@@ -134,20 +154,74 @@ export async function buildSkillContext({
       similarity: s.similarity,
       activationType: (s.id === namedSkill?.id ? "manual" : "semantic") as "manual" | "semantic",
     }));
-    db.insert(skillUsageEvents)
-      .values(usageEntries)
-        .catch((e) => logger.error("skill", "usage log failed", { error: e instanceof Error ? e.message : String(e) }));
-    for (const s of merged) {
+    try {
+      const rows = await db
+        .insert(skillUsageEvents)
+        .values(usageEntries)
+        .returning({
+          id: skillUsageEvents.id,
+          skillId: skillUsageEvents.skillId,
+        });
+      // Build injected info by joining returned usage event ids with skill metadata.
+      injected = merged
+        .map((s) => {
+          const row = rows.find((r) => r.skillId === s.id);
+          if (!row) return null;
+          return {
+            skillId: s.id,
+            name: s.name,
+            usageEventId: row.id,
+            similarity: s.similarity,
+            activationType: (s.id === namedSkill?.id ? "manual" : "semantic") as "manual" | "semantic",
+          };
+        })
+        .filter((x): x is InjectedSkillInfo => x !== null);
+      // Single lastUsedAt UPDATE for all injected skills (fire-and-forget).
       db.update(skills)
         .set({ lastUsedAt: new Date() })
-        .where(eq(skills.id, s.id))
+        .where(and(eq(skills.userId, userId), inArray(skills.id, merged.map((s) => s.id))))
         .catch((e) => logger.error("skill", "lastUsedAt update failed", { error: e instanceof Error ? e.message : String(e) }));
+    } catch (e) {
+      logger.error("skill", "usage log insert failed", { error: e instanceof Error ? e.message : String(e) });
     }
   }
-  if (merged.length === 0) return null;
+
   const lines = merged.map((s) => `- [${s.name}] ${s.content}`).join("\n");
   return {
-    role: "system",
-    content: `Active skills for this conversation. Follow these instructions:\n${lines}`,
+    message: {
+      role: "system",
+      content: `Active skills for this conversation. Follow these instructions:\n${lines}`,
+    },
+    injected,
   };
+}
+
+/**
+ * Attach messageId to skill usage events after the assistant message is saved.
+ * Called on both success and partial-error save paths so feedback evidence is
+ * always linked to a message.
+ */
+export async function attachUsageMessageIds(
+  usageEventIds: string[],
+  messageId: string,
+  userId: string,
+): Promise<void> {
+  if (usageEventIds.length === 0) return;
+  try {
+    await db
+      .update(skillUsageEvents)
+      .set({ messageId })
+      .where(
+        and(
+          eq(skillUsageEvents.userId, userId),
+          inArray(skillUsageEvents.id, usageEventIds),
+        ),
+      );
+  } catch (e) {
+    logger.error("skill", "attachUsageMessageIds failed", {
+      messageId,
+      count: usageEventIds.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }

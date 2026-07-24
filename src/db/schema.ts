@@ -372,6 +372,14 @@ export const messages = sqliteTable(
       };
       model?: string;
       elapsedMs?: number;
+      /** Skill Evolution: skills injected into this assistant response */
+      injectedSkills?: Array<{
+        skillId: string;
+        name: string;
+        usageEventId: string;
+        similarity: number;
+        activationType: "semantic" | "manual";
+      }>;
     }>(),
     createdAt: tsNow("created_at"),
   },
