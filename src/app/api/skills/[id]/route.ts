@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { skills } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
-import { embedText, hashContent } from "@/lib/embed";
+import { updateSkillContent } from "@/lib/skillStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ type PatchBody = {
  * PATCH /api/skills/[id] — Edit a skill.
  * Partially updates name/content/kind/trigger/tags/status.
  * Re-embeds + updates contentHash + increments version when content changes.
+ * Uses shared updateSkillContent helper for embed/version/hash logic.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -32,7 +33,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  // Fetch existing skill (user scope)
+  // Fetch existing skill (user scope) — needed for kind update which
+  // updateSkillContent doesn't handle (kind is not in its patch type)
   const [existing] = await db
     .select()
     .from(skills)
@@ -40,51 +42,54 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .limit(1);
   if (!existing) return new Response("Not found", { status: 404 });
 
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  // Handle kind separately (not part of updateSkillContent)
+  if (body.kind !== undefined) {
+    await db
+      .update(skills)
+      .set({ kind: body.kind, updatedAt: new Date() })
+      .where(and(eq(skills.id, id), eq(skills.userId, user.id)));
+  }
 
-  if (body.name !== undefined) updates.name = body.name.trim();
-  if (body.kind !== undefined) updates.kind = body.kind;
-  if (body.trigger !== undefined) updates.trigger = body.trigger.trim();
+  // Use shared helper for content/name/trigger/tags/status
+  const patch: {
+    content?: string;
+    name?: string;
+    trigger?: string;
+    tags?: string[];
+    status?: "active" | "archived";
+  } = {};
+
+  if (body.content !== undefined) patch.content = body.content;
+  if (body.name !== undefined) patch.name = body.name;
+  if (body.trigger !== undefined) patch.trigger = body.trigger;
   if (body.tags !== undefined) {
-    updates.tags = Array.isArray(body.tags)
+    patch.tags = Array.isArray(body.tags)
       ? body.tags.filter((t): t is string => typeof t === "string")
       : [];
   }
-  if (body.status !== undefined) updates.status = body.status;
+  if (body.status !== undefined) patch.status = body.status;
 
-  // Re-embed if any embedding source (name + trigger + tags + content) changed.
-  // Bump contentHash + version only when content changes.
-  const newContent = body.content?.trim();
-  const newName = (updates.name as string | undefined) ?? existing.name;
-  const newTrigger = (updates.trigger as string | undefined) ?? existing.trigger ?? "";
-  const newTags = (updates.tags as string[] | undefined) ?? existing.tags;
-  const contentChanged = newContent !== undefined && newContent !== existing.content;
-  const nameChanged = updates.name !== undefined;
-  const triggerChanged = updates.trigger !== undefined;
-  const tagsChanged = updates.tags !== undefined;
+  // Only call updateSkillContent if there's something to update beyond kind
+  const hasContentUpdate =
+    body.content !== undefined ||
+    body.name !== undefined ||
+    body.trigger !== undefined ||
+    body.tags !== undefined ||
+    body.status !== undefined;
 
-  if (contentChanged || nameChanged || triggerChanged || tagsChanged) {
-    const effectiveContent = newContent ?? existing.content;
-    const embedSource = [newName, newTrigger, newTags.join(", "), effectiveContent]
-      .filter(Boolean)
-      .join("\n");
-    const vector = await embedText(embedSource, "document");
-    if (vector.length === 0) {
+  if (hasContentUpdate) {
+    const row = await updateSkillContent(id, user.id, patch);
+    if (!row) {
+      // updateSkillContent returns null on embedding failure OR not found.
+      // We already verified the skill exists above, so null means embedding failed.
       return new Response("Embedding failed", { status: 503 });
     }
-    updates.embedding = vector;
-    if (contentChanged) {
-      updates.content = newContent;
-      updates.contentHash = hashContent(newContent);
-      updates.version = existing.version + 1;
-    }
+    return Response.json(row);
   }
 
-  const [row] = await db
-    .update(skills)
-    .set(updates)
-    .where(and(eq(skills.id, id), eq(skills.userId, user.id)))
-    .returning({
+  // Only kind was updated — return existing skill fields
+  const [updated] = await db
+    .select({
       id: skills.id,
       name: skills.name,
       content: skills.content,
@@ -94,9 +99,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       status: skills.status,
       version: skills.version,
       updatedAt: skills.updatedAt,
-    });
-  if (!row) return new Response("Not found", { status: 404 });
-  return Response.json(row);
+    })
+    .from(skills)
+    .where(and(eq(skills.id, id), eq(skills.userId, user.id)))
+    .limit(1);
+  if (!updated) return new Response("Not found", { status: 404 });
+  return Response.json(updated);
 }
 
 /**
@@ -110,7 +118,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const [row] = await db
     .delete(skills)
     .where(and(eq(skills.id, id), eq(skills.userId, user.id)))
-    .returning();
+    .returning({ id: skills.id });
   if (!row) return new Response("Not found", { status: 404 });
-  return new Response(null, { status: 204 });
+  return Response.json({ id: row.id });
 }

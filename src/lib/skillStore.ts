@@ -1,7 +1,7 @@
 import { and, eq, like, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { skills, skillUsageEvents } from "@/db/schema";
-import { embedText } from "@/lib/embed";
+import { embedText, hashContent } from "@/lib/embed";
 import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
 
@@ -145,6 +145,8 @@ export async function buildSkillContext({
 
   // Skill usage log: multi-row insert + RETURNING (await — usageEventId is required
   // for feedback and metadata persistence). Single lastUsedAt UPDATE via IN clause.
+  if (merged.length === 0) return null;
+
   let injected: InjectedSkillInfo[] = [];
   if (threadId) {
     const usageEntries = merged.map((s) => ({
@@ -176,7 +178,6 @@ export async function buildSkillContext({
           };
         })
         .filter((x): x is InjectedSkillInfo => x !== null);
-      // Single lastUsedAt UPDATE for all injected skills (fire-and-forget).
       db.update(skills)
         .set({ lastUsedAt: new Date() })
         .where(and(eq(skills.userId, userId), inArray(skills.id, merged.map((s) => s.id))))
@@ -224,4 +225,83 @@ export async function attachUsageMessageIds(
       error: e instanceof Error ? e.message : String(e),
     });
   }
+}
+
+/**
+ * Shared skill content update helper — used by PATCH /api/skills/[id].
+ * applyEvolutionProposal performs its own transactional update (version bump +
+ * re-embed + lastEvolutionAt) and does not call this helper directly.
+ *
+ * Embed source: [name, trigger, tags.join(", "), content].filter(Boolean).join("\n")
+ * Re-embeds + updates contentHash + increments version when content changes.
+ * Returns the updated skill row or null if not found or embedding failed.
+ */
+export async function updateSkillContent(
+  skillId: string,
+  userId: string,
+  patch: {
+    content?: string;
+    name?: string;
+    trigger?: string;
+    tags?: string[];
+    status?: "active" | "archived";
+  },
+): Promise<{ id: string; version: number; content: string; name: string; contentHash: string } | null> {
+  const [existing] = await db
+    .select()
+    .from(skills)
+    .where(and(eq(skills.id, skillId), eq(skills.userId, userId)))
+    .limit(1);
+  if (!existing) return null;
+
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (patch.name !== undefined) updates.name = patch.name.trim();
+  if (patch.trigger !== undefined) updates.trigger = patch.trigger.trim();
+  if (patch.tags !== undefined) {
+    updates.tags = Array.isArray(patch.tags)
+      ? patch.tags.filter((t): t is string => typeof t === "string")
+      : [];
+  }
+  if (patch.status !== undefined) updates.status = patch.status;
+
+  const newContent = patch.content?.trim();
+  const newName = (updates.name as string | undefined) ?? existing.name;
+  const newTrigger = (updates.trigger as string | undefined) ?? existing.trigger ?? "";
+  const newTags = (updates.tags as string[] | undefined) ?? existing.tags;
+  const contentChanged = newContent !== undefined && newContent !== existing.content;
+  const nameChanged = updates.name !== undefined;
+  const triggerChanged = updates.trigger !== undefined;
+  const tagsChanged = updates.tags !== undefined;
+
+  if (contentChanged || nameChanged || triggerChanged || tagsChanged) {
+    const effectiveContent = newContent ?? existing.content;
+    const embedSource = [newName, newTrigger, newTags.join(", "), effectiveContent]
+      .filter(Boolean)
+      .join("\n");
+    const vector = await embedText(embedSource, "document");
+    if (vector.length === 0) {
+      return null; // embedding failed — caller should return 503
+    }
+    updates.embedding = vector;
+    if (contentChanged) {
+      updates.content = newContent;
+      updates.contentHash = hashContent(newContent);
+      updates.version = existing.version + 1;
+    }
+  }
+
+  const [row] = await db
+    .update(skills)
+    .set(updates)
+    .where(and(eq(skills.id, skillId), eq(skills.userId, userId)))
+    .returning({
+      id: skills.id,
+      version: skills.version,
+      content: skills.content,
+      name: skills.name,
+      contentHash: skills.contentHash,
+    });
+
+  return row ?? null;
 }

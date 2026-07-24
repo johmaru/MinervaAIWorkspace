@@ -1,5 +1,8 @@
+import { after } from "next/server";
 import { getSessionUser } from "@/lib/auth-guards";
 import { applySkillFeedback, type FeedbackOutcome } from "@/lib/skillFeedback";
+import { maybeProposeSkillEvolution, isSkillEvolutionEnabled, isSkillEvolutionAutoPropose } from "@/lib/skillEvolution";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,12 +20,15 @@ type Body = {
  * - 404 if event not found or belongs to another user (no enumeration leak)
  * - 400 if body is invalid
  *
+ * On not_helpful outcome for an active skill with evolution enabled + auto-propose on,
+ * schedules maybeProposeSkillEvolution via after() (non-blocking, request-scoped).
+ *
  * Response:
  * {
  *   id: string;                    // usage event id
  *   outcome: "helpful" | "not_helpful";
  *   skill: { id: string; successCount: number; failureCount: number };
- *   evolutionTriggered: boolean;   // always false in PR1 (evolution after() added in PR4)
+ *   evolutionTriggered: boolean;   // true if after(propose) was scheduled
  * }
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -50,6 +56,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   if (!result) return new Response("Not found", { status: 404 });
 
+  // Schedule evolution proposal via after() — only on not_helpful for active skills
+  // with evolution enabled + auto-propose on. Non-blocking; request-scoped.
+  const evolutionTriggered =
+    result.shouldAttemptEvolution &&
+    isSkillEvolutionEnabled() &&
+    isSkillEvolutionAutoPropose();
+
+  if (evolutionTriggered) {
+    after(async () => {
+      try {
+        await maybeProposeSkillEvolution({
+          skillId: result.skillId,
+          userId: user.id,
+        });
+      } catch (err) {
+        logger.error("skill-evolution", "after() propose failed", {
+          skillId: result.skillId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
+  }
+
   return Response.json({
     id: result.eventId,
     outcome: result.outcome,
@@ -58,7 +87,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       successCount: result.successCount,
       failureCount: result.failureCount,
     },
-    // PR1: evolution after() is not wired yet. Always false until PR4.
-    evolutionTriggered: false,
+    evolutionTriggered,
   });
 }
