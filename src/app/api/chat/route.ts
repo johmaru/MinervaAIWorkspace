@@ -298,6 +298,11 @@ export async function POST(req: Request) {
 
         const skillMessage = skillResult?.message ?? null;
         injectedSkills = skillResult?.injected ?? [];
+        // SSE skills event: send before first token so the client can render
+        // chips immediately. Persistent metadata is saved with the assistant row.
+        if (injectedSkills.length > 0) {
+          send("skills", { skills: injectedSkills });
+        }
 
         // MCP server connections: connect to servers enabled on the thread and fetch tools.
         // On failure, skip and continue chat (non-blocking).

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState, useCallback } from "react";
-import { useChat, type ChatMessage, type DualTrace, type HyperTrace, type CouncilTrace } from "@/hooks/useChat";
+import { useChat, type ChatMessage, type DualTrace, type HyperTrace, type CouncilTrace, type InjectedSkillInfo } from "@/hooks/useChat";
 import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
@@ -575,6 +575,79 @@ function formatElapsed(ms: number): string {
   return `${m}m${rem}s`;
 }
 
+/**
+ * Skill chips: show injected skills with 👍/👎 feedback buttons.
+ * Data source: message.metadata.injectedSkills (SSE live + DB persistent).
+ * Feedback is sent to POST /api/skill-usage/[id]/feedback.
+ */
+function SkillChips({ skills }: { skills: InjectedSkillInfo[] }) {
+  const { t } = useI18n();
+  const [submitted, setSubmitted] = useState<Record<string, "helpful" | "not_helpful">>({});
+  const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
+
+  if (skills.length === 0) return null;
+
+  const handleFeedback = async (usageEventId: string, outcome: "helpful" | "not_helpful") => {
+    if (submitting[usageEventId]) return;
+    setSubmitting((prev) => ({ ...prev, [usageEventId]: true }));
+    try {
+      const res = await clientFetch(`/api/skill-usage/${usageEventId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome }),
+      });
+      if (res.ok) {
+        setSubmitted((prev) => ({ ...prev, [usageEventId]: outcome }));
+      }
+    } catch {
+      // Silently fail — feedback is best-effort
+    } finally {
+      setSubmitting((prev) => ({ ...prev, [usageEventId]: false }));
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1" aria-label={t("skills.skillsInjected")}>
+      {skills.map((skill) => {
+        const voted = submitted[skill.usageEventId];
+        const isSubmitting = submitting[skill.usageEventId];
+        return (
+          <div
+            key={skill.usageEventId}
+            className="inline-flex items-center gap-1 rounded-full bg-muted/70 px-2 py-0.5 text-[10px] text-muted-foreground"
+          >
+            <span className="font-medium">{skill.name}</span>
+            {!voted ? (
+              <>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => handleFeedback(skill.usageEventId, "helpful")}
+                  className="rounded-full px-1 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-1"
+                  aria-label={t("skills.feedbackHelpful")}
+                >
+                  {t("skills.feedbackHelpful")}
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => handleFeedback(skill.usageEventId, "not_helpful")}
+                  className="rounded-full px-1 hover:bg-muted hover:text-foreground disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-1"
+                  aria-label={t("skills.feedbackNotHelpful")}
+                >
+                  {t("skills.feedbackNotHelpful")}
+                </button>
+              </>
+            ) : (
+              <span className="text-[10px]">{t("skills.feedbackThanks")}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 type MessageBubbleProps = {
   m: ChatMessage;
   streaming: boolean;
@@ -672,6 +745,9 @@ function MessageBubble({
             onPrev={() => onSwitchBranch(siblings[Math.max(0, currentIndex - 1)])}
             onNext={() => onSwitchBranch(siblings[Math.min(siblings.length - 1, currentIndex + 1)])}
           />
+        )}
+        {m.metadata?.injectedSkills && m.metadata.injectedSkills.length > 0 && (
+          <SkillChips skills={m.metadata.injectedSkills} />
         )}
         {!streaming && answer && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">

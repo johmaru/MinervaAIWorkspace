@@ -5,6 +5,14 @@ import type { SourceInfo } from "@/lib/scraper";
 import { useI18n } from "@/components/I18nProvider";
 import { clientFetch } from "@/lib/clientFetch";
 
+export type InjectedSkillInfo = {
+  skillId: string;
+  name: string;
+  usageEventId: string;
+  similarity: number;
+  activationType: "semantic" | "manual";
+};
+
 export type ChatRole = "user" | "assistant" | "system";
 export type DualTrace = {
   strategy: "cross_review" | "debate";
@@ -57,6 +65,7 @@ export type ChatMessage = {
     councilTrace?: CouncilTrace;
     model?: string;
     elapsedMs?: number;
+    injectedSkills?: InjectedSkillInfo[];
   } | null;
 };
 
@@ -95,6 +104,7 @@ type RawMessage = {
     councilTrace?: CouncilTrace;
     model?: string;
     elapsedMs?: number;
+    injectedSkills?: InjectedSkillInfo[];
   } | null;
 };
 
@@ -125,6 +135,7 @@ type SseData = {
   councilRound?: number;
   model?: string;
   elapsedMs?: number;
+  skills?: InjectedSkillInfo[];
 };
 
 /**
@@ -403,6 +414,15 @@ export function useChat(threadId: string | null) {
               byIdRef.current.set(assistantId, {
                 ...existing,
                 statusLabel: event.data.label,
+              });
+              setMessages(buildChain(assistantId));
+            }
+          } else if (event.event === "skills" && event.data?.skills) {
+            const existing = byIdRef.current.get(assistantId);
+            if (existing) {
+              byIdRef.current.set(assistantId, {
+                ...existing,
+                metadata: { ...(existing.metadata ?? {}), injectedSkills: event.data.skills },
               });
               setMessages(buildChain(assistantId));
             }

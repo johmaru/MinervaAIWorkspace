@@ -581,6 +581,10 @@ const ja = {
     duplicateOf: "既存スキルの更新候補",
     replace: "置換",
     append: "追記",
+    feedbackHelpful: "役立った",
+    feedbackNotHelpful: "役立たなかった",
+    feedbackThanks: "フィードバックありがとうございます",
+    skillsInjected: "適用中のスキル",
   },
   memoryViewer: {
     title: "メモリマネージャー",
@@ -1268,6 +1272,10 @@ const en: typeof ja = {
     duplicateOf: "Update candidate for existing skill",
     replace: "Replace",
     append: "Append",
+    feedbackHelpful: "Helpful",
+    feedbackNotHelpful: "Not helpful",
+    feedbackThanks: "Thank you for your feedback",
+    skillsInjected: "Active skills",
   },
   memoryViewer: {
     title: "Memory Manager",

@@ -558,3 +558,81 @@ describe("useChat — branching", () => {
     expect(result.current.messages[1].content).toBe("edited");
   });
 });
+
+describe("useChat — skills event", () => {
+  it("merges injectedSkills metadata on skills event, preserves through done id-swap", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            messages: [],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u1" } },
+            { event: "skills", data: { skills: [
+              { skillId: "s1", name: "Docker rebuild", usageEventId: "e1", similarity: 0.72, activationType: "semantic" },
+            ] } },
+            { event: "delta", data: { delta: "answer" } },
+            { event: "done", data: { assistantMessageId: "a1" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    const msgs = result.current.messages;
+    expect(msgs).toHaveLength(2);
+    // metadata.injectedSkills survives the id-swap on done
+    expect(msgs[1].metadata?.injectedSkills).toEqual([
+      { skillId: "s1", name: "Docker rebuild", usageEventId: "e1", similarity: 0.72, activationType: "semantic" },
+    ]);
+  });
+
+  it("does not set error on unknown SSE event", async () => {
+    const id = await createThreadInDb();
+    fetchMock().mockImplementation((url: string) => {
+      if (url === `/api/threads/${id}`) {
+        return Promise.resolve(
+          threadResponse({
+            thread: { id, title: "x", systemPrompt: null, model: "gpt-4o-mini" },
+            messages: [],
+          }),
+        );
+      }
+      if (url === "/api/chat") {
+        return Promise.resolve(
+          sseResponse([
+            { event: "start", data: { userMessageId: "u1" } },
+            { event: "unknown_event", data: { foo: "bar" } },
+            { event: "delta", data: { delta: "answer" } },
+            { event: "done", data: { assistantMessageId: "a1" } },
+          ]),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+
+    const { result } = renderHook(() => useChat(id));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.send("hi");
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages[1].content).toBe("answer");
+  });
+});
