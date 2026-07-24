@@ -6,6 +6,7 @@ import { Markdown } from "@/components/Markdown";
 import { ThreadSettings } from "@/components/ThreadSettings";
 import { AttachmentBar } from "@/components/AttachmentBar";
 import { McpPanel } from "@/components/McpPanel";
+import { KnowledgeBaseModal } from "@/components/KnowledgeBaseModal";
 import { useI18n } from "@/components/I18nProvider";
 import { clientFetch } from "@/lib/clientFetch";
 import { PROVIDER_LABEL } from "@/lib/connections/provider-map";
@@ -41,6 +42,9 @@ export const ChatWindow = memo(function ChatWindow({
   const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
   const [connOpen, setConnOpen] = useState(false);
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
+  const [kbOpen, setKbOpen] = useState(false);
+  const [activeKbIds, setActiveKbIds] = useState<string[]>([]);
+  const [kbModalOpen, setKbModalOpen] = useState(false);
   const [connectionsList, setConnectionsList] = useState<{ id: string; provider: string; workspaceName: string | null }[]>([]);
   const [sendMode, setSendMode] = useState<SendMode>("ctrl-enter");
 
@@ -64,11 +68,12 @@ export const ChatWindow = memo(function ChatWindow({
 
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Sync mcpServerIds / connectionIds on thread switch (rapid is preserved until user interaction)
+  // Sync mcpServerIds / connectionIds / activeKbIds on thread switch (rapid is preserved until user interaction)
   useEffect(() => {
     setMcpServerIds(thread?.mcpServerIds ?? []);
     setConnectionIds(thread?.connectionIds ?? []);
-  }, [thread?.id, thread?.mcpServerIds, thread?.connectionIds]);
+    setActiveKbIds(thread?.activeKbIds ?? []);
+  }, [thread?.id, thread?.mcpServerIds, thread?.connectionIds, thread?.activeKbIds]);
 
   const fetchConnections = useCallback(async () => {
     const res = await clientFetch("/api/connections");
@@ -106,6 +111,13 @@ export const ChatWindow = memo(function ChatWindow({
     (ids: string[]) => {
       setMcpServerIds(ids);
       void updateThread({ mcpServerIds: ids });
+    },
+    [updateThread],
+  );
+  const handleKbChange = useCallback(
+    (ids: string[]) => {
+      setActiveKbIds(ids);
+      void updateThread({ activeKbIds: ids });
     },
     [updateThread],
   );
@@ -410,6 +422,42 @@ export const ChatWindow = memo(function ChatWindow({
                       </motion.div>
                     )}
                   </AnimatePresence>
+                  {/* Knowledge bases */}
+                  <button
+                    type="button"
+                    onClick={() => setKbOpen((v) => !v)}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  >
+                    <span>📚</span>
+                    <span className="flex-1 text-left">{t("chat.inputMenuKnowledgeBases")}</span>
+                    {activeKbIds.length > 0 && (
+                      <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium">
+                        {activeKbIds.length}
+                      </span>
+                    )}
+                    <span className={`text-xs transition-transform duration-200 ${kbOpen ? "rotate-90" : ""}`}>▶</span>
+                  </button>
+                  <AnimatePresence>
+                    {kbOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <div className="border-t border-border/50 px-1 py-1">
+                          <button
+                            type="button"
+                            onClick={() => setKbModalOpen(true)}
+                            className="w-full rounded-lg px-1 py-1 text-left text-xs text-primary hover:underline"
+                          >
+                            {t("chat.knowledgeBaseManage")}
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -510,6 +558,12 @@ export const ChatWindow = memo(function ChatWindow({
           </div>
         </div>
       </div>
+      <KnowledgeBaseModal
+        open={kbModalOpen}
+        onClose={() => setKbModalOpen(false)}
+        selectedKbIds={activeKbIds}
+        onChange={handleKbChange}
+      />
     </div>
   );
 });

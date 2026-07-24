@@ -333,6 +333,7 @@ export const threads = sqliteTable("threads", {
   councilTimeLimit: integer("council_time_limit").notNull().default(60), // 秒、30〜300
   mcpServerIds: text("mcp_server_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   folderId: text("folder_id").references(() => folders.id, { onDelete: "set null" }),
+  activeKbIds: text("active_kb_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   globalInstructionId: text("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
   currentLeafId: text("current_leaf_id"),
@@ -664,3 +665,73 @@ export const userTraits = sqliteTable(
     suppressedIdx: index("user_traits_suppressed_idx").on(t.suppressedAt),
   }),
 );
+
+// ── Knowledge Bases (user-created RAG databases) ──
+/**
+ * knowledge_bases — user-created RAG databases.
+ * Each KB is a collection of documents (files, URLs, pasted text) that can be
+ * selectively enabled per-thread for RAG injection into chat context.
+ * e.g. "ソシャゲストーリー用", "仕事用資料"
+ */
+export const knowledgeBases = sqliteTable("knowledge_bases", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  name: text("name").notNull(),
+  description: text("description"),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
+}, (t) => ({
+  userIdx: index("knowledge_bases_user_idx").on(t.userId),
+}));
+
+/**
+ * kb_documents — documents within a knowledge base.
+ * sourceType: "file" (uploaded PDF/text), "url" (scraped web page), "text" (pasted directly).
+ * sourceUrl: original URL for sourceType="url", null otherwise.
+ * content: full extracted text (for display/re-embedding on model change).
+ * chunkCount: denormalized count of kb_chunks rows (updated on insert/delete).
+ */
+export const kbDocuments = sqliteTable("kb_documents", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  knowledgeBaseId: text("knowledge_base_id")
+    .notNull()
+    .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  sourceType: text("source_type", { enum: ["file", "url", "text"] }).notNull(),
+  sourceUrl: text("source_url"),
+  content: text("content").notNull(),
+  contentHash: text("content_hash").notNull(),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  createdAt: tsNow("created_at"),
+  updatedAt: tsNow("updated_at"),
+}, (t) => ({
+  kbIdx: index("kb_documents_kb_idx").on(t.knowledgeBaseId),
+}));
+
+/**
+ * kb_chunks — text chunks with embeddings for RAG search.
+ * Each chunk is ~512 chars with ~64 char overlap (see chunker.ts).
+ * ordinal: position within the document (0-based), for context reconstruction.
+ * embedding is Float32 BLOB via embeddingColumn, same as memories/page_embeddings.
+ * model: embedding model that produced the vector (for migration on model change).
+ */
+export const kbChunks = sqliteTable("kb_chunks", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  documentId: text("document_id")
+    .notNull()
+    .references(() => kbDocuments.id, { onDelete: "cascade" }),
+  knowledgeBaseId: text("knowledge_base_id")
+    .notNull()
+    .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull(),
+  text: text("text").notNull(),
+  embedding: embeddingColumn("embedding").notNull(),
+  contentHash: text("content_hash").notNull(),
+  model: text("model").notNull(),
+  createdAt: tsNow("created_at"),
+}, (t) => ({
+  docIdx: index("kb_chunks_doc_idx").on(t.documentId),
+  kbIdx: index("kb_chunks_kb_idx").on(t.knowledgeBaseId),
+}));

@@ -85,6 +85,8 @@ type Thread = {
   councilTimeLimit: number;
   mcpServerIds: string[];
   connectionIds: string[];
+  activeKbIds: string[];
+  folderId: string | null;
   globalInstructionId: string | null;
 };
 
@@ -881,6 +883,7 @@ export function useChat(threadId: string | null) {
       councilTimeLimit?: number;
       mcpServerIds?: string[];
       connectionIds?: string[];
+      activeKbIds?: string[];
       globalInstructionId?: string | null;
     }) => {
       if (!threadId) return;

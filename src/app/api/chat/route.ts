@@ -23,6 +23,7 @@ import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildSkillContext, attachUsageMessageIds, listSkills, createSkill, deleteSkill, updateSkillContent, type InjectedSkillInfo } from "@/lib/skillStore";
 import { buildMemoryContext } from "@/lib/memoryStore";
+import { buildKnowledgeContextMessage } from "@/lib/kbStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -254,9 +255,9 @@ export async function POST(req: Request) {
         // Run pre-stream processing in parallel to reduce first-token latency.
         // Each build* is wrapped with .catch(() => null) to isolate failures.
         // rapid mode skips all (null).
-        const [searchContextMessage, urlContextMessage, memoryMessage, skillResult] =
+        const [searchContextMessage, urlContextMessage, memoryMessage, skillResult, knowledgeMessage] =
           body.rapid
-            ? [null, null, null, null]
+            ? [null, null, null, null, null]
             : await Promise.all([
                 buildSearchContext({
                   content: prepared.content,
@@ -293,6 +294,14 @@ export async function POST(req: Request) {
                   threadId: thread.id,
                 }).catch((err) => {
                   logger.error("chat", "buildSkillContext failed", { error: err instanceof Error ? err.message : String(err) });
+                  return null;
+                }),
+                buildKnowledgeContextMessage(
+                  prepared.content,
+                  thread.activeKbIds ?? [],
+                  user.id,
+                ).catch((err) => {
+                  logger.error("chat", "buildKnowledgeContextMessage failed", { error: err instanceof Error ? err.message : String(err) });
                   return null;
                 }),
               ]);
@@ -365,6 +374,7 @@ export async function POST(req: Request) {
           urlContextMessage,
           skillMessage,
           memoryMessage,
+          knowledgeMessage,
         });
         if (thread.responseMode === "council") {
           send("status", { label: t(locale, "chat.statusCouncilPreparing") });
@@ -496,6 +506,7 @@ export async function POST(req: Request) {
                   urlContextMessage,
                   skillMessage,
                   memoryMessage,
+                  knowledgeMessage,
                 })
               : finalMessages;
             await streamCompletion({
@@ -1149,6 +1160,7 @@ function buildFinalMessages({
   urlContextMessage,
   skillMessage,
   memoryMessage,
+  knowledgeMessage,
 }: {
   systemContent?: string | null;
   personalizationContent?: string | null;
@@ -1158,6 +1170,7 @@ function buildFinalMessages({
   urlContextMessage?: OpenAI.Chat.Completions.ChatCompletionMessageParam | null;
   skillMessage?: { role: "system"; content: string } | null;
   memoryMessage?: { role: "system"; content: string } | null;
+  knowledgeMessage?: { role: "system"; content: string } | null;
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return [
     { role: "system" as const, content: getEnvContext() },
@@ -1165,6 +1178,7 @@ function buildFinalMessages({
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
     ...(skillMessage ? [skillMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
+    ...(knowledgeMessage ? [knowledgeMessage] : []),
     ...history.map(
       (m) => ({ role: m.role, content: m.content }) as OpenAI.Chat.Completions.ChatCompletionMessageParam,
     ),

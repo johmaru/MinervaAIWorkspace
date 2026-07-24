@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { attachments, threads } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
+import { extractFileText } from "@/lib/fileExtract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,27 +54,16 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64 = buffer.toString("base64");
     dataUrl = `data:${mimeType};base64,${base64}`;
-  } else if (mimeType === "application/pdf") {
-    // PDF: extract text via pdf-parse
-    const buffer = Buffer.from(await file.arrayBuffer());
-    try {
-      const mod = await import("pdf-parse");
-      const pdfParse = (mod as unknown as { default?: (buf: Buffer) => Promise<{ text: string }> }).default ?? mod;
-      const data = await (pdfParse as (buf: Buffer) => Promise<{ text: string }>)(buffer);
-      extractedText = data.text || "";
-    } catch {
-      return new Response("PDF parse failed", { status: 422 });
-    }
-  } else if (
-    mimeType.startsWith("text/") ||
-    mimeType.startsWith("application/json") ||
-    mimeType.startsWith("application/xml") ||
-    filename.endsWith(".md") || filename.endsWith(".txt") || filename.endsWith(".json") || filename.endsWith(".csv") || filename.endsWith(".xml") || filename.endsWith(".yml") || filename.endsWith(".yaml") || filename.endsWith(".ts") || filename.endsWith(".js") || filename.endsWith(".py")
-  ) {
-    // Text: read as UTF-8
-    extractedText = await file.text();
   } else {
-    return new Response(`Unsupported file type: ${mimeType}`, { status: 415 });
+    // PDF or text-based file: extract via shared utility
+    try {
+      const extracted = await extractFileText(file);
+      extractedText = extracted.text;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "File text extraction failed";
+      const status = msg.startsWith("Unsupported file type") ? 415 : 422;
+      return new Response(msg, { status });
+    }
   }
 
   // Save to DB (messageId is linked at send time)

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { defaultModel } from "@/lib/llm";
 import { db } from "@/db";
-import { threads, mcpServers, connections } from "@/db/schema";
+import { threads, mcpServers, connections, knowledgeBases } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
@@ -18,6 +18,7 @@ export async function GET() {
       id: threads.id,
       title: threads.title,
       folderId: threads.folderId,
+      activeKbIds: threads.activeKbIds,
       createdAt: threads.createdAt,
       updatedAt: threads.updatedAt,
     })
@@ -95,6 +96,7 @@ type PatchBody = {
   connectionIds?: string[];
   globalInstructionId?: string | null;
   currentLeafId?: string | null;
+  activeKbIds?: string[];
 };
 
 /**
@@ -154,6 +156,19 @@ export async function PATCH(req: Request) {
       }
     }
     values.connectionIds = body.connectionIds;
+  }
+  if (Array.isArray(body.activeKbIds)) {
+    // Validate ownership: all activeKbIds must belong to the current user
+    if (body.activeKbIds.length > 0) {
+      const ownedKbs = await db
+        .select({ id: knowledgeBases.id })
+        .from(knowledgeBases)
+        .where(and(eq(knowledgeBases.userId, user.id), inArray(knowledgeBases.id, body.activeKbIds)));
+      if (ownedKbs.length !== body.activeKbIds.length) {
+        return new Response("One or more knowledge bases not found or not owned", { status: 403 });
+      }
+    }
+    values.activeKbIds = body.activeKbIds;
   }
   if (body.globalInstructionId !== undefined) values.globalInstructionId = body.globalInstructionId || null;
   if (body.currentLeafId !== undefined) values.currentLeafId = body.currentLeafId;
