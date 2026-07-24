@@ -34,7 +34,32 @@ async def lifespan(_app: FastAPI):
     # (~700MB), so it takes time. /health returns "loading" while loading.
     from sentence_transformers import SentenceTransformer
 
-    _model["transformer"] = SentenceTransformer(EMBEDDER_MODEL)
+    transformer = SentenceTransformer(EMBEDDER_MODEL)
+
+    # LFM2.5-Embedding-350M ships with CLS-token pooling by default, but its
+    # CLS token (position 0) produces a constant vector regardless of input
+    # content — making every text embed to the same point. Switch to mean
+    # pooling, which correctly reflects per-token semantic differences.
+    pooling = transformer[1]
+    pooling.pooling_mode_cls_token = False
+    pooling.pooling_mode_mean_tokens = True
+
+    # Startup self-test: embed two distinct probe strings and verify they
+    # produce different vectors. Catches degenerate model configs (e.g.,
+    # CLS-pooling returning a position-0 constant) before serving requests.
+    import numpy as np
+
+    probe = transformer.encode(
+        ["startup probe alpha", "startup probe beta zeta gamma"],
+        normalize_embeddings=True,
+    )
+    if np.array_equal(probe[0], probe[1]):
+        raise RuntimeError(
+            "Embedding self-test failed: two distinct inputs produced "
+            "identical vectors. The model configuration is degenerate."
+        )
+
+    _model["transformer"] = transformer
     _model["ready"] = True
     yield
     # Release on shutdown (explicit close is not required)

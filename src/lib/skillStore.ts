@@ -283,6 +283,24 @@ export async function updateSkillContent(
     if (vector.length === 0) {
       return { error: "embed_failed" as const };
     }
+    // Guard against degenerate embeddings (identical vector for different
+    // content). Compare against another skill with a different contentHash.
+    const newHash = contentChanged ? hashContent(newContent!) : existing.contentHash;
+    const [other] = await db
+      .select({ embedding: skills.embedding, contentHash: skills.contentHash })
+      .from(skills)
+      .where(and(
+        eq(skills.userId, userId),
+        eq(skills.status, "active"),
+        sql`${skills.id} != ${skillId}`,
+      ))
+      .limit(1);
+    if (other && other.contentHash !== newHash && other.embedding.length === vector.length) {
+      const identical = other.embedding.every((v: number, i: number) => Math.abs(v - vector[i]) < 1e-7);
+      if (identical) {
+        return { error: "embed_failed" as const };
+      }
+    }
     updates.embedding = vector;
     if (contentChanged) {
       updates.content = newContent;
@@ -443,6 +461,26 @@ export async function createSkill(
     throw new Error("Embedding failed");
   }
   const contentHash = hashContent(content);
+
+  // Guard against degenerate embeddings: if the embedder returns the same
+  // vector for different content (e.g., CLS-pooling constant), every skill
+  // would appear identical. Compare the new vector against an existing
+  // skill with a different contentHash — if embeddings match, the embedder
+  // is broken.
+  const [existing] = await db
+    .select({ id: skills.id, embedding: skills.embedding, contentHash: skills.contentHash })
+    .from(skills)
+    .where(and(eq(skills.userId, userId), eq(skills.status, "active")))
+    .limit(1);
+  if (existing && existing.contentHash !== contentHash) {
+    const existingVec = existing.embedding;
+    if (existingVec.length === vector.length) {
+      const identical = existingVec.every((v: number, i: number) => Math.abs(v - vector[i]) < 1e-7);
+      if (identical) {
+        throw new Error("Embedding service returned a degenerate vector (identical to existing skill)");
+      }
+    }
+  }
 
   const [dup] = await db
     .select({ id: skills.id })

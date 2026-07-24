@@ -5,14 +5,26 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { skills, users } from "@/db/schema";
 
-// Mock embedText: deterministic vectors without depending on the real embedder.
-// Identical content → identical vectors, so duplicate detection is predictable.
+// Mock embedText: produces deterministic vectors where similarity reflects
+// content overlap. Uses character n-gram hashing into a fixed-dimensional
+// space so that similar content yields similar vectors (high cosine similarity)
+// and unrelated content yields dissimilar vectors.
 vi.mock("@/lib/embed", () => ({
   embedText: vi.fn().mockImplementation(async (text: string) => {
-    const vec = new Array(1024).fill(0);
-    for (const ch of text) {
-      const code = ch.charCodeAt(0) % 1024;
-      vec[code] = 1;
+    const dim = 1024;
+    const vec = new Array(dim).fill(0);
+    // Use bigram hashing: each consecutive character pair contributes to
+    // two buckets, creating overlap between similar texts.
+    for (let i = 0; i < text.length; i++) {
+      const code1 = text.charCodeAt(i) % dim;
+      const code2 = text.charCodeAt((i + 1) % text.length) % dim;
+      vec[code1] += 1;
+      vec[code2] += 0.5;
+    }
+    // L2 normalize so cosine distance is meaningful
+    const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+    if (norm > 0) {
+      for (let i = 0; i < dim; i++) vec[i] /= norm;
     }
     return vec;
   }),
@@ -142,19 +154,44 @@ describe("listSkills", () => {
     expect(list.every((s) => s.name !== "Other User Skill")).toBe(true);
   });
 
-  it("returns duplicates array when includeDuplicates=true", async () => {
-    // Create two nearly-identical skills (same content → same embedding → high similarity)
-    const content = "Near-identical duplicate content for dedup test.";
-    const row1 = await createSkill(testUserId, { name: "Dedup Original", content });
+  it("detects duplicate pairs when includeDuplicates=true", async () => {
+    // Create two nearly-identical skills: content shares most characters,
+    // so embeddings should be similar (cosine distance < 0.12 = similarity > 0.88).
+    // content differs slightly to avoid contentHash collision.
+    const content1 = "When debugging check logs first then trace the error";
+    const content2 = "When debugging check logs first then trace the bug";
+    const row1 = await createSkill(testUserId, { name: "Dedup Alpha", content: content1 });
+    if ("error" in row1) return;
     createdSkillIds.push(row1.id);
-    // Modify slightly to avoid contentHash collision but keep embedding similar
-    const row2 = await createSkill(testUserId, { name: "Dedup Near", content: content + " extra" });
-    if (!("error" in row2)) createdSkillIds.push(row2.id);
+    const row2 = await createSkill(testUserId, { name: "Dedup Beta", content: content2 });
+    if ("error" in row2) return;
+    createdSkillIds.push(row2.id);
+
+    // Create a clearly different skill that should NOT be a duplicate
+    const row3 = await createSkill(testUserId, {
+      name: "Dedup Unique",
+      content: "Z Y X W V U T S R Q P O N M L K J I H G F E D C B A",
+    });
+    if ("error" in row3) createdSkillIds.push(row3.id);
 
     const list = await listSkills(testUserId, undefined, true);
     expect(list.length).toBeGreaterThan(0);
-    // Each row should have a duplicates array (possibly empty)
+    // Every row must have a duplicates array
     expect(list.every((s) => Array.isArray(s.duplicates))).toBe(true);
+
+    // Alpha and Beta must detect each other as duplicates
+    const alpha = list.find((s) => s.name === "Dedup Alpha");
+    const beta = list.find((s) => s.name === "Dedup Beta");
+    expect(alpha).toBeTruthy();
+    expect(beta).toBeTruthy();
+    expect(alpha!.duplicates.some((d) => d.name === "Dedup Beta")).toBe(true);
+    expect(beta!.duplicates.some((d) => d.name === "Dedup Alpha")).toBe(true);
+
+    // Unique must not have Alpha or Beta as a duplicate
+    const unique = list.find((s) => s.name === "Dedup Unique");
+    expect(unique).toBeTruthy();
+    expect(unique!.duplicates.some((d) => d.name === "Dedup Alpha")).toBe(false);
+    expect(unique!.duplicates.some((d) => d.name === "Dedup Beta")).toBe(false);
   });
 });
 
