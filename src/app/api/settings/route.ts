@@ -182,6 +182,7 @@ export async function GET(req: Request) {
     logFilePath: getLogFilePath(),
     chatExportPath: process.env.CHAT_EXPORT_PATH || "",
     chatExportMode: process.env.CHAT_EXPORT_MODE || "daily",
+    workspaceHostPath: process.env.WORKSPACE_HOST_PATH || "",
   });
 }
 
@@ -248,6 +249,7 @@ type SettingsBody = {
   // Chat export
   chatExportPath?: string;
   chatExportMode?: string;
+  workspaceHostPath?: string;
   applyMigration?: boolean;
 };
 
@@ -476,6 +478,11 @@ export async function POST(req: Request) {
     if (body.chatExportMode !== undefined) {
       const mode = body.chatExportMode === "thread" ? "thread" : "daily";
       updates.CHAT_EXPORT_MODE = mode;
+    }
+    // Workspace host path: prevent path traversal
+    if (body.workspaceHostPath !== undefined) {
+      if (body.workspaceHostPath.includes("..")) return new Response("Invalid workspaceHostPath: path traversal not allowed", { status: 400 });
+      updates.WORKSPACE_HOST_PATH = body.workspaceHostPath;
     }
     envContent = updateEnvContent(envContent, updates);
 

@@ -99,7 +99,14 @@ export type DocumentSource = {
 export async function ingestDocument(
   kbId: string,
   source: DocumentSource,
+  userId: string,
 ): Promise<{ id: string; chunkCount: number; cached: boolean }> {
+  // Verify KB ownership before ingesting (IDOR prevention)
+  const [owned] = await db
+    .select({ id: knowledgeBases.id })
+    .from(knowledgeBases)
+    .where(sql`${knowledgeBases.id} = ${kbId} AND ${knowledgeBases.userId} = ${userId}`);
+  if (!owned) throw new Error("Knowledge base not found or not owned by user");
   const contentHash = hashContent(source.content);
 
   // Dedup: check if document with same content already exists in this KB

@@ -129,7 +129,7 @@ export async function POST(req: Request, { params }: Params) {
       sourceType,
       sourceUrl,
       content,
-    });
+    }, user.id);
     return Response.json(result, { status: 201 });
   } catch (err) {
     return new Response(

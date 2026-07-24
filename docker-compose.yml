@@ -31,6 +31,11 @@ services:
       # The app image includes the `docker` CLI (Dockerfile installs docker.io).
       # Without this, sandbox_run is auto-off.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Workspace: mount a host folder so AI file tools (read_file/write_file/
+      # list_directory/run_command) operate on user-selected files.
+      # Set WORKSPACE_HOST_PATH in .env to a host path (forward slashes on Windows).
+      # When empty, defaults to ./data/workspace (inside the already-mounted data volume).
+      - ${WORKSPACE_HOST_PATH:-./data/workspace}:/app/workspace
     env_file:
       - .env
     environment:

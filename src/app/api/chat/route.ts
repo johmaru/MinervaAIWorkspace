@@ -23,7 +23,7 @@ import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildSkillContext, attachUsageMessageIds, listSkills, createSkill, deleteSkill, updateSkillContent, type InjectedSkillInfo } from "@/lib/skillStore";
 import { buildMemoryContext } from "@/lib/memoryStore";
-import { buildKnowledgeContextMessage } from "@/lib/kbStore";
+import { buildKnowledgeContextMessage, createKnowledgeBase, listKnowledgeBases, ingestDocument, searchKnowledgeBases } from "@/lib/kbStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -1899,6 +1899,64 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "kb_create",
+      description: "Create a new knowledge base (RAG database). Use when the user asks to create a knowledge base for a specific topic or purpose. Documents can be added later via kb_ingest.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Knowledge base name (e.g. 'Game Story Data', 'Work Documents')" },
+          description: { type: "string", description: "Optional description of what this KB contains" },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "kb_list",
+      description: "List the user's knowledge bases. Use when the user asks to see their knowledge bases or check which ones exist.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "kb_ingest",
+      description: "Add a document to a knowledge base. The text is automatically chunked and embedded for RAG search. Use when the user asks to add, store, or save text/URLs/documents to a knowledge base.",
+      parameters: {
+        type: "object",
+        properties: {
+          knowledge_base_id: { type: "string", description: "The knowledge base id (from kb_list)" },
+          title: { type: "string", description: "Document title" },
+          content: { type: "string", description: "The text content to ingest. Will be chunked (~512 chars) and embedded." },
+          source_url: { type: "string", description: "Optional source URL. If provided, the server scrapes the URL to get full page content instead of using 'content'." },
+        },
+        required: ["knowledge_base_id", "title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "kb_search",
+      description: "Search a knowledge base for relevant chunks matching the query. Returns top results with similarity scores. Use when the user asks to search within their knowledge base or find specific information.",
+      parameters: {
+        type: "object",
+        properties: {
+          knowledge_base_id: { type: "string", description: "The knowledge base id to search" },
+          query: { type: "string", description: "The search query" },
+        },
+        required: ["knowledge_base_id", "query"],
+      },
+    },
+  },
 ];
 
 const MAX_TOOL_ROUNDS = 3;
@@ -2084,10 +2142,10 @@ async function streamCompletion({
 
       // Execute each tool call and append the result as a tool role message
       for (const tc of toolCalls) {
-        let toolContent: string;
-        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean };
+        let toolContent: string = "";
+        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string };
         try {
-          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean };
+          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string };
         } catch {
           parsedArgs = {};
         }
@@ -2329,6 +2387,75 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolSkillDelete") });
           const deleted = await deleteSkill(userId, parsedArgs.id);
           toolContent = deleted ? "Skill deleted" : "Skill not found";
+        } else if (tc.name === "kb_create" && parsedArgs.name) {
+          send?.("status", { label: t(locale, "chat.statusToolKbCreate") });
+          const tTool = Date.now();
+          try {
+            const kb = await createKnowledgeBase(userId, parsedArgs.name, parsedArgs.description);
+            toolContent = `Knowledge base created: ${kb.id} (${kb.name})`;
+          } catch (err) {
+            toolContent = `Failed to create knowledge base: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_create", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_list") {
+          send?.("status", { label: t(locale, "chat.statusToolKbList") });
+          const tTool = Date.now();
+          try {
+            const kbs = await listKnowledgeBases(userId);
+            toolContent = kbs.length === 0
+              ? "No knowledge bases found."
+              : JSON.stringify(kbs.map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, documentCount: kb.documentCount })));
+          } catch (err) {
+            toolContent = `Failed to list knowledge bases: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_list", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_ingest" && parsedArgs.knowledge_base_id && parsedArgs.title) {
+          send?.("status", { label: t(locale, "chat.statusToolKbIngest") });
+          const tTool = Date.now();
+          try {
+            let content = parsedArgs.content ?? "";
+            let sourceUrl: string | undefined;
+            let sourceType: "text" | "url" = "text";
+            if (parsedArgs.source_url) {
+              sourceType = "url";
+              sourceUrl = parsedArgs.source_url;
+              const scraped = await scrapeUrl(sourceUrl);
+              if (!scraped) {
+                toolContent = "Failed to scrape URL (scraper service unavailable)";
+              } else {
+                content = scraped.content;
+              }
+            }
+            if (!content) {
+              if (!toolContent) toolContent = "No content to ingest (provide content or a valid source_url)";
+            } else {
+              const result = await ingestDocument(parsedArgs.knowledge_base_id, {
+                title: parsedArgs.title,
+                sourceType,
+                sourceUrl,
+                content,
+              }, userId);
+              toolContent = result.cached
+                ? `Document already exists (cached): ${result.id}`
+                : `Document ingested: ${result.id} (${result.chunkCount} chunks)`;
+            }
+          } catch (err) {
+            toolContent = `Failed to ingest document: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_ingest", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_search" && parsedArgs.knowledge_base_id && parsedArgs.query) {
+          send?.("status", { label: t(locale, "chat.statusToolKbSearch") });
+          const tTool = Date.now();
+          try {
+            // userId ownership verified in searchKnowledgeBases via JOIN on knowledge_bases.user_id
+            const results = await searchKnowledgeBases(parsedArgs.query, [parsedArgs.knowledge_base_id], userId, 5, 0.3);
+            toolContent = results.length === 0
+              ? "No results found."
+              : JSON.stringify(results.map((r) => ({ title: r.title, similarity: r.similarity, text: r.text.slice(0, 200) })));
+          } catch (err) {
+            toolContent = `Failed to search knowledge base: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_search", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
           // MCP tool: function name format "{serverName}__{toolName}"
           const parsed = parseMcpToolFunctionName(tc.name);
