@@ -19,11 +19,26 @@ import { parseCommandTokens, isAllowedCommand } from "@/lib/commandWhitelist";
 
 /**
  * Resolve the workspace root directory for a specific user.
- * - UMANS_USER_ROOT set (exe): join(root, "workspace", userId)
- * - Unset (dev/Docker): join(cwd, "workspace", userId)
+ *
+ * Two modes:
+ * 1. WORKSPACE_HOST_PATH set (Docker shared mount): returns the mount path
+ *    directly (/app/workspace). This is a single-user shared mount — all
+ *    logged-in users see the same host folder. Use when you want AI file
+ *    tools to operate on an existing project folder.
+ * 2. WORKSPACE_HOST_PATH unset (default): returns <dataRoot>/workspace/<userId>/
+ *    for per-user isolation. Each user gets their own directory.
+ *
  * Creates the directory if it doesn't exist (idempotent).
  */
 export function getWorkspaceRoot(userId: string): string {
+  // Shared mount mode: WORKSPACE_HOST_PATH is set in .env, docker-compose
+  // mounts the host folder to /app/workspace. Return the container-side
+  // mount target, not the host path (which doesn't exist inside the container).
+  if (process.env.WORKSPACE_HOST_PATH) {
+    return "/app/workspace";
+  }
+
+  // Per-user isolation mode: <dataRoot>/workspace/<userId>/
   const root = getUserDataRoot();
   const base = root ?? process.cwd();
   const ws = join(base, "workspace", userId);
