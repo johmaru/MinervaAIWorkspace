@@ -162,6 +162,14 @@ export function HelpModal({ open, onClose, initialTopic }: Props) {
           <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.fileStructureExample`)}</code>
         </section>
         <section>
+          <h3 className="mb-2 text-sm font-semibold">{t(`${n}.modesTitle`)}</h3>
+          <p className="text-sm text-muted-foreground">{t(`${n}.modesIntro`)}</p>
+          <p className="mt-1 text-sm text-muted-foreground"><strong>daily</strong> — {t(`${n}.modeDailyDesc`)}</p>
+          <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.modeDailyExample`)}</code>
+          <p className="mt-2 text-sm text-muted-foreground"><strong>thread</strong> — {t(`${n}.modeThreadDesc`)}</p>
+          <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.modeThreadExample`)}</code>
+        </section>
+        <section>
           <h3 className="mb-2 text-sm font-semibold">{t(`${n}.dockerTitle`)}</h3>
           <p className="text-sm text-muted-foreground">{t(`${n}.dockerDesc`)}</p>
           <code className="mt-1 block rounded-lg bg-muted px-2 py-1 text-xs">{t(`${n}.dockerExample`)}</code>

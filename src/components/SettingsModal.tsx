@@ -85,6 +85,7 @@ type SettingsResponse = {
   translateTimeout: number;
   // Chat export
   chatExportPath: string;
+  chatExportMode: string;
 };
 
 type TorConnection = {
@@ -1256,6 +1257,20 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 placeholder={t("settings.chatExportPathPlaceholder")}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
+            </div>
+            <div>
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.chatExportModeLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.chatExportModeHint")}</span>
+              </label>
+              <select
+                value={form.chatExportMode ?? "daily"}
+                onChange={(e) => update("chatExportMode", e.target.value)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="daily">{t("settings.chatExportModeDaily")}</option>
+                <option value="thread">{t("settings.chatExportModeThread")}</option>
+              </select>
             </div>
           </div>
           </div>

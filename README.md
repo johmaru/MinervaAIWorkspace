@@ -322,7 +322,8 @@ For Docker HTTP embedder, set `EMBED_PROVIDER=http`, `EMBED_MODEL=LiquidAI/LFM2.
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` |
 | `LOG_FILE_ENABLED` | Write `data/logs/umanschat.log` (auto: exe→true, Docker→false) | auto |
 | `LOG_FILE_MAX_SIZE` | Rotation size bytes (keeps one `.log.1`) | `5242880` |
-| `CHAT_EXPORT_PATH` | Markdown export dir (`<YYYY>/<MM>/<DD>/<title>.md`; empty = off) | — |
+| `CHAT_EXPORT_PATH` | Markdown export dir (empty = off) | — |
+| `CHAT_EXPORT_MODE` | `daily`: `<YYYY>/<MM>/<DD>/<title>.md` / `thread`: `<title>/<YYYY-MM-DD>[-partN].md` | `daily` |
 | `CHAT_EXPORT_HOST_PATH` | Docker only: host path to mount (Windows: `C:/Users/...`) | — |
 
 ### Auth & security

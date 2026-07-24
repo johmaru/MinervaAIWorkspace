@@ -180,8 +180,8 @@ export async function GET(req: Request) {
     logLevel: process.env.LOG_LEVEL || "info",
     logFileEnabled: process.env.LOG_FILE_ENABLED || "true",
     logFilePath: getLogFilePath(),
-    // Chat export
     chatExportPath: process.env.CHAT_EXPORT_PATH || "",
+    chatExportMode: process.env.CHAT_EXPORT_MODE || "daily",
   });
 }
 
@@ -247,6 +247,7 @@ type SettingsBody = {
   logFileEnabled?: string;
   // Chat export
   chatExportPath?: string;
+  chatExportMode?: string;
   applyMigration?: boolean;
 };
 
@@ -471,6 +472,10 @@ export async function POST(req: Request) {
     if (body.chatExportPath !== undefined) {
       if (body.chatExportPath.includes("..")) return new Response("Invalid chatExportPath: path traversal not allowed", { status: 400 });
       updates.CHAT_EXPORT_PATH = body.chatExportPath;
+    }
+    if (body.chatExportMode !== undefined) {
+      const mode = body.chatExportMode === "thread" ? "thread" : "daily";
+      updates.CHAT_EXPORT_MODE = mode;
     }
     envContent = updateEnvContent(envContent, updates);
 

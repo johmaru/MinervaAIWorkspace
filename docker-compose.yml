@@ -47,6 +47,7 @@ services:
       # Chat export: in-container path is always /app/chat-export when CHAT_EXPORT_HOST_PATH is set.
       # This overrides the .env value so the app writes to the mounted directory.
       CHAT_EXPORT_PATH: ${CHAT_EXPORT_HOST_PATH:+/app/chat-export}
+      CHAT_EXPORT_MODE: ${CHAT_EXPORT_MODE:-daily}
     ports:
       - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
 

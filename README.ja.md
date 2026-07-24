@@ -322,7 +322,8 @@ Docker の HTTP embedder を使う場合: `EMBED_PROVIDER=http`、`EMBED_MODEL=L
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` |
 | `LOG_FILE_ENABLED` | `data/logs/umanschat.log` へ出力（自動: exe→true、Docker→false） | auto |
 | `LOG_FILE_MAX_SIZE` | ローテーション前サイズ（`.log.1` を 1 つ保持） | `5242880` |
-| `CHAT_EXPORT_PATH` | Markdown エクスポート先（`<YYYY>/<MM>/<DD>/<title>.md`、空 = 無効） | — |
+| `CHAT_EXPORT_PATH` | Markdown エクスポート先（空 = 無効） | — |
+| `CHAT_EXPORT_MODE` | `daily`: `<YYYY>/<MM>/<DD>/<title>.md` / `thread`: `<title>/<YYYY-MM-DD>[-partN].md` | `daily` |
 | `CHAT_EXPORT_HOST_PATH` | Docker 専用: ホスト側マウントパス（Windows は `C:/Users/...`） | — |
 
 ### 認証・セキュリティ
