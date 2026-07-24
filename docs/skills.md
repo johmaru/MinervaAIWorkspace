@@ -137,12 +137,11 @@ export async function findRelevantSkills(
 ### Algorithm
 
 1. **Embed the query** via `embedText(query, "query")`. Returns `[]` immediately if embedding fails (e.g., model still loading).
-2. **Fetch all active skills** for the user: `SELECT id, name, content, embedding FROM skills WHERE userId = ? AND status = 'active'`.
-3. **Compute cosine similarity** client-side for each skill: `cosineSimilarity(queryVector, row.embedding)`.
-4. **Filter** by `similarity > 0.3` (same threshold as memory retrieval).
-5. **Sort** by similarity descending.
-6. **Take top `limit`** (default 5).
-7. **Round** similarity to 3 decimal places.
+2. **SQL vector search** via `vec_distance_cosine(embedding, queryBuf)` — the sqlite-vec extension computes cosine distance directly in SQLite.
+3. **Filter** by `distance < 0.7` (equivalent to `similarity > 0.3`, same threshold as memory retrieval).
+4. **Sort** by distance ascending (lower distance = higher similarity).
+5. **Take top `limit`** (default 5).
+6. **Convert** distance to similarity via `distanceToSimilarity()` and round to 3 decimal places.
 
 Returns an array of `ScoredSkill` objects:
 
@@ -155,7 +154,7 @@ export type ScoredSkill = {
 };
 ```
 
-> **Note:** Unlike memory retrieval, skill retrieval does **not** apply recency scoring or importance weighting. It is pure cosine similarity. See [Embeddings & Vector Search](./embeddings.md) for the `cosineSimilarity()` implementation.
+> **Note:** Unlike memory retrieval, skill retrieval does **not** apply recency scoring or importance weighting. It is pure cosine similarity via sqlite-vec. See [Embeddings & Vector Search](./embeddings.md) for the `vec_distance_cosine()` implementation.
 
 ## Skill injection — `buildSkillContext()`
 
@@ -540,7 +539,9 @@ Located in `src/components/SkillManagerModal.tsx`. A modal component for managin
 
 - **Inline edit** — click "Edit" to edit `name`, `kind` (dropdown), `trigger`, `tags` (comma-separated), and `content` inline. Saves via `PATCH /api/skills/[id]`.
 - **Archive** — sets `status = "archived"` via PATCH. The skill moves to the Archived tab and is excluded from RAG retrieval.
-- **Display** — shows skill name, kind badge, trigger (if set), tags, content, and `lastUsedAt` (or "never").
+- **Propose improvement** — click "改善を提案" to trigger `POST /api/skills/[id]/evolve`, which checks the evolution window threshold and generates a bounded content patch via LLM. Switches to the Evolution tab automatically.
+- **Lifetime counts** — shows `成功 {n} / 失敗 {m}` from `successCount` / `failureCount` (updated via `POST /api/skill-usage/[id]/feedback`).
+- **Display** — shows skill name, kind badge, trigger (if set), tags, content, lifetime counts, and `lastUsedAt` (or "never").
 
 ### Drafts tab features
 
@@ -550,6 +551,16 @@ Located in `src/components/SkillManagerModal.tsx`. A modal component for managin
 - **Display** — shows proposed name, kind badge, confidence percentage (`Math.round(confidence * 100)%`), trigger, reason (italicized), proposed content, and tags.
 - **Badge** — the Drafts tab shows a count badge when candidates exist.
 
+### Evolution tab features
+
+- **Plain 2-column diff** — shows `previousContent` vs `proposedContent` side by side (no diff library).
+- **Approve** — applies the proposal via `PATCH /api/skill-evolution-proposals/[id]` with `status: "approved"`. Calls `applyEvolutionProposal` (version bump + re-embed + `lastEvolutionAt` + supersede other drafts).
+- **Edit & Approve** — opens an inline editor for proposed content/name/trigger/tags before applying.
+- **Reject** — marks the proposal as rejected.
+- **Delete draft** — physically deletes a draft proposal (enables re-proposal after cooldown).
+- **Conflict** — shows a conflict badge when `skill.version !== proposal.baseVersion`. The skill was edited after the proposal was generated.
+- **Badge** — the Evolution tab shows a count badge when proposals exist.
+
 ### Archived tab features
 
 - **Restore** — sets `status = "active"` via PATCH, moving the skill back to the Active tab.
@@ -557,22 +568,77 @@ Located in `src/components/SkillManagerModal.tsx`. A modal component for managin
 
 ### Data loading
 
-On open, `fetchAll()` makes three parallel requests:
+On open, `fetchAll()` makes four parallel requests:
 
 ```typescript
-const [activeRes, draftRes, archivedRes] = await Promise.all([
+const [activeRes, draftRes, archivedRes, evoRes] = await Promise.all([
   clientFetch("/api/skills"),
   clientFetch("/api/skill-candidates?status=draft"),
   clientFetch("/api/skills"),
+  clientFetch("/api/skill-evolution-proposals?status=draft"),
 ]);
 ```
 
 The active and archived tabs both fetch from `/api/skills` and filter client-side by `status`.
+
+## Skill Evolution
+
+Skill Evolution is a feedback-driven improvement loop for existing skills. When a skill receives enough negative feedback, the system generates a bounded content patch via LLM, which the user can review and approve.
+
+### Feedback
+
+- Users can vote 👍/👎 on injected skill chips in the chat UI (`POST /api/skill-usage/[id]/feedback`).
+- Each vote updates `skill_usage_events.outcome` (`helpful` / `not_helpful`) and lifetime `skills.successCount` / `failureCount` in a single transaction.
+- Feedback is idempotent — re-submitting the same outcome is a no-op. Toggling adjusts counters by the delta.
+
+### Evolution window + threshold
+
+The threshold is computed from events within an **evolution window** — starting from `skills.lastEvolutionAt` (or `createdAt` if never evolved). Only `helpful` / `not_helpful` events count.
+
+- `net failures >= 3` (minNetFailures) → propose
+- `samples >= 5 AND failure rate >= 50%` → propose
+- Open draft or cooldown active → no propose
+
+### Bounded edit
+
+The LLM-generated patch is validated by `isBoundedEdit()`:
+
+- `measureContentDelta` computes `absChanged` = total changed code units (prefix/suffix based).
+- `cap = max(500, floor(len(prev) * 0.35))`.
+- `absChanged > cap` → patch rejected (unbounded).
+- `kind` is immutable. Content must be non-empty.
+
+### Approval gate
+
+Proposals are `draft` until approved. Approval calls `applyEvolutionProposal`:
+
+1. Re-checks proposal status + skill version **inside a transaction** (TOCTOU-safe).
+2. Updates skill content + version + embedding + `lastEvolutionAt`.
+3. Marks proposal as `approved` with `appliedVersion`.
+4. Supersedes other drafts for the same skill.
+
+Version conflict (`skill.version !== proposal.baseVersion`) → proposal marked as `conflict`.
+
+### Feature flags
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `SKILL_EVOLUTION_ENABLED` | `true` (unset → on) | `"false"` / `"0"` → disable proposal generation. Feedback recording always works. |
+| `SKILL_EVOLUTION_AUTO_PROPOSE` | `false` (unset → off) | `"true"` / `"1"` → auto-schedule `after(propose)` on not_helpful feedback. Off = manual evolve only. |
+| `SKILL_EVOLUTION_MODEL` | `defaultModel()` | LLM model for patch generation. |
+
+### Concurrency safety
+
+- One open draft per skill: enforced by partial unique index `skill_evo_one_draft_per_skill` on `(user_id, skill_id) WHERE status = 'draft'`.
+- `maybeProposeSkillEvolution` re-checks for open draft **inside** the INSERT transaction.
+- Unique constraint violation → no-op success (`{ proposed: false, reason: "open_draft_exists" }`).
+- Cooldown: 1 hour between proposals per skill (`proposals.createdAt` based, DB query).
+- Force rate limit: 5 minutes between force evolves.
 
 ## See also
 
 - [Chat & Streaming](./chat-streaming.md) — How `buildSkillContext()` is called during message preparation and where the skill system message is positioned in the LLM message array
 - [Memory System](./memory.md) — The sibling RAG system; memories are ephemeral per-thread context, skills are permanent cross-thread procedures
 - [Embeddings & Vector Search](./embeddings.md) — `embedText()`, `cosineSimilarity()`, local ONNX vs HTTP embedder providers, the `kind` parameter
-- [Database & Schema](./database.md) — Full `skills`, `skill_candidates`, and `skill_usage_events` table definitions, migration history, and embedding storage conventions
+- [Database & Schema](./database.md) — Full `skills`, `skill_candidates`, `skill_usage_events`, and `skill_evolution_proposals` table definitions, migration history, and embedding storage conventions
 - [API Routes](./api-routes.md) — Complete REST API reference including skill endpoints

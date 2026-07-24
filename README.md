@@ -303,6 +303,15 @@ For Docker HTTP embedder, set `EMBED_PROVIDER=http`, `EMBED_MODEL=LiquidAI/LFM2.
 | `TOR_PROXY` | App-side Tor reference (empty = none) | — |
 | `SCRAPE_PROXY` | Proxy used by scraper | — |
 
+
+### Skills
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SKILL_EVOLUTION_ENABLED` | Enable evolution proposal generation (`false`/`0` = off; feedback recording always works) | `true` |
+| `SKILL_EVOLUTION_AUTO_PROPOSE` | Auto-schedule evolution proposal on negative feedback (`true`/`1` = on; off = manual evolve only) | `false` |
+| `SKILL_EVOLUTION_MODEL` | LLM model for evolution patch generation (empty = `LLM_MODEL`) | — |
+
 ### Database, logging, environment
 
 | Variable | Description | Default |

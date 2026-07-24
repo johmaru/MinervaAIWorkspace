@@ -303,6 +303,15 @@ Docker の HTTP embedder を使う場合: `EMBED_PROVIDER=http`、`EMBED_MODEL=L
 | `TOR_PROXY` | アプリ側 Tor 参照（空 = なし） | — |
 | `SCRAPE_PROXY` | Scraper が使うプロキシ | — |
 
+
+### スキル
+
+| 変数 | 説明 | デフォルト |
+|------|------|------------|
+| `SKILL_EVOLUTION_ENABLED` | 進化提案生成を有効化（`false`/`0` = オフ、フィードバック記録は常に動作） | `true` |
+| `SKILL_EVOLUTION_AUTO_PROPOSE` | 否定フィードバック時に自動で提案生成をスケジュール（`true`/`1` = オン、オフ = 手動のみ） | `false` |
+| `SKILL_EVOLUTION_MODEL` | 進化パッチ生成用 LLM モデル（空 = `LLM_MODEL`） | — |
+
 ### データベース・ログ・実行環境
 
 | 変数 | 説明 | デフォルト |
