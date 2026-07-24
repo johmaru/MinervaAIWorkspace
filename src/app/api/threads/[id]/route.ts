@@ -1,6 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { attachments, messages, threads } from "@/db/schema";
+import { attachments, messages, threads, skills } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
@@ -34,6 +34,32 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     .where(eq(messages.threadId, id))
     .orderBy(asc(messages.createdAt), asc(messages.id));
 
+  // Filter orphaned injectedSkills from message metadata.
+  // When a skill is deleted, past messages still reference it via
+  // metadata.injectedSkills. Query the user's current skill IDs once,
+  // then strip entries whose skillId no longer exists.
+  // The DB metadata is not modified — only the API response is cleaned.
+  const skillRows = await db
+    .select({ id: skills.id })
+    .from(skills)
+    .where(eq(skills.userId, user.id));
+  const validSkillIds = new Set(skillRows.map((r) => r.id));
+
+  const filteredMsgs = msgs.map((m) => {
+    if (!m.metadata?.injectedSkills) return m;
+    const filtered = m.metadata.injectedSkills.filter(
+      (s: { skillId?: string }) => validSkillIds.has(s.skillId ?? ""),
+    );
+    if (filtered.length === m.metadata.injectedSkills.length) return m;
+    return {
+      ...m,
+      metadata: {
+        ...m.metadata,
+        injectedSkills: filtered.length > 0 ? filtered : undefined,
+      },
+    };
+  });
+
   // Fetch attachments (only those linked to a messageId)
   const atts = await db
     .select({
@@ -46,7 +72,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     .from(attachments)
     .where(eq(attachments.threadId, id));
 
-  return Response.json({ thread, messages: msgs, attachments: atts });
+  return Response.json({ thread, messages: filteredMsgs, attachments: atts });
 }
 
 /**

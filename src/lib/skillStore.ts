@@ -47,19 +47,22 @@ export type SkillContextResult = {
 export async function findRelevantSkills(
   query: string,
   userId: string,
-  limit = 5,
+  limit = 3,
 ): Promise<ScoredSkill[]> {
   const queryVector = await embedText(query, "query");
   if (queryVector.length === 0) return [];
   const queryBuf = toVecBuffer(queryVector);
 
+  // Threshold: similarity > 0.5 (distance < 0.5).
+  // Previously 0.3 (distance < 0.7) was too permissive — injected up to 5
+  // loosely related skills every turn, cluttering the conversation.
   const rows = await db.all(sql`
     SELECT id, name, content,
            vec_distance_cosine(embedding, ${queryBuf}) AS distance
     FROM skills
     WHERE user_id = ${userId}
       AND status = 'active'
-      AND vec_distance_cosine(embedding, ${queryBuf}) < 0.7
+      AND vec_distance_cosine(embedding, ${queryBuf}) < 0.5
     ORDER BY distance
     LIMIT ${limit}
   `) as { id: string; name: string; content: string; distance: number }[];
