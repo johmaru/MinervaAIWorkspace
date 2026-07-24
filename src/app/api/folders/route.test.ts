@@ -127,17 +127,11 @@ describe("POST /api/folders", () => {
     createdFolderIds.push(folder.id);
   });
 
-  it("invalid memoryScope falls back to 'global'", async () => {
+  it("invalid memoryScope returns 400", async () => {
     const res = await POST(
       jsonReq("POST", { name: "bad-scope", memoryScope: "banana" }),
     );
-    expect(res.status).toBe(201);
-    const folder = (await res.json()) as {
-      id: string;
-      memoryScope: string;
-    };
-    expect(folder.memoryScope).toBe("global");
-    createdFolderIds.push(folder.id);
+    expect(res.status).toBe(400);
   });
 
   it("invalid JSON returns 400", async () => {

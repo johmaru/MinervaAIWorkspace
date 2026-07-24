@@ -169,6 +169,8 @@ export function useChat(threadId: string | null) {
   const realUserMsgIdRef = useRef<string | null>(null);
   // WakeLock handle to keep the screen on during streaming (mobile).
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
+  // Mirror of isStreaming for use in event listeners that can't access state directly
+  const isStreamingRef = useRef(false);
   // Polling timer reference for visibility-resync.
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Whether the user explicitly stopped the stream (vs. background-disconnect).
@@ -288,6 +290,7 @@ export function useChat(threadId: string | null) {
       wakeLockRef.current = null;
     }
     setIsStreaming(false);
+    isStreamingRef.current = false;
     streamingAssistantIdRef.current = null;
   }, []);
 
@@ -329,6 +332,7 @@ export function useChat(threadId: string | null) {
     setError(null);
     setSources([]);
     setIsStreaming(true);
+    isStreamingRef.current = true;
     streamingAssistantIdRef.current = assistantId;
     realUserMsgIdRef.current = null;
     userStoppedRef.current = false;
@@ -574,6 +578,7 @@ export function useChat(threadId: string | null) {
       }
 
       setIsStreaming(false);
+      isStreamingRef.current = false;
       abortRef.current = null;
       streamingAssistantIdRef.current = null;
 
@@ -671,8 +676,8 @@ export function useChat(threadId: string | null) {
       if (userStoppedRef.current) return;
       const found = await pollOnce();
       if (found) {
-        resyncingRef.current = false;
         setIsStreaming(false);
+        isStreamingRef.current = false;
         streamingAssistantIdRef.current = null;
         if (wakeLockRef.current) {
           wakeLockRef.current.release().catch(() => { /* non-fatal */ });
@@ -684,6 +689,7 @@ export function useChat(threadId: string | null) {
       if (attempts >= maxAttempts) {
         resyncingRef.current = false;
         setIsStreaming(false);
+        isStreamingRef.current = false;
         streamingAssistantIdRef.current = null;
         if (wakeLockRef.current) {
           wakeLockRef.current.release().catch(() => { /* non-fatal */ });
@@ -704,6 +710,13 @@ export function useChat(threadId: string | null) {
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         startResyncPoll();
+        // Re-acquire wakeLock if streaming and it was lost (e.g. screen off→on)
+        if (isStreamingRef.current && !wakeLockRef.current && typeof navigator !== "undefined" && "wakeLock" in navigator) {
+          navigator.wakeLock.request("screen").then(
+            (lock: { release: () => Promise<void> }) => { wakeLockRef.current = lock; },
+            () => { /* wakeLock denied — non-fatal */ },
+          );
+        }
       }
     };
     const onPageShow = (e: PageTransitionEvent) => {

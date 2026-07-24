@@ -76,6 +76,9 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
+  if (body.text && body.text.length > 51200) return Response.json({ error: "Text too long (max 50KB)" }, { status: 413 });
+  if (body.targetLang && !/^[a-zA-Z\s-]{0,30}$/.test(body.targetLang)) return Response.json({ error: "Invalid targetLang" }, { status: 400 });
+  if (body.sourceLang && !/^[a-zA-Z\s-]{0,30}$/.test(body.sourceLang)) return Response.json({ error: "Invalid sourceLang" }, { status: 400 });
 
   const { text, targetLang, sourceLang, explainLang } = body;
   const context = body.context?.trim() ?? "";

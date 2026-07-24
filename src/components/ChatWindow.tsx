@@ -138,6 +138,12 @@ export const ChatWindow = memo(function ChatWindow({
     scrollAnimRef.current = window.setTimeout(() => {
       scrollAnimRef.current = null;
     }, 400);
+    return () => {
+      if (scrollAnimRef.current) {
+        clearTimeout(scrollAnimRef.current);
+        scrollAnimRef.current = null;
+      }
+    };
   }, [messages]);
 
   // Auto-resize input height
@@ -151,7 +157,7 @@ export const ChatWindow = memo(function ChatWindow({
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    for (const file of Array.from(files)) {
+    for (const file of Array.from(files).slice(0, 10)) {
       await uploadAttachment(file);
     }
     // Reset input to allow re-selecting the same file

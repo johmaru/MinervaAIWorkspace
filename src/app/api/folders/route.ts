@@ -44,6 +44,10 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.memoryScope !== undefined && !isValidScope(body.memoryScope)) {
+    return new Response("invalid memoryScope", { status: 400 });
+  }
+
   const [row] = await db
     .insert(folders)
     .values({
@@ -52,7 +56,7 @@ export async function POST(req: Request) {
         typeof body.instruction === "string"
           ? body.instruction.trim() || null
           : null,
-      memoryScope: isValidScope(body.memoryScope) ? body.memoryScope : "global",
+      memoryScope: body.memoryScope === "folder" || body.memoryScope === "global" ? body.memoryScope : undefined,
       userId: user.id,
     })
     .returning();

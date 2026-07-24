@@ -246,7 +246,7 @@ export async function updateSkillContent(
     tags?: string[];
     status?: "active" | "archived";
   },
-): Promise<{ id: string; version: number; content: string; name: string; contentHash: string } | null> {
+): Promise<{ id: string; version: number; content: string; name: string; contentHash: string } | { error: "embed_failed" } | { error: "version_conflict" } | null> {
   const [existing] = await db
     .select()
     .from(skills)
@@ -281,7 +281,7 @@ export async function updateSkillContent(
       .join("\n");
     const vector = await embedText(embedSource, "document");
     if (vector.length === 0) {
-      return null; // embedding failed — caller should return 503
+      return { error: "embed_failed" as const };
     }
     updates.embedding = vector;
     if (contentChanged) {
@@ -291,10 +291,21 @@ export async function updateSkillContent(
     }
   }
 
+  // Optimistic locking: only UPDATE if version hasn't changed since we read it.
+  // This prevents lost updates without a transaction (works with existing mock tests).
+  if (contentChanged) {
+    updates.version = existing.version + 1;
+  }
   const [row] = await db
     .update(skills)
     .set(updates)
-    .where(and(eq(skills.id, skillId), eq(skills.userId, userId)))
+    .where(
+      and(
+        eq(skills.id, skillId),
+        eq(skills.userId, userId),
+        eq(skills.version, existing.version),
+      ),
+    )
     .returning({
       id: skills.id,
       version: skills.version,
@@ -303,5 +314,17 @@ export async function updateSkillContent(
       contentHash: skills.contentHash,
     });
 
-  return row ?? null;
+  if (!row) {
+    // Either skill was deleted, or version changed (concurrent edit)
+    // Check if the skill still exists to distinguish
+    const [check] = await db
+      .select({ id: skills.id })
+      .from(skills)
+      .where(and(eq(skills.id, skillId), eq(skills.userId, userId)))
+      .limit(1);
+    if (check) return { error: "version_conflict" as const };
+    return null;
+  }
+
+  return row;
 }

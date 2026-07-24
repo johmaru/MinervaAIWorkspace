@@ -123,7 +123,7 @@ export function warmupToolProbe(): void {
   warmupStarted = true;
   queueMicrotask(() => {
     try {
-      void probeToolSupport(createLLM(), defaultModel());
+      probeToolSupport(createLLM(), defaultModel()).catch(() => { /* warmup failure is harmless */ });
     } catch {
     // Warmup failure is harmless (retried on first request)
     }

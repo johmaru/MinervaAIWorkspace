@@ -1,4 +1,4 @@
-import { join, resolve, sep, dirname } from "node:path";
+import { join, resolve, sep, dirname, relative, isAbsolute } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { getUserDataRoot } from "@/lib/user-data";
@@ -29,9 +29,11 @@ export function resolveWorkspacePath(relativePath: string): string {
   const wsRoot = getWorkspaceRoot();
   // Allow absolute paths that are inside workspace, or relative paths
   const target = resolve(wsRoot, relativePath);
-  // Ensure the resolved path is within wsRoot (prevent path traversal)
-  const wsRootNormalized = wsRoot.endsWith(sep) ? wsRoot : wsRoot + sep;
-  if (!target.startsWith(wsRootNormalized) && target !== wsRoot) {
+  // Ensure the resolved path is within wsRoot (prevent path traversal).
+  // Use path.relative to handle Windows case-insensitivity correctly:
+  // if the result starts with '..' or is absolute, the path escaped wsRoot.
+  const rel = relative(wsRoot, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Path "${relativePath}" is outside the workspace`);
   }
   return target;
@@ -102,8 +104,15 @@ export async function runWorkspaceCommand(command: string): Promise<string> {
     });
     let stdout = "";
     let stderr = "";
-    proc.stdout.on("data", (d) => { stdout += d.toString(); });
-    proc.stderr.on("data", (d) => { stderr += d.toString(); });
+    const MAX_OUTPUT = 1024 * 1024; // 1MB cap
+    proc.stdout.on("data", (d) => {
+      stdout += d.toString();
+      if (stdout.length > MAX_OUTPUT) stdout = stdout.slice(0, MAX_OUTPUT) + "\n[truncated]";
+    });
+    proc.stderr.on("data", (d) => {
+      stderr += d.toString();
+      if (stderr.length > MAX_OUTPUT) stderr = stderr.slice(0, MAX_OUTPUT) + "\n[truncated]";
+    });
     proc.on("close", (code) => {
       let result = `Exit code: ${code}\n`;
       if (stdout) result += `--- stdout ---\n${stdout}\n`;

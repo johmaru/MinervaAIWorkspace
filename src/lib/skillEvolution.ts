@@ -203,9 +203,10 @@ export async function generateBoundedPatch(args: {
 
   const evidenceText = evidence
     .map((e, i) => {
-      const parts: string[] = [`[${i + 1}] outcome=${e.outcome} similarity=${e.similarity ?? "n/a"} activation=${e.activationType}`];
-      if (e.userSnippet) parts.push(`  user: ${e.userSnippet.slice(0, 500)}`);
-      if (e.assistantSnippet) parts.push(`  assistant: ${e.assistantSnippet.slice(0, 500)}`);
+      const parts: string[] = [`<evidence index="${i + 1}" outcome="${e.outcome}" similarity="${e.similarity ?? "n/a"}" activation="${e.activationType}">`];
+      if (e.userSnippet) parts.push(`  <user>${e.userSnippet.slice(0, 500)}</user>`);
+      if (e.assistantSnippet) parts.push(`  <assistant>${e.assistantSnippet.slice(0, 500)}</assistant>`);
+      parts.push("</evidence>");
       return parts.join("\n");
     })
     .join("\n\n");

@@ -346,6 +346,7 @@ async function processProfileTraits(
           AND category = ${trait.category}
           AND suppressed_at IS NULL
           AND vec_distance_cosine(embedding, ${queryBuf}) BETWEEN 0.15 AND 0.25
+        LIMIT 5
       `) as { id: string; content: string; distance: number }[];
 
       for (const candidate of contradictionCandidates) {
@@ -616,7 +617,7 @@ export async function generateMemories(
           AND (valid_until IS NULL OR valid_until > ${now.getTime()})
           AND (expires_at IS NULL OR expires_at > ${now.getTime()})
           AND vec_distance_cosine(embedding, ${queryBuf}) < 0.25
-        LIMIT 50
+        LIMIT 5
       `) as { id: string; content: string; distance: number }[];
 
       for (const candidate of contradictCandidates) {

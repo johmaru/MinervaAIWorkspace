@@ -78,13 +78,15 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     body.status !== undefined;
 
   if (hasContentUpdate) {
-    const row = await updateSkillContent(id, user.id, patch);
-    if (!row) {
-      // updateSkillContent returns null on embedding failure OR not found.
-      // We already verified the skill exists above, so null means embedding failed.
-      return new Response("Embedding failed", { status: 503 });
+    const result = await updateSkillContent(id, user.id, patch);
+    if (!result) {
+      return new Response("Not found", { status: 404 });
     }
-    return Response.json(row);
+    if ("error" in result) {
+      if (result.error === "embed_failed") return new Response("Embedding failed", { status: 503 });
+      if (result.error === "version_conflict") return new Response("Version conflict", { status: 409 });
+    }
+    return Response.json(result);
   }
 
   // Only kind was updated — return existing skill fields

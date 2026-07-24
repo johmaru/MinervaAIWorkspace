@@ -23,6 +23,33 @@ import { logger } from "@/lib/logger";
 let MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
 let EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 
+/**
+ * Startup check: verify EMBED_DIM matches stored vectors in the DB.
+ * Logs a warning if mismatched — does not block startup so users can inspect data.
+ */
+async function checkEmbedDimConsistency(): Promise<void> {
+  try {
+    const { db } = await import("@/db");
+    const { skills } = await import("@/db/schema");
+    // Dynamic import to avoid circular dependency: embed.ts ← db/index.ts → embed.ts
+    const [row] = await db.select({ embedding: skills.embedding }).from(skills).limit(1);
+    if (row && Array.isArray(row.embedding) && row.embedding.length > 0) {
+      if (row.embedding.length !== EMBED_DIM) {
+        logger.error("embed", "EMBED_DIM mismatch detected", {
+          envDim: EMBED_DIM,
+          storedDim: row.embedding.length,
+          hint: "Change EMBED_DIM back or re-embed all vectors",
+        });
+      }
+    }
+  } catch {
+    // DB not ready yet (first run) — skip silently
+  }
+}
+
+// Run check in background (non-blocking)
+void checkEmbedDimConsistency();
+
 type EmbedKind = "query" | "document";
 
 type Pipeline = {

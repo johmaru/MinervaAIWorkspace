@@ -230,23 +230,25 @@ async function processFeedbackLoop(
   if (injected.length === 0) return;
 
   const now = new Date();
-  for (const mem of injected) {
-    // distance < 0.5 means similarity > 0.5 → user continued the topic → boost
-    if (mem.distance < 0.5) {
-      const newImportance = Math.min(1.0, mem.importance + 0.05);
-      await db
-        .update(memories)
-        .set({ importance: newImportance, lastReferencedAt: now, updatedAt: now })
-        .where(eq(memories.id, mem.memory_id));
-    } else {
-      // User moved on → decay
-      const newImportance = Math.max(0.1, mem.importance - 0.02);
-      await db
-        .update(memories)
-        .set({ importance: newImportance, updatedAt: now })
-        .where(eq(memories.id, mem.memory_id));
+  db.transaction((tx) => {
+    for (const mem of injected) {
+      if (mem.distance < 0.5) {
+        const newImportance = Math.min(1.0, mem.importance + 0.05);
+        tx
+          .update(memories)
+          .set({ importance: newImportance, lastReferencedAt: now, updatedAt: now })
+          .where(eq(memories.id, mem.memory_id))
+          .run();
+      } else {
+        const newImportance = Math.max(0.1, mem.importance - 0.02);
+        tx
+          .update(memories)
+          .set({ importance: newImportance, updatedAt: now })
+          .where(eq(memories.id, mem.memory_id))
+          .run();
+      }
     }
-  }
+  });
 }
 
 /**
@@ -268,13 +270,14 @@ async function recordInjections(
     memoryId,
     injectedAt: now,
   }));
-  await db.insert(memoryInjections).values(rows);
-
-  // Update injection tracking on all injected memories in one query
-  await db
-    .update(memories)
-    .set({ injectionCount: sql`${memories.injectionCount} + 1`, lastInjectedAt: now })
-    .where(inArray(memories.id, memoryIds));
+  db.transaction((tx) => {
+    tx.insert(memoryInjections).values(rows).run();
+    tx
+      .update(memories)
+      .set({ injectionCount: sql`${memories.injectionCount} + 1`, lastInjectedAt: now })
+      .where(inArray(memories.id, memoryIds))
+      .run();
+  });
 }
 
 /**

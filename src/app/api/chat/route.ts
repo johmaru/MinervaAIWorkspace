@@ -130,6 +130,7 @@ export async function POST(req: Request) {
   }
 
   if (!body.threadId) return new Response("threadId is required", { status: 400 });
+  if (body.content && body.content.length > 102400) return new Response("Content too long (max 100KB)", { status: 413 });
 
   const [thread] = await db.select().from(threads).where(eq(threads.id, body.threadId));
   if (!thread) return new Response("thread not found", { status: 404 });

@@ -55,7 +55,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (body.proposedContent !== undefined) overrides.proposedContent = body.proposedContent;
     if (body.proposedName !== undefined) overrides.proposedName = body.proposedName;
     if (body.proposedTrigger !== undefined) overrides.proposedTrigger = body.proposedTrigger;
-    if (body.proposedTags !== undefined) overrides.proposedTags = body.proposedTags;
+    if (body.proposedTags !== undefined) {
+      if (!Array.isArray(body.proposedTags) || !body.proposedTags.every((t: unknown) => typeof t === "string")) {
+        return new Response("proposedTags must be an array of strings", { status: 400 });
+      }
+      overrides.proposedTags = body.proposedTags;
+    }
 
     const result = await applyEvolutionProposal({
       proposalId: id,

@@ -209,6 +209,7 @@ function writeToFile(line: string): void {
   // If rotation is in progress, queue the line — drained after rotation completes
   if (rotationPromise) {
     pendingLines.push(line);
+    if (pendingLines.length > 10000) pendingLines.shift();
     return;
   }
 

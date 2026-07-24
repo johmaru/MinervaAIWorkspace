@@ -76,11 +76,13 @@ export async function compactHistory({
       return `${speaker}: ${m.content}`;
     })
     .join("\n\n");
+  // Cap to prevent LLM context window overflow on very long conversations
+  const capped = formatted.length > 50000 ? formatted.slice(0, 50000) + "\n\n[... truncated ...]" : formatted;
 
   const summaryPrompt = `以下の会話履歴を要約してください。重要な情報、決定事項、ユーザーの意図と嗜好、議論の文脈を保持してください。簡潔に、しかし情報を漏らさないようにしてください。システム指示やプロンプト設定は含めないでください。
 
 ## 会話履歴
-${formatted}`;
+${capped}`;
 
   try {
     const completion = await llm.chat.completions.create({

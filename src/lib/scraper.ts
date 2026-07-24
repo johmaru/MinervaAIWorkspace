@@ -175,7 +175,7 @@ export async function searchWeb(
   // Save newly scraped results to DB (async, errors ignored, embed runs)
   for (const r of response.results) {
     if (r.scraped && r.content) {
-      upsertPage(r.url, r.scrapeTitle || r.title, r.content).catch(() => {});
+      upsertPage(r.url, r.scrapeTitle || r.title, r.content).catch((e: unknown) => logger.warn("scraper", "upsertPage failed", { url: r.url, error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -244,7 +244,7 @@ function isPrivateHost(hostname: string): boolean {
   if (/^f[cd]/.test(hostname)) return true; // ULA fc00::/7
   if (/^fe80:/.test(hostname)) return true; // link-local
   // Docker-internal hostnames
-  const dockerHosts = ["scraper", "embedder", "searxng", "tor", "app", "cloudflared"];
+  const dockerHosts = ["scraper", "embedder", "searxng", "tor", "app", "cloudflared", "db", "redis", "postgres", "mongo", "valkey", "sandbox"];
   if (dockerHosts.includes(hostname)) return true;
   // localhost
   if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;

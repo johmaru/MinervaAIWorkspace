@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, count } from "drizzle-orm";
 import { db } from "@/db";
 import { mcpServers } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth-guards";
@@ -70,6 +70,15 @@ export async function POST(req: Request) {
   if (!name) return new Response("name is required", { status: 400 });
   if (transport !== "http" && transport !== "sse" && transport !== "stdio") {
     return new Response("transport must be 'http', 'sse', or 'stdio'", { status: 400 });
+  }
+
+  // Limit: max 20 MCP servers per user to prevent resource exhaustion
+  const [{ value: serverCount }] = await db
+    .select({ value: count() })
+    .from(mcpServers)
+    .where(eq(mcpServers.userId, user.id));
+  if (serverCount >= 20) {
+    return new Response("Maximum number of MCP servers (20) reached", { status: 409 });
   }
 
   const isRemote = transport === "http" || transport === "sse";
