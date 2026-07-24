@@ -204,31 +204,65 @@ async function checkDuplicate(
     // Byte-identical to an existing active skill — skip entirely.
     return { candidate: null, contentHash, duplicateOfId: existingSkill.id, duplicateOfType: "skill" };
   }
-
-  // Tier 3: semantic similarity against active skills
+  // Tier 3: semantic similarity against existing draft candidates.
+  // Catches near-duplicates where the LLM rephrased the content slightly
+  // but contentHash (Tier 1) didn't match. Skips insertion if a draft with
+  // similarity >= 0.88 already exists.
   const embedSource = [candidate.name, candidate.trigger, candidate.tags.join(", "), candidate.content]
     .filter(Boolean)
     .join("\n");
-  const queryVector = await embedText(embedSource, "query");
+  const queryVector = await embedText(embedSource, "document");
   if (queryVector.length > 0) {
     const queryBuf = toVecBuffer(queryVector);
+
+    // Check against existing draft candidates (no embedding column — use
+    // embedTexts to batch-embed all draft contents, then compare in JS).
+    const drafts = await db
+      .select({ id: skillCandidates.id, proposedContent: skillCandidates.proposedContent,
+                proposedName: skillCandidates.proposedName, proposedTrigger: skillCandidates.proposedTrigger,
+                proposedTags: skillCandidates.proposedTags })
+      .from(skillCandidates)
+      .where(and(eq(skillCandidates.userId, userId), eq(skillCandidates.status, "draft")))
+      .limit(100);
+
+    if (drafts.length > 0) {
+      const draftTexts = drafts.map((d) =>
+        [d.proposedName, d.proposedTrigger, (d.proposedTags ?? []).join(", "), d.proposedContent]
+          .filter(Boolean).join("\n"),
+      );
+      const draftVectors = await embedTexts(draftTexts, "document");
+      for (let i = 0; i < drafts.length; i++) {
+        if (draftVectors[i].length === 0) continue;
+        const sim = cosineSimilarity(queryVector, draftVectors[i]);
+        if (sim >= DEDUP_SIMILARITY_THRESHOLD) {
+          logger.info("skill-candidate", "skipped semantically duplicate draft", {
+            name: candidate.name,
+            existingDraft: drafts[i].proposedName,
+            similarity: Number(sim.toFixed(3)),
+          });
+          return { candidate: null, contentHash, duplicateOfId: drafts[i].id, duplicateOfType: "candidate" };
+        }
+      }
+    }
+
+    // Tier 4: semantic similarity against active skills.
+    // Skip insertion (not flag-and-insert) if a highly similar skill exists.
+    // The previous flag-and-insert behavior caused duplicate draft accumulation
+    // and orphaned-reference bugs when the referenced skill was deleted.
     const rows = await db.all(sql`
-      SELECT id,
-             vec_distance_cosine(embedding, ${queryBuf}) AS distance
+      SELECT id
       FROM skills
       WHERE user_id = ${userId}
         AND status = 'active'
         AND vec_distance_cosine(embedding, ${queryBuf}) < ${1 - DEDUP_SIMILARITY_THRESHOLD}
-      ORDER BY distance
       LIMIT 1
-    `) as { id: string; distance: number }[];
+    `) as { id: string }[];
     if (rows.length > 0) {
-      return {
-        candidate,
-        contentHash,
-        duplicateOfId: rows[0].id,
-        duplicateOfType: "skill",
-      };
+      logger.info("skill-candidate", "skipped semantically duplicate skill", {
+        name: candidate.name,
+        existingSkillId: rows[0].id,
+      });
+      return { candidate: null, contentHash, duplicateOfId: rows[0].id, duplicateOfType: "skill" };
     }
   }
 
