@@ -40,4 +40,4 @@ CREATE TABLE `knowledge_bases` (
 );
 --> statement-breakpoint
 CREATE INDEX `knowledge_bases_user_idx` ON `knowledge_bases` (`user_id`);--> statement-breakpoint
-ALTER TABLE `threads` ADD `active_kb_ids` text NOT NULL;
+ALTER TABLE `threads` ADD `active_kb_ids` text NOT NULL DEFAULT '[]';
