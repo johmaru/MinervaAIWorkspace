@@ -23,7 +23,7 @@ import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildSkillContext, attachUsageMessageIds, listSkills, createSkill, deleteSkill, updateSkillContent, type InjectedSkillInfo } from "@/lib/skillStore";
 import { buildMemoryContext } from "@/lib/memoryStore";
-import { buildKnowledgeContextMessage, createKnowledgeBase, listKnowledgeBases, ingestDocument, searchKnowledgeBases } from "@/lib/kbStore";
+import { buildKnowledgeContextMessage, createKnowledgeBase, listKnowledgeBases, ingestDocument, ingestFolder, searchKnowledgeBases } from "@/lib/kbStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -1957,6 +1957,21 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "kb_ingest_folder",
+      description: "Recursively scan a folder in the workspace and ingest all text files (.txt, .md, .json, .csv, .xml, .yml, .yaml, .ts, .js, .py, .html) into a knowledge base. Each file becomes one document with chunked embeddings. Use when the user asks to bulk-import a folder or multiple files at once.",
+      parameters: {
+        type: "object",
+        properties: {
+          knowledge_base_id: { type: "string", description: "The knowledge base id (from kb_list)" },
+          folder_path: { type: "string", description: "Path relative to workspace root (e.g. 'docs', 'src', '.'). The folder must exist in the workspace." },
+        },
+        required: ["knowledge_base_id", "folder_path"],
+      },
+    },
+  },
 ];
 
 const MAX_TOOL_ROUNDS = 3;
@@ -2128,7 +2143,7 @@ async function streamCompletion({
       currentMessages = [
         ...currentMessages,
         {
-          role: "assistant",
+          role: "assistant" as const,
           content: null,
           tool_calls: toolCalls.map((tc) => ({
             id: tc.id,
@@ -2143,9 +2158,9 @@ async function streamCompletion({
       // Execute each tool call and append the result as a tool role message
       for (const tc of toolCalls) {
         let toolContent: string = "";
-        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string };
+        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string; folder_path?: string };
         try {
-          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string };
+          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string; folder_path?: string };
         } catch {
           parsedArgs = {};
         }
@@ -2456,6 +2471,19 @@ async function streamCompletion({
             toolContent = `Failed to search knowledge base: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "kb_search", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_ingest_folder" && parsedArgs.knowledge_base_id && parsedArgs.folder_path) {
+          send?.("status", { label: t(locale, "chat.statusToolKbIngestFolder") });
+          const tTool = Date.now();
+          try {
+            const result = await ingestFolder(parsedArgs.knowledge_base_id, parsedArgs.folder_path, userId);
+            toolContent = `Ingested ${result.ingested} file(s), skipped ${result.skipped} empty file(s)${result.errors.length > 0 ? `, ${result.errors.length} error(s)` : ""}`;
+            if (result.errors.length > 0) {
+              toolContent += `\nErrors:\n${result.errors.slice(0, 5).join("\n")}${result.errors.length > 5 ? `\n... and ${result.errors.length - 5} more` : ""}`;
+            }
+          } catch (err) {
+            toolContent = `Failed to ingest folder: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_ingest_folder", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
           // MCP tool: function name format "{serverName}__{toolName}"
           const parsed = parseMcpToolFunctionName(tc.name);

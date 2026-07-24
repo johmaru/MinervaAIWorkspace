@@ -5,6 +5,9 @@ import { embedText, embedTexts, hashContent } from "@/lib/embed";
 import { chunkText } from "@/lib/chunker";
 import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative, sep, extname } from "node:path";
+import { getWorkspaceRoot } from "@/lib/workspace";
 
 /**
  * Knowledge Base store — CRUD for knowledge_bases, document ingestion with
@@ -194,6 +197,91 @@ export async function deleteDocument(docId: string, kbId: string) {
   if (!doc) return false;
   await db.delete(kbDocuments).where(eq(kbDocuments.id, docId));
   return true;
+}
+
+const INGESTIBLE_EXTENSIONS: Record<string, true> = {
+  ".txt": true, ".md": true, ".json": true, ".csv": true, ".xml": true,
+  ".yml": true, ".yaml": true, ".ts": true, ".js": true, ".py": true,
+  ".html": true, ".htm": true,
+};
+
+/**
+ * Recursively scans a folder within the workspace and ingests all text files
+ * into the specified knowledge base. Each file becomes one document, chunked
+ * and embedded via ingestDocument.
+ *
+ * Security: folderPath is resolved against getWorkspaceRoot() with path
+ * traversal protection. userId ownership is verified inside ingestDocument.
+ *
+ * @returns summary of ingested files (count, skipped, errors)
+ */
+export async function ingestFolder(
+  kbId: string,
+  folderPath: string,
+  userId: string,
+): Promise<{ ingested: number; skipped: number; errors: string[] }> {
+  const wsRoot = getWorkspaceRoot();
+  const absPath = join(wsRoot, folderPath);
+
+  // Path traversal check
+  const rel = relative(wsRoot, absPath);
+  if (rel.startsWith("..") || (sep === "\\" && rel.includes(".."))) {
+    throw new Error(`Path "${folderPath}" is outside the workspace`);
+  }
+
+  let stats: { isDirectory: () => boolean };
+  try {
+    stats = statSync(absPath);
+  } catch {
+    throw new Error(`Folder not found: ${folderPath}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`Not a directory: ${folderPath}`);
+  }
+
+  // Recursively collect all ingestible files
+  const files: string[] = [];
+  function scanDir(dir: string) {
+    const entries = readdirSync(dir);
+    for (const entry of entries) {
+      const fullPath = join(dir, entry);
+      const st = statSync(fullPath);
+      if (st.isDirectory()) {
+        // Skip node_modules, .git, and hidden directories
+        if (entry === "node_modules" || entry === ".git" || entry.startsWith(".")) continue;
+        scanDir(fullPath);
+      } else if (INGESTIBLE_EXTENSIONS[extname(entry).toLowerCase()]) {
+        files.push(fullPath);
+      }
+    }
+  }
+  scanDir(absPath);
+
+  let ingested = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const filePath of files) {
+    try {
+      const content = readFileSync(filePath, "utf8");
+      if (content.trim().length === 0) {
+        skipped++;
+        continue;
+      }
+      // Use relative path from workspace root as the document title
+      const relPath = relative(wsRoot, filePath).split(sep).join("/");
+      await ingestDocument(kbId, {
+        title: relPath,
+        sourceType: "file",
+        content,
+      }, userId);
+      ingested++;
+    } catch (err) {
+      errors.push(`${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { ingested, skipped, errors };
 }
 
 // ── RAG search ──
