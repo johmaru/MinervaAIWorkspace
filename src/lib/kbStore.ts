@@ -5,9 +5,10 @@ import { embedText, embedTexts, hashContent } from "@/lib/embed";
 import { chunkText } from "@/lib/chunker";
 import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, sep, extname } from "node:path";
+import { readdirSync, statSync } from "node:fs";
+import { join, relative, sep, extname, basename } from "node:path";
 import { getWorkspaceRoot } from "@/lib/workspace";
+import { extractFileTextFromPath } from "@/lib/fileExtract";
 
 /**
  * Knowledge Base store — CRUD for knowledge_bases, document ingestion with
@@ -199,18 +200,27 @@ export async function deleteDocument(docId: string, kbId: string) {
   return true;
 }
 
-const INGESTIBLE_EXTENSIONS: Record<string, true> = {
-  ".txt": true, ".md": true, ".json": true, ".csv": true, ".xml": true,
-  ".yml": true, ".yaml": true, ".ts": true, ".js": true, ".py": true,
-  ".html": true, ".htm": true,
+// Extensions to skip (binary/non-text files that can't be meaningfully embedded)
+const SKIP_EXTENSIONS: Record<string, true> = {
+  ".exe": true, ".dll": true, ".so": true, ".dylib": true, ".bin": true,
+  ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true,
+  ".ico": true, ".webp": true, ".tiff": true, ".svg": true,
+  ".mp3": true, ".mp4": true, ".wav": true, ".avi": true, ".mov": true,
+  ".zip": true, ".tar": true, ".gz": true, ".rar": true, ".7z": true,
+  ".db": true, ".sqlite": true, ".sqlite3": true,
+  ".class": true, ".jar": true, ".war": true, ".pyc": true,
+  ".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
 };
 
 /**
- * Recursively scans a folder within the workspace and ingests all text files
- * into the specified knowledge base. Each file becomes one document, chunked
- * and embedded via ingestDocument.
+ * Recursively scans a folder within the user's workspace and ingests all
+ * text-readable files into the specified knowledge base.
  *
- * Security: folderPath is resolved against getWorkspaceRoot() with path
+ * All file types are eligible except known binary formats (images, audio,
+ * video, archives, executables, databases). Binary files are skipped because
+ * they cannot be meaningfully chunked or embedded as text.
+ *
+ * Security: folderPath is resolved against getWorkspaceRoot(userId) with path
  * traversal protection. userId ownership is verified inside ingestDocument.
  *
  * @returns summary of ingested files (count, skipped, errors)
@@ -220,7 +230,7 @@ export async function ingestFolder(
   folderPath: string,
   userId: string,
 ): Promise<{ ingested: number; skipped: number; errors: string[] }> {
-  const wsRoot = getWorkspaceRoot();
+  const wsRoot = getWorkspaceRoot(userId);
   const absPath = join(wsRoot, folderPath);
 
   // Path traversal check
@@ -239,7 +249,7 @@ export async function ingestFolder(
     throw new Error(`Not a directory: ${folderPath}`);
   }
 
-  // Recursively collect all ingestible files
+  // Recursively collect all readable files (skip known binary formats)
   const files: string[] = [];
   function scanDir(dir: string) {
     const entries = readdirSync(dir);
@@ -250,8 +260,11 @@ export async function ingestFolder(
         // Skip node_modules, .git, and hidden directories
         if (entry === "node_modules" || entry === ".git" || entry.startsWith(".")) continue;
         scanDir(fullPath);
-      } else if (INGESTIBLE_EXTENSIONS[extname(entry).toLowerCase()]) {
-        files.push(fullPath);
+      } else {
+        const ext = extname(entry).toLowerCase();
+        if (!SKIP_EXTENSIONS[ext]) {
+          files.push(fullPath);
+        }
       }
     }
   }
@@ -263,8 +276,8 @@ export async function ingestFolder(
 
   for (const filePath of files) {
     try {
-      const content = readFileSync(filePath, "utf8");
-      if (content.trim().length === 0) {
+      const extracted = await extractFileTextFromPath(filePath, basename(filePath));
+      if (extracted.empty) {
         skipped++;
         continue;
       }
@@ -273,7 +286,7 @@ export async function ingestFolder(
       await ingestDocument(kbId, {
         title: relPath,
         sourceType: "file",
-        content,
+        content: extracted.text,
       }, userId);
       ingested++;
     } catch (err) {

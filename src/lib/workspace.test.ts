@@ -18,6 +18,8 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { runWorkspaceCommand } from "./workspace";
 
+const TEST_USER = "test-user";
+
 function createMockChild(): ChildProcess {
   const child = new EventEmitter() as unknown as ChildProcess;
   (child as unknown as { stdout: EventEmitter }).stdout = new EventEmitter();
@@ -34,7 +36,7 @@ describe("runWorkspaceCommand", () => {
     const mockChild = createMockChild();
     mockSpawn.mockReturnValue(mockChild);
 
-    const promise = runWorkspaceCommand("echo hello");
+    const promise = runWorkspaceCommand("echo hello", TEST_USER);
     mockChild.stdout?.emit("data", Buffer.from("hello"));
     mockChild.emit("close", 0);
     const result = await promise;
@@ -51,7 +53,7 @@ describe("runWorkspaceCommand", () => {
     const mockChild = createMockChild();
     mockSpawn.mockReturnValue(mockChild);
 
-    const promise = runWorkspaceCommand("echo test");
+    const promise = runWorkspaceCommand("echo test", TEST_USER);
     mockChild.stdout?.emit("data", Buffer.from("test"));
     mockChild.emit("close", 0);
     await promise;
@@ -69,31 +71,31 @@ describe("runWorkspaceCommand", () => {
   });
 
   it("blocks disallowed binary (rm)", async () => {
-    const result = await runWorkspaceCommand("rm -rf /");
+    const result = await runWorkspaceCommand("rm -rf /", TEST_USER);
     expect(result).toContain("Blocked:");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("blocks disallowed binary (node -e)", async () => {
-    const result = await runWorkspaceCommand('node -e "require(\'child_process\').execSync(\'rm -rf /\')"');
+    const result = await runWorkspaceCommand('node -e "require(\'child_process\').execSync(\'rm -rf /\')"', TEST_USER);
     expect(result).toContain("Blocked:");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("blocks disallowed binary (curl)", async () => {
-    const result = await runWorkspaceCommand("curl http://evil.com");
+    const result = await runWorkspaceCommand("curl http://evil.com", TEST_USER);
     expect(result).toContain("Blocked:");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("blocks disallowed binary (python -c)", async () => {
-    const result = await runWorkspaceCommand("python -c 'import os; os.system(\"rm -rf /\")'");
+    const result = await runWorkspaceCommand("python -c 'import os; os.system(\"rm -rf /\")'", TEST_USER);
     expect(result).toContain("Blocked:");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("blocks find -exec", async () => {
-    const result = await runWorkspaceCommand("find . -exec rm -rf / ;");
+    const result = await runWorkspaceCommand("find . -exec rm -rf / ;", TEST_USER);
     expect(result).toContain("Blocked:");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
@@ -102,7 +104,7 @@ describe("runWorkspaceCommand", () => {
     const mockChild = createMockChild();
     mockSpawn.mockReturnValue(mockChild);
 
-    const promise = runWorkspaceCommand("git status");
+    const promise = runWorkspaceCommand("git status", TEST_USER);
     mockChild.stdout?.emit("data", Buffer.from("On branch main"));
     mockChild.emit("close", 0);
     const result = await promise;
@@ -118,7 +120,7 @@ describe("runWorkspaceCommand", () => {
     const mockChild = createMockChild();
     mockSpawn.mockReturnValue(mockChild);
 
-    const promise = runWorkspaceCommand("ls -la");
+    const promise = runWorkspaceCommand("ls -la", TEST_USER);
     mockChild.stdout?.emit("data", Buffer.from("total 0"));
     mockChild.emit("close", 0);
     const result = await promise;
@@ -130,7 +132,7 @@ describe("runWorkspaceCommand", () => {
   });
 
   it("returns error for empty command", async () => {
-    const result = await runWorkspaceCommand("");
+    const result = await runWorkspaceCommand("", TEST_USER);
     expect(result).toContain("Error: empty command");
     expect(mockSpawn).not.toHaveBeenCalled();
   });
@@ -139,7 +141,7 @@ describe("runWorkspaceCommand", () => {
     const mockChild = createMockChild();
     mockSpawn.mockReturnValue(mockChild);
 
-    const promise = runWorkspaceCommand("git status");
+    const promise = runWorkspaceCommand("git status", TEST_USER);
     mockChild.emit("error", new Error("spawn ENOENT"));
     const result = await promise;
 
@@ -151,7 +153,7 @@ describe("runWorkspaceCommand", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const largeOutput = "x".repeat(2 * 1024 * 1024); // 2MB
-    const promise = runWorkspaceCommand("cat bigfile");
+    const promise = runWorkspaceCommand("cat bigfile", TEST_USER);
     mockChild.stdout?.emit("data", Buffer.from(largeOutput));
     mockChild.emit("close", 0);
     const result = await promise;

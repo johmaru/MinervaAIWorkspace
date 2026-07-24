@@ -5,28 +5,41 @@ import { getUserDataRoot } from "@/lib/user-data";
 import { parseCommandTokens, isAllowedCommand } from "@/lib/commandWhitelist";
 
 /**
- * Resolve the workspace root directory.
- * - UMANS_USER_ROOT set (exe): join(root, "workspace")
- * - Unset (dev): join(cwd, "workspace")
+ * Per-user workspace isolation.
+ *
+ * Each user gets their own workspace directory under <dataRoot>/workspace/<userId>/.
+ * This prevents cross-user file access: user A cannot read/write/list files
+ * in user B's workspace. The userId is threaded through every workspace
+ * function call from the chat route's tool handlers.
+ *
+ * The base workspace directory (<dataRoot>/workspace/) is mounted into the
+ * Docker container via WORKSPACE_HOST_PATH in docker-compose.yml. Per-user
+ * subdirectories are created on first access.
+ */
+
+/**
+ * Resolve the workspace root directory for a specific user.
+ * - UMANS_USER_ROOT set (exe): join(root, "workspace", userId)
+ * - Unset (dev/Docker): join(cwd, "workspace", userId)
  * Creates the directory if it doesn't exist (idempotent).
  */
-export function getWorkspaceRoot(): string {
+export function getWorkspaceRoot(userId: string): string {
   const root = getUserDataRoot();
   const base = root ?? process.cwd();
-  const ws = join(base, "workspace");
+  const ws = join(base, "workspace", userId);
   mkdirSync(ws, { recursive: true });
   return ws;
 }
 
 /**
- * Resolve a path relative to the workspace root and verify it stays inside.
+ * Resolve a path relative to the user's workspace root and verify it stays inside.
  * Throws if the resolved path escapes the workspace (path traversal).
  * Accepts absolute paths inside workspace, or relative paths.
  * Normalizes .. segments before checking.
  * Returns the absolute resolved path.
  */
-export function resolveWorkspacePath(relativePath: string): string {
-  const wsRoot = getWorkspaceRoot();
+export function resolveWorkspacePath(relativePath: string, userId: string): string {
+  const wsRoot = getWorkspaceRoot(userId);
   // Allow absolute paths that are inside workspace, or relative paths
   const target = resolve(wsRoot, relativePath);
   // Ensure the resolved path is within wsRoot (prevent path traversal).
@@ -43,8 +56,8 @@ export function resolveWorkspacePath(relativePath: string): string {
 const MAX_READ_SIZE = 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
 
-export async function readWorkspaceFile(relativePath: string): Promise<string> {
-  const abs = resolveWorkspacePath(relativePath);
+export async function readWorkspaceFile(relativePath: string, userId: string): Promise<string> {
+  const abs = resolveWorkspacePath(relativePath, userId);
   const stat = statSync(abs);
   if (stat.size > MAX_READ_SIZE) {
     return `File is too large (${stat.size} bytes, max ${MAX_READ_SIZE}). Showing first ${MAX_READ_SIZE} bytes.\n\n${readFileSync(abs, "utf8").slice(0, MAX_READ_SIZE)}`;
@@ -52,16 +65,16 @@ export async function readWorkspaceFile(relativePath: string): Promise<string> {
   return readFileSync(abs, "utf8");
 }
 
-export async function writeWorkspaceFile(relativePath: string, content: string): Promise<string> {
-  const abs = resolveWorkspacePath(relativePath);
+export async function writeWorkspaceFile(relativePath: string, content: string, userId: string): Promise<string> {
+  const abs = resolveWorkspacePath(relativePath, userId);
   // Create parent directories if needed
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, content, "utf8");
   return `File written: ${relativePath} (${content.length} bytes)`;
 }
 
-export async function listWorkspaceDirectory(relativePath: string): Promise<string> {
-  const abs = resolveWorkspacePath(relativePath);
+export async function listWorkspaceDirectory(relativePath: string, userId: string): Promise<string> {
+  const abs = resolveWorkspacePath(relativePath, userId);
   const entries = readdirSync(abs);
   const lines = entries.map(name => {
     const stat = statSync(join(abs, name));
@@ -69,7 +82,8 @@ export async function listWorkspaceDirectory(relativePath: string): Promise<stri
   });
   return lines.join("\n") || "(empty directory)";
 }
-export async function runWorkspaceCommand(command: string): Promise<string> {
+
+export async function runWorkspaceCommand(command: string, userId: string): Promise<string> {
   const tokens = parseCommandTokens(command);
   if (tokens.length === 0) {
     return "Error: empty command";
@@ -83,7 +97,7 @@ export async function runWorkspaceCommand(command: string): Promise<string> {
   const binary = tokens[0];
   if (!binary) return "Error: empty command";
   const args = tokens.slice(1);
-  const wsRoot = getWorkspaceRoot();
+  const wsRoot = getWorkspaceRoot(userId);
 
   // Minimal env: no secrets leaked to child process
   const safeEnv: NodeJS.ProcessEnv = {

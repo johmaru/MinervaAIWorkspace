@@ -2264,7 +2264,7 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolReadFile") });
           const tTool = Date.now();
           try {
-            const result = await readWorkspaceFile(parsedArgs.path);
+            const result = await readWorkspaceFile(parsedArgs.path, userId);
             toolContent = result;
           } catch (err) {
             toolContent = `Failed to read file: ${err instanceof Error ? err.message : String(err)}`;
@@ -2274,7 +2274,7 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolWriteFile") });
           const tTool = Date.now();
           try {
-            const result = await writeWorkspaceFile(parsedArgs.path, parsedArgs.content);
+            const result = await writeWorkspaceFile(parsedArgs.path, parsedArgs.content, userId);
             toolContent = result;
           } catch (err) {
             toolContent = `Failed to write file: ${err instanceof Error ? err.message : String(err)}`;
@@ -2284,7 +2284,7 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolListDir") });
           const tTool = Date.now();
           try {
-            const result = await listWorkspaceDirectory(parsedArgs.path);
+            const result = await listWorkspaceDirectory(parsedArgs.path, userId);
             toolContent = result;
           } catch (err) {
             toolContent = `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`;
@@ -2294,7 +2294,7 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolRunCommand") });
           const tTool = Date.now();
           try {
-            const result = await runWorkspaceCommand(parsedArgs.command);
+            const result = await runWorkspaceCommand(parsedArgs.command, userId);
             toolContent = result;
           } catch (err) {
             toolContent = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
