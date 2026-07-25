@@ -2059,8 +2059,14 @@ async function streamCompletion({
   // Up to MAX_TOOL_ROUNDS times. Beyond that, continue answering without tools.
   let fallbackRetried = false;
 
+  // Loop detection: track tool call signatures to detect repeated identical
+  // calls (a common GLM-5.2 hallucination pattern where it keeps calling the
+  // same tool with the same args, never making progress).
+  const seenToolCalls: Record<string, number> = {};
+  const MAX_DUPLICATE_CALLS = 2; // allow 2 identical calls, block on the 3rd
+  let useToolsThisRoundOverride = true;
   while (true) {
-    const useToolsThisRound = useTools && !fallbackRetried && rounds < MAX_TOOL_ROUNDS;
+    const useToolsThisRound = useTools && !fallbackRetried && rounds < MAX_TOOL_ROUNDS && useToolsThisRoundOverride;
 
     // TTFT timeout: only on the first round, before any delta has been received.
     // Once we fall back (or fallback is disabled), no timeout is set.
@@ -2162,6 +2168,50 @@ async function streamCompletion({
       // Execute tool calls
       const toolCalls = Object.values(toolCallAccumulator).filter((tc) => tc.name);
 
+      // Loop detection: check if any tool call is a duplicate of a previous call.
+      // If the same tool+args combo has been called MAX_DUPLICATE_CALLS times,
+      // inject a "loop detected" result instead of executing, and force the
+      // next round to proceed without tools.
+      let loopDetected = false;
+      for (const tc of toolCalls) {
+        const sig = `${tc.name}:${tc.arguments}`;
+        seenToolCalls[sig] = (seenToolCalls[sig] ?? 0) + 1;
+        if (seenToolCalls[sig] > MAX_DUPLICATE_CALLS) {
+          loopDetected = true;
+          logger.warn("chat", "tool-loop-detected", {
+            tool: tc.name,
+            round: rounds,
+            count: seenToolCalls[sig],
+          });
+        }
+      }
+      if (loopDetected) {
+        // Inject loop-detected results for ALL tool calls in this round,
+        // then force the next round to answer without tools.
+        currentMessages = [
+          ...currentMessages,
+          {
+            role: "assistant" as const,
+            content: null,
+            tool_calls: toolCalls.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.name, arguments: tc.arguments },
+            })),
+          } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam,
+          ...toolCalls.map((tc): OpenAI.Chat.Completions.ChatCompletionToolMessageParam => ({
+            role: "tool" as const,
+            tool_call_id: tc.id,
+            content: "LOOP DETECTED: You have already called this tool with the same arguments. " +
+              "Do not repeat the same call. Summarize what you found so far and answer the user.",
+          })),
+        ];
+        send?.("status", { label: t(locale, "chat.statusToolLoopDetected") });
+        // Force-disable tools for the next (final) round.
+        useToolsThisRoundOverride = false;
+        continue;
+      }
+
       // Add assistant message (including tool_calls) to history
       currentMessages = [
         ...currentMessages,
@@ -2175,7 +2225,6 @@ async function streamCompletion({
           })),
         } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam,
       ];
-
       const sources: SourceInfo[] = [];
 
       // Execute each tool call and append the result as a tool role message
