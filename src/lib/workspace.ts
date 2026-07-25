@@ -98,6 +98,25 @@ export async function listWorkspaceDirectory(relativePath: string, userId: strin
   return lines.join("\n") || "(empty directory)";
 }
 
+export type WorkspaceEntry = {
+  name: string;
+  type: "file" | "dir";
+  size: number;
+};
+
+/**
+ * List workspace directory entries as structured JSON (for KB file picker UI).
+ * Returns [{ name, type, size }] — safe to serialize for HTTP responses.
+ */
+export async function listWorkspaceEntries(relativePath: string, userId: string): Promise<WorkspaceEntry[]> {
+  const abs = resolveWorkspacePath(relativePath, userId);
+  const entries = readdirSync(abs);
+  return entries.map((name) => {
+    const st = statSync(join(abs, name));
+    return { name, type: st.isDirectory() ? "dir" as const : "file" as const, size: st.size };
+  });
+}
+
 export async function runWorkspaceCommand(command: string, userId: string): Promise<string> {
   const tokens = parseCommandTokens(command);
   if (tokens.length === 0) {

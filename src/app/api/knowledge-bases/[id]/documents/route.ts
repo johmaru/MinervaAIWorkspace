@@ -2,13 +2,16 @@ import { getSessionUser } from "@/lib/auth-guards";
 import {
   listDocuments,
   ingestDocument,
+  ingestFolder,
   deleteDocument,
 } from "@/lib/kbStore";
 import { db } from "@/db";
 import { knowledgeBases } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { scrapeUrl } from "@/lib/scraper";
-import { extractFileText } from "@/lib/fileExtract";
+import { extractFileText, extractFileTextFromPath } from "@/lib/fileExtract";
+import { resolveWorkspacePath } from "@/lib/workspace";
+import { basename } from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,9 +39,10 @@ export async function GET(req: Request, { params }: Params) {
 
 type IngestBody = {
   title?: string;
-  sourceType?: "file" | "url" | "text";
+  sourceType?: "file" | "url" | "text" | "workspace_file" | "workspace_folder";
   sourceUrl?: string;
   content?: string;
+  workspacePath?: string;
 };
 
 /**
@@ -71,7 +75,7 @@ export async function POST(req: Request, { params }: Params) {
   let title: string;
   let sourceType: "file" | "url" | "text";
   let sourceUrl: string | undefined;
-  let content: string;
+  let content: string = "";
 
   if (contentType.includes("multipart/form-data")) {
     // ── File upload path ──
@@ -101,10 +105,11 @@ export async function POST(req: Request, { params }: Params) {
     }
 
     title = body.title?.trim() ?? "";
-    sourceType = body.sourceType ?? "text";
+    const rawSourceType = body.sourceType ?? "text";
     sourceUrl = body.sourceUrl?.trim();
+    const workspacePath = body.workspacePath?.trim();
 
-    if (sourceType === "url") {
+    if (rawSourceType === "url") {
       // Server-side scrape: get full page content
       if (!sourceUrl) return new Response("sourceUrl is required for url sourceType", { status: 400 });
       const result = await scrapeUrl(sourceUrl);
@@ -112,16 +117,38 @@ export async function POST(req: Request, { params }: Params) {
       content = result.content;
       // Use scraped title if user didn't provide one
       if (!title && result.title) title = result.title;
+      sourceType = "url";
+    } else if (rawSourceType === "workspace_file") {
+      // Read a file from the user's workspace
+      if (!workspacePath) return new Response("workspacePath is required for workspace_file sourceType", { status: 400 });
+      const absPath = resolveWorkspacePath(workspacePath, user.id);
+      try {
+        const extracted = await extractFileTextFromPath(absPath, basename(absPath));
+        content = extracted.text;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Workspace file extraction failed";
+        return new Response(msg, { status: 422 });
+      }
+      if (!title) title = workspacePath;
+      sourceUrl = workspacePath; // Store path for traceability
+      sourceType = "file"; // Normalize to "file" for DB storage
+    } else if (rawSourceType === "workspace_folder") {
+      // Bulk-ingest a folder from the user's workspace
+      if (!workspacePath) return new Response("workspacePath is required for workspace_folder sourceType", { status: 400 });
+      try {
+        const result = await ingestFolder(id, workspacePath, user.id);
+        return Response.json(result, { status: 201 });
+      } catch (err) {
+        return new Response(err instanceof Error ? err.message : "Folder ingestion failed", { status: 500 });
+      }
     } else {
       content = body.content?.trim() ?? "";
+      sourceType = "text";
     }
   }
 
   if (!title) return new Response("title is required", { status: 400 });
   if (!content) return new Response("content is empty (scrape returned no text or file had no extractable text)", { status: 400 });
-  if (!["file", "url", "text"].includes(sourceType)) {
-    return new Response("sourceType must be file, url, or text", { status: 400 });
-  }
 
   try {
     const result = await ingestDocument(id, {

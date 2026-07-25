@@ -56,10 +56,14 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
   // Document ingest form
   const [docOpen, setDocOpen] = useState(false);
   const [docTitle, setDocTitle] = useState("");
-  const [docSourceType, setDocSourceType] = useState<"text" | "url" | "file">("text");
+  const [docSourceType, setDocSourceType] = useState<"text" | "url" | "file" | "workspace_file" | "workspace_folder">("text");
   const [docContent, setDocContent] = useState("");
   const [docUrl, setDocUrl] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
+  const [workspacePath, setWorkspacePath] = useState("");
+  const [workspaceEntries, setWorkspaceEntries] = useState<{ name: string; type: string; size: number }[]>([]);
+  const [workspaceBrowsing, setWorkspaceBrowsing] = useState(false);
+  const [workspaceCurrentDir, setWorkspaceCurrentDir] = useState(".");
   const [ingesting, setIngesting] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -151,20 +155,30 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
     );
   }, [selectedKbIds, onChange]);
 
+  const fetchWorkspaceEntries = useCallback(async (dir: string) => {
+    try {
+      const res = await clientFetch(`/api/workspace/list?path=${encodeURIComponent(dir)}`);
+      if (res.ok) {
+        setWorkspaceEntries(await res.json());
+        setWorkspaceCurrentDir(dir);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleIngest = useCallback(async () => {
     if (!selectedKbId) return;
     const title = docTitle.trim();
-    if (!title) return;
+    if (!title && docSourceType !== "workspace_folder") return;
     if (docSourceType === "text" && !docContent.trim()) return;
     if (docSourceType === "url" && !docUrl.trim()) return;
     if (docSourceType === "file" && !docFile) return;
+    if ((docSourceType === "workspace_file" || docSourceType === "workspace_folder") && !workspacePath.trim()) return;
 
     setIngesting(true);
     setError(null);
     try {
-      // For text: send JSON with content directly.
-      // For url: send JSON with sourceUrl only — server scrapes internally.
-      // For file: send multipart/form-data — server extracts text internally.
       let res: Response;
       if (docSourceType === "file" && docFile) {
         const formData = new FormData();
@@ -174,6 +188,17 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
         res = await clientFetch(`/api/knowledge-bases/${selectedKbId}/documents`, {
           method: "POST",
           body: formData,
+        });
+      } else if (docSourceType === "workspace_file" || docSourceType === "workspace_folder") {
+        const body: Record<string, string> = {
+          title: title || workspacePath.trim(),
+          sourceType: docSourceType,
+          workspacePath: workspacePath.trim(),
+        };
+        res = await clientFetch(`/api/knowledge-bases/${selectedKbId}/documents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
       } else {
         const body: Record<string, string> = { title, sourceType: docSourceType };
@@ -193,6 +218,7 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
         setDocContent("");
         setDocUrl("");
         setDocFile(null);
+        setWorkspacePath("");
         setDocOpen(false);
         await fetchDocuments(selectedKbId);
         await fetchKbs();
@@ -205,7 +231,7 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
     } finally {
       setIngesting(false);
     }
-  }, [selectedKbId, docTitle, docContent, docUrl, docFile, docSourceType, fetchDocuments, fetchKbs]);
+  }, [selectedKbId, docTitle, docContent, docUrl, docFile, docSourceType, workspacePath, fetchDocuments, fetchKbs]);
 
   const handleDeleteDoc = useCallback(async (docId: string) => {
     if (!selectedKbId) return;
@@ -313,19 +339,25 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
                           onChange={(e) => setDocTitle(e.target.value)}
                           className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm"
                         />
-                        <div className="flex gap-1">
-                          {(["text", "url", "file"] as const).map((st) => (
+                        <div className="flex flex-wrap gap-1">
+                          {(["text", "url", "file", "workspace_file", "workspace_folder"] as const).map((st) => (
                             <button
                               key={st}
                               type="button"
-                              onClick={() => setDocSourceType(st)}
+                              onClick={() => {
+                                setDocSourceType(st);
+                                if (st === "workspace_file" || st === "workspace_folder") {
+                                  void fetchWorkspaceEntries(".");
+                                  setWorkspaceBrowsing(true);
+                                }
+                              }}
                               className={`rounded-lg px-2 py-1 text-xs ${
                                 docSourceType === st
                                   ? "bg-foreground/15 text-foreground"
                                   : "bg-muted text-muted-foreground"
                               }`}
                             >
-                              {t(`chat.knowledgeBaseDocType${st.charAt(0).toUpperCase() + st.slice(1)}`)}
+                              {t(`chat.knowledgeBaseDocType${st === "workspace_file" ? "WsFile" : st === "workspace_folder" ? "WsFolder" : st.charAt(0).toUpperCase() + st.slice(1)}`)}
                             </button>
                           ))}
                         </div>
@@ -344,6 +376,48 @@ export function KnowledgeBaseModal({ open, onClose, selectedKbIds, onChange }: P
                             onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
                             className="w-full text-sm"
                           />
+                        ) : docSourceType === "workspace_file" || docSourceType === "workspace_folder" ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              placeholder={docSourceType === "workspace_folder" ? "フォルダパス (例: docs, src, .)" : "ファイルパス (例: data/Story.json)"}
+                              value={workspacePath}
+                              onChange={(e) => setWorkspacePath(e.target.value)}
+                              className="w-full rounded-lg border border-border bg-background px-2 py-1 text-sm"
+                            />
+                            {workspaceBrowsing && (
+                              <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background p-1 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const parent = workspaceCurrentDir.split("/").slice(0, -1).join("/") || ".";
+                                    void fetchWorkspaceEntries(parent);
+                                  }}
+                                  className="block w-full px-2 py-1 text-left hover:bg-muted rounded"
+                                >
+                                  ⬆ ..
+                                </button>
+                                {workspaceEntries.map((entry) => (
+                                  <button
+                                    key={entry.name}
+                                    type="button"
+                                    onClick={() => {
+                                      const newPath = workspaceCurrentDir === "." ? entry.name : `${workspaceCurrentDir}/${entry.name}`;
+                                      if (entry.type === "dir") {
+                                        void fetchWorkspaceEntries(newPath);
+                                      } else {
+                                        setWorkspacePath(newPath);
+                                        setWorkspaceBrowsing(false);
+                                      }
+                                    }}
+                                    className="block w-full px-2 py-1 text-left hover:bg-muted rounded"
+                                  >
+                                    {entry.type === "dir" ? "📁 " : "📄 "}{entry.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <textarea
                             placeholder={t("chat.knowledgeBaseDocContent")}
