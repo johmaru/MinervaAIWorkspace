@@ -1180,7 +1180,7 @@ function buildFinalMessages({
     ? {
         role: "system" as const,
         content:
-          "TOOL USE RULES (mandatory):\n" +
+          "TOOL USE RULES (mandatory — violating these causes user harm):\n" +
           "1. NEVER claim you checked/read/found something without an actual tool call returning that result. " +
           "If you have not called a tool, you do not know it.\n" +
           "2. If a tool returns empty output, an error, or 'not found', report that honestly. " +
@@ -1191,7 +1191,15 @@ function buildFinalMessages({
           "5. Distinguish explicitly between 'confirmed via tool output' and 'inferred'. " +
           "Use the exact phrasing: '[CONFIRMED]' vs '[INFERRED]'.\n" +
           "6. Files generated inside sandbox_run are NOT visible to the host until saved via outputFiles. " +
-          "Never tell the user a file was written unless it appears in the tool result's outputs field.",
+          "Never tell the user a file was written unless it appears in the tool result's outputs field.\n" +
+          "7. When you call list_directory or run_command, you MUST report the actual output in your response. " +
+          "Do NOT say 'I checked it' without quoting what the tool returned. " +
+          "If the tool returned a file list, paste the list. If it returned file contents, summarize with quotes.\n" +
+          "8. Do NOT ask the user 'where is the file' if you have not yet called list_directory or run_command " +
+          "to look for it yourself first. Explore with tools before asking.\n" +
+          "9. If a tool call returned results but you cannot find what you need in them, say exactly: " +
+          "'I looked at [X] using [tool] and found [Y], but could not find [Z].' " +
+          "Do NOT say 'I couldn't see it' if you haven't called the tool.",
       }
     : null;
   return [
