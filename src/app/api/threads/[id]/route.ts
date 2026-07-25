@@ -60,6 +60,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     };
   });
 
+  // Cap individual message fields to 128KB (131072 chars) to prevent
+  // browser crashes when a model hallucinates a huge output. Full content
+  // remains in the DB for debugging — only the API response is truncated.
+  const MAX_MSG_CHARS = 131072;
+  const cappedMsgs = filteredMsgs.map((m) => {
+    const cappedContent = m.content.length > MAX_MSG_CHARS
+      ? m.content.slice(0, MAX_MSG_CHARS) + "\n...(truncated, original " + m.content.length + " chars)"
+      : m.content;
+    const cappedReasoning = m.reasoning && m.reasoning.length > MAX_MSG_CHARS
+      ? m.reasoning.slice(0, MAX_MSG_CHARS) + "\n...(truncated, original " + m.reasoning.length + " chars)"
+      : m.reasoning;
+    return { ...m, content: cappedContent, reasoning: cappedReasoning };
+  });
   // Fetch attachments (only those linked to a messageId)
   const atts = await db
     .select({
@@ -72,7 +85,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     .from(attachments)
     .where(eq(attachments.threadId, id));
 
-  return Response.json({ thread, messages: filteredMsgs, attachments: atts });
+  return Response.json({ thread, messages: cappedMsgs, attachments: atts });
 }
 
 /**
