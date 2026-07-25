@@ -317,20 +317,27 @@ export type JsonlIngestResult = {
  * Bulk-ingest a workspace JSONL file into a knowledge base.
  * Each non-empty line is one JSON object → one document.
  *
+ * Performance: chunks all new documents first, then embeds ALL chunk texts in
+ * batched HTTP calls (see embedTexts), then inserts. Calling ingestDocument
+ * per line used to hammer /embed once per document (thousands of requests) and
+ * held the chat SSE open until every embed finished — clients saw "silence"
+ * while docker logs flooded with POST /embed.
+ *
  * Supported line shapes (title/content resolved in order of preference):
  * - `{ "title": "...", "content": "..." }`
  * - `{ "name": "...", "content": "..." }`  (title falls back to name)
  * - `{ "character_id": "...", "name": "...", "content": "..." }`
  * - `{ "text": "..." }` with optional title/name
- *
- * Designed for agent RAG builds (e.g. one JSONL line per character) so the
- * model does not need dozens of sequential kb_ingest tool rounds.
  */
 export async function ingestJsonlFile(
   kbId: string,
   filePath: string,
   userId: string,
-  options?: { maxLines?: number },
+  options?: {
+    maxLines?: number;
+    /** Progress callback: (docsDone, docsTotal, phase) for SSE status. */
+    onProgress?: (done: number, total: number, phase: "parse" | "embed" | "write") => void;
+  },
 ): Promise<JsonlIngestResult> {
   const abs = resolveWorkspacePath(filePath, userId);
   let raw: string;
@@ -352,11 +359,28 @@ export async function ingestJsonlFile(
     );
   }
 
-  let ingested = 0;
+  // Ownership once
+  const [owned] = await db
+    .select({ id: knowledgeBases.id })
+    .from(knowledgeBases)
+    .where(sql`${knowledgeBases.id} = ${kbId} AND ${knowledgeBases.userId} = ${userId}`);
+  if (!owned) throw new Error("Knowledge base not found or not owned by user");
+
+  type PendingDoc = {
+    lineNo: number;
+    title: string;
+    content: string;
+    contentHash: string;
+    chunks: { text: string; ordinal: number }[];
+  };
+
+  const pending: PendingDoc[] = [];
   let skipped = 0;
   let cached = 0;
   const errors: string[] = [];
   const titles: string[] = [];
+
+  options?.onProgress?.(0, lines.length, "parse");
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
@@ -384,19 +408,155 @@ export async function ingestJsonlFile(
       (typeof obj.character_id === "string" && obj.character_id.trim()) ||
       `${basename(filePath)}#${i + 1}`;
 
-    try {
-      const result = await ingestDocument(
-        kbId,
-        { title, sourceType: "file", sourceUrl: filePath, content },
-        userId,
+    const contentHash = hashContent(content);
+    const [existing] = await db
+      .select({ id: kbDocuments.id })
+      .from(kbDocuments)
+      .where(
+        sql`${kbDocuments.knowledgeBaseId} = ${kbId} AND ${kbDocuments.contentHash} = ${contentHash}`,
       );
-      if (result.cached) cached++;
-      else ingested++;
+    if (existing) {
+      cached++;
       if (titles.length < 10) titles.push(title);
-    } catch (err) {
-      errors.push(`line ${i + 1} (${title}): ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+
+    const chunks = chunkText(content);
+    if (chunks.length === 0) {
+      skipped++;
+      continue;
+    }
+
+    pending.push({ lineNo: i + 1, title, content, contentHash, chunks });
+    if (titles.length < 10) titles.push(title);
+
+    if ((i + 1) % 100 === 0) {
+      options?.onProgress?.(i + 1, lines.length, "parse");
     }
   }
+
+  if (pending.length === 0) {
+    return { ingested: 0, skipped, cached, errors, titles };
+  }
+
+  // Flatten all chunks for one batched embed pipeline
+  const flatTexts: string[] = [];
+  const flatIndex: { docIdx: number; chunkIdx: number }[] = [];
+  for (let d = 0; d < pending.length; d++) {
+    const doc = pending[d]!;
+    for (let c = 0; c < doc.chunks.length; c++) {
+      flatTexts.push(doc.chunks[c]!.text);
+      flatIndex.push({ docIdx: d, chunkIdx: c });
+    }
+  }
+
+  options?.onProgress?.(0, flatTexts.length, "embed");
+  logger.info("kbStore", "jsonl-batch-embed-start", {
+    kbId,
+    docs: pending.length,
+    chunks: flatTexts.length,
+  });
+
+  // Embed in slices so we can report progress and keep the chat SSE alive.
+  // embedTexts also batches HTTP; slicing here is for progress + smaller payloads.
+  const allVectors: number[][] = [];
+  const EMBED_SLICE = 64;
+  for (let i = 0; i < flatTexts.length; i += EMBED_SLICE) {
+    const slice = flatTexts.slice(i, i + EMBED_SLICE);
+    const vectors = await embedTexts(slice, "document");
+    for (let j = 0; j < slice.length; j++) {
+      allVectors.push(vectors[j] ?? []);
+    }
+    options?.onProgress?.(
+      Math.min(i + EMBED_SLICE, flatTexts.length),
+      flatTexts.length,
+      "embed",
+    );
+  }
+
+  logger.info("kbStore", "jsonl-batch-embed-done", {
+    kbId,
+    chunks: flatTexts.length,
+  });
+
+  // Reassemble vectors per document
+  const vectorsByDoc: number[][][] = pending.map(() => []);
+  for (let i = 0; i < flatIndex.length; i++) {
+    const { docIdx, chunkIdx } = flatIndex[i]!;
+    const arr = vectorsByDoc[docIdx]!;
+    arr[chunkIdx] = allVectors[i] ?? [];
+  }
+
+  const embedModel = process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2";
+  let ingested = 0;
+
+  options?.onProgress?.(0, pending.length, "write");
+
+  for (let d = 0; d < pending.length; d++) {
+    const doc = pending[d]!;
+    const vectors = vectorsByDoc[d]!;
+    try {
+      const [row] = await db
+        .insert(kbDocuments)
+        .values({
+          knowledgeBaseId: kbId,
+          title: doc.title,
+          sourceType: "file",
+          sourceUrl: filePath,
+          content: doc.content,
+          contentHash: doc.contentHash,
+          chunkCount: doc.chunks.length,
+        })
+        .returning();
+
+      const chunkRows = doc.chunks
+        .map((chunk, ci) => ({
+          documentId: row.id,
+          knowledgeBaseId: kbId,
+          ordinal: chunk.ordinal,
+          text: chunk.text,
+          embedding: vectors[ci] ?? [],
+          contentHash: hashContent(chunk.text),
+          model: embedModel,
+        }))
+        .filter((r) => r.embedding.length > 0);
+
+      if (chunkRows.length === 0) {
+        await db.update(kbDocuments).set({ chunkCount: 0 }).where(eq(kbDocuments.id, row.id));
+        errors.push(`line ${doc.lineNo} (${doc.title}): all chunk embeddings failed`);
+        continue;
+      }
+
+      // Insert chunks in slices to avoid huge multi-row statements
+      const SLICE = 50;
+      for (let s = 0; s < chunkRows.length; s += SLICE) {
+        await db.insert(kbChunks).values(chunkRows.slice(s, s + SLICE));
+      }
+      if (chunkRows.length !== doc.chunks.length) {
+        await db
+          .update(kbDocuments)
+          .set({ chunkCount: chunkRows.length })
+          .where(eq(kbDocuments.id, row.id));
+      }
+      ingested++;
+    } catch (err) {
+      errors.push(
+        `line ${doc.lineNo} (${doc.title}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if ((d + 1) % 50 === 0 || d + 1 === pending.length) {
+      options?.onProgress?.(d + 1, pending.length, "write");
+    }
+  }
+
+  logger.info("kbStore", "jsonl-ingest-complete", {
+    kbId,
+    ingested,
+    cached,
+    skipped,
+    errors: errors.length,
+  });
 
   return { ingested, skipped, cached, errors, titles };
 }

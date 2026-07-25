@@ -514,6 +514,16 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
+### 26. Bulk KB ingest floods /embed and chat "ends" with no reply
+
+**Symptom**: Chat goes silent; docker embedder logs endless `POST /embed 200`; stream never finishes a user-visible answer.
+
+**Cause**: `ingestJsonlFile` called `ingestDocument` per line → one HTTP `/embed` per document (thousands of sequential requests) while the chat SSE waited on the tool. Client often times out; server keeps embedding.
+
+**Fix**: Parse → chunk all → batched `embedTexts` (HTTP batch + progress slices) → write docs/chunks. SSE status `statusToolKbEmbedProgress` / `statusToolKbWriteProgress`. Log `jsonl-batch-embed-start/done`.
+
+---
+
 ### 25. KB documentCount always 0 / sparse character RAG
 
 **Symptom**: KB list badge shows `0` documents though expand shows docs; character RAG feels thin (~80 chunks/char) and lines mix speakers.

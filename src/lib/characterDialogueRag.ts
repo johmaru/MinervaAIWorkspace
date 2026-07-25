@@ -331,6 +331,7 @@ export async function buildAndIngestCharacterDialogueRag(
     verifyQuery?: string;
     /** When true (default), remove prior KBs with the same name before create. */
     replaceExisting?: boolean;
+    onProgress?: (done: number, total: number, phase: "parse" | "embed" | "write") => void;
   },
 ): Promise<BuildAndIngestCharacterDialogueResult> {
   const characterPath = args.characterPath?.trim() || "ipr-master-diff/Character.json";
@@ -366,6 +367,7 @@ export async function buildAndIngestCharacterDialogueRag(
 
   const ingest = await ingestJsonlFile(kb.id, outputPath, userId, {
     maxLines: 20_000,
+    onProgress: args.onProgress,
   });
 
   let verify: BuildAndIngestCharacterDialogueResult["verify"];

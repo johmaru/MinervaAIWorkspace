@@ -2879,6 +2879,25 @@ async function streamCompletion({
               {
                 maxLines:
                   typeof parsedArgs.max_lines === "number" ? parsedArgs.max_lines : undefined,
+                onProgress: (done, total, phase) => {
+                  // Keep SSE alive and show progress so the UI does not look hung
+                  // while thousands of chunks are embedded.
+                  if (phase === "embed") {
+                    send?.("status", {
+                      label: t(locale, "chat.statusToolKbEmbedProgress", {
+                        done: String(done),
+                        total: String(total),
+                      }),
+                    });
+                  } else if (phase === "write" && (done % 100 === 0 || done === total)) {
+                    send?.("status", {
+                      label: t(locale, "chat.statusToolKbWriteProgress", {
+                        done: String(done),
+                        total: String(total),
+                      }),
+                    });
+                  }
+                },
               },
             );
             toolContent =
@@ -2905,6 +2924,23 @@ async function streamCompletion({
               outputPath: parsedArgs.output_path,
               kbName: parsedArgs.kb_name,
               verifyQuery: parsedArgs.verify_query,
+              onProgress: (done, total, phase) => {
+                if (phase === "embed") {
+                  send?.("status", {
+                    label: t(locale, "chat.statusToolKbEmbedProgress", {
+                      done: String(done),
+                      total: String(total),
+                    }),
+                  });
+                } else if (phase === "write" && (done % 100 === 0 || done === total)) {
+                  send?.("status", {
+                    label: t(locale, "chat.statusToolKbWriteProgress", {
+                      done: String(done),
+                      total: String(total),
+                    }),
+                  });
+                }
+              },
             });
             toolContent =
               `Character dialogue RAG ready.\n` +

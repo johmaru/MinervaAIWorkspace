@@ -171,14 +171,25 @@ export async function embedText(text: string, kind?: EmbedKind): Promise<number[
 
 /**
  * Batch-embeds multiple texts.
- * transformers.js supports batch input, but processes in chunks of
- * up to 16 at a time for memory efficiency.
- * The HTTP provider delegates batching to the embedder side.
+ * transformers.js: chunks of 16 for memory.
+ * HTTP embedder: chunks of EMBED_HTTP_BATCH (default 32) so bulk KB ingest
+ * does not issue one HTTP call per document (was ~thousands of /embed hits).
  */
 export async function embedTexts(texts: string[], kind?: EmbedKind): Promise<number[][]> {
   if (texts.length === 0) return [];
   if (isHttpProvider()) {
-    return embedViaHttp(texts, kind);
+    const results: number[][] = [];
+    const rawBatch = Number(process.env.EMBED_HTTP_BATCH);
+    const BATCH = Number.isFinite(rawBatch) && rawBatch > 0 ? Math.min(128, Math.floor(rawBatch)) : 32;
+    for (let i = 0; i < texts.length; i += BATCH) {
+      const batch = texts.slice(i, i + BATCH);
+      const vectors = await embedViaHttp(batch, kind);
+      // Pad if embedder returned fewer vectors than requested
+      for (let j = 0; j < batch.length; j++) {
+        results.push(vectors[j] ?? []);
+      }
+    }
+    return results;
   }
   const results: number[][] = [];
   const BATCH = 16;
