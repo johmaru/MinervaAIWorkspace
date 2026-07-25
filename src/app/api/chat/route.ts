@@ -68,10 +68,15 @@ import {
 } from "@/lib/workspace";
 import {
   resolveBufferedToolRoundContent,
-  shouldForceFinalAnswer,
   TOOL_GROUNDING_REMINDER,
-  FINAL_ANSWER_REQUIRED_REMINDER,
 } from "@/lib/toolStreamPolicy";
+import {
+  recordToolResult,
+  shouldForceFinalAnswer,
+  buildForcedReportPrompt,
+  formatAutoUserReport,
+  type ToolTranscriptEntry,
+} from "@/lib/agentHooks";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
 import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
@@ -1226,14 +1231,11 @@ function buildFinalMessages({
           "repeated `list_directory`. Use `read_file` for known paths. " +
           "Do NOT chain shallow list_directory calls guessing folder names. " +
           "Reserve `sandbox_run` for executing code, not for file exploration.\n" +
-          "11. Multi-step agent work (RAG build, data shaping, scripts): after tools finish, you MUST " +
-          "always produce a user-visible answer in message content. Thinking is not the answer. " +
-          "If incomplete, report progress, artifacts written, and next steps — never end on thinking only.\n" +
-          "12. Bulk character dialogue RAG from game master data (Character/Message/HomeTalk JSON): " +
-          "call `rag_build_character_dialogue` ONCE — do NOT invent long Python in thinking/sandbox for this. " +
-          "That one-shot tool builds JSONL, creates the KB, bulk-ingests, and can verify with a search query. " +
-          "For other bulk RAG, write JSONL then kb_ingest_jsonl. Never call kb_ingest dozens of times. " +
-          "Sandbox (if used): read /workspace, write /out only + outputFiles.",
+          "11. Multi-step agent work: after tools finish, you MUST produce a user-visible answer in message content. " +
+          "Thinking is not the answer. Server hooks will force a final report if content is missing — still write it yourself.\n" +
+          "12. Bulk character dialogue RAG from Character/Message/HomeTalk: prefer `rag_build_character_dialogue` ONCE. " +
+          "Do not invent long Python in thinking for that task. Other bulk RAG: JSONL + kb_ingest_jsonl. " +
+          "Sandbox: read /workspace, write /out only + outputFiles.",
       }
     : null;
   return [
@@ -2239,14 +2241,16 @@ async function streamCompletion({
 
   let currentMessages = messagesForModel;
   let rounds = 0;
-  // Track user-visible answer length (thinking does not count). Used to detect
-  // "thinking-only" completions after tool work and force a final content turn.
+  // Track user-visible answer length (thinking does not count). Used by agent
+  // hooks to force a final content turn / auto-report when the model only thinks.
   let emittedContentChars = 0;
   const emitContent = (delta: string) => {
     if (!delta) return;
     emittedContentChars += delta.length;
     onDelta(delta);
   };
+  /** OMP-style tool transcript for post-tool report hooks. */
+  const toolTranscript: ToolTranscriptEntry[] = [];
 
   // Tool-use mode: when tool_calls are detected during streaming,
   // execute the tools, append results as tool role messages, and re-stream.
@@ -2958,6 +2962,12 @@ async function streamCompletion({
           toolContent = `Unknown tool: ${tc.name}`;
         }
 
+        recordToolResult(toolTranscript, {
+          name: tc.name,
+          content: toolContent,
+          round: rounds,
+        });
+
         currentMessages = [
           ...currentMessages,
           {
@@ -3012,24 +3022,26 @@ async function streamCompletion({
     }
   }
 
-  // Thinking-only / discarded-prose recovery: high-thinking models often end after
-  // tools with only reasoning_content. Force one tools-off content turn so the
-  // agent loop always leaves a user-visible answer (critical for RAG build etc.).
-  if (
-    shouldForceFinalAnswer({
-      emittedContentChars,
-      forceWhenEmpty: true,
-    })
-  ) {
-    logger.warn("chat", "force-final-answer", {
+  // ── Agent hooks (OMP-style): always leave a user-visible body ──
+  // 1) Force one tools-off LLM report when content is still empty/tiny
+  // 2) If the model still only thinks, auto-report from tool transcript
+  const hookArgs = {
+    emittedContentChars,
+    toolRounds: rounds,
+    toolResultCount: toolTranscript.length,
+  };
+
+  if (shouldForceFinalAnswer(hookArgs)) {
+    logger.warn("chat", "hook-force-final-answer", {
       model: modelToUse,
       toolRounds: rounds,
       emittedContentChars,
+      toolResults: toolTranscript.length,
     });
     send?.("status", { label: t(locale, "chat.statusFinalAnswerRequired") });
     currentMessages = [
       ...currentMessages,
-      { role: "system" as const, content: FINAL_ANSWER_REQUIRED_REMINDER },
+      { role: "system" as const, content: buildForcedReportPrompt(toolTranscript) },
     ];
     try {
       const recovery = await llm.chat.completions.create({
@@ -3041,7 +3053,7 @@ async function streamCompletion({
           : reasoningEffort
             ? { reasoning_effort: reasoningEffort }
             : {}),
-        // No tools — answer only.
+        // No tools — answer only (hook-enforced).
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
       for await (const chunk of recovery) {
         const choice = chunk.choices?.[0];
@@ -3056,21 +3068,33 @@ async function streamCompletion({
         if (contentDelta) emitContent(contentDelta);
       }
     } catch (err) {
-      logger.error("chat", "force-final-answer-failed", {
+      logger.error("chat", "hook-force-final-answer-failed", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
-  // Last resort: recovery still produced only thinking / empty content.
-  // Always leave something user-visible so the UI is not a silent thinking-only end.
-  if (emittedContentChars === 0) {
-    const fallback =
-      locale === "ja"
-        ? "回答本文を生成できませんでした（思考のみで終了）。ツール結果や途中成果（workspace のファイル・KB id）があれば再生成で続きを依頼してください。"
-        : "Could not produce a user-visible answer (thinking-only end). If tools wrote files or created a KB, ask to continue from those artifacts.";
-    emitContent(fallback);
-    logger.warn("chat", "empty-content-fallback", { model: modelToUse, toolRounds: rounds });
+  // Deterministic last resort: never end on thinking-only / empty bubble after tools
+  // (or completely empty turns). Uses updated emittedContentChars after LLM recovery.
+  if (
+    shouldForceFinalAnswer({
+      emittedContentChars,
+      toolRounds: rounds,
+      toolResultCount: toolTranscript.length,
+    })
+  ) {
+    const auto = formatAutoUserReport({
+      locale: locale === "ja" ? "ja" : "en",
+      tools: toolTranscript,
+      toolRounds: rounds,
+    });
+    emitContent(auto);
+    logger.warn("chat", "hook-auto-user-report", {
+      model: modelToUse,
+      toolRounds: rounds,
+      toolResults: toolTranscript.length,
+      reportChars: auto.length,
+    });
   }
 
   logger.info("chat", "llm-stream-end", {
@@ -3078,5 +3102,6 @@ async function streamCompletion({
     duration: Date.now() - llmStreamStartedAt,
     emittedContentChars,
     toolRounds: rounds,
+    toolResults: toolTranscript.length,
   });
 }

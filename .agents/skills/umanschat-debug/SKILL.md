@@ -513,6 +513,19 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 **Files**: `src/lib/characterDialogueRag.ts`, `STREAM_TOOLS` in `route.ts`.
 
 ---
+
+### 24. Agent hooks: always report in message body (OMP-style)
+
+**Symptom**: Tools ran (KB created, JSONL written) but the user only sees thinking — no usable body.
+
+**Fix (server hooks in `src/lib/agentHooks.ts`)**:
+1. Record every tool result in a transcript.
+2. If user-visible content is still empty/tiny after the main loop → force one tools-off LLM report with tool results embedded in the system prompt.
+3. If still empty → **deterministic auto-report** in content listing tool names + snippets (ja/en). Never leave an empty bubble.
+
+Logs: `hook-force-final-answer`, `hook-auto-user-report`.
+
+---
 ## Basic Debugging Steps
 
 1. **Reproduce the symptom** — reliably reproduce via browser or curl

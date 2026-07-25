@@ -786,6 +786,70 @@ describe("POST /api/chat — tool-round content buffering", () => {
     expect(statuses.some((s) => /回答|final|visible/i.test(s))).toBe(true);
     expect(callCount).toBeGreaterThanOrEqual(3);
   }, 30_000);
+
+  it("auto-reports tool results in content when recovery still produces no body", async () => {
+    const id = await createThread();
+    vi.mocked(probeToolSupport).mockResolvedValue({
+      supported: true,
+      checkedAt: new Date(),
+    });
+
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>) => {
+            callCount++;
+            if (params.stream) {
+              if (callCount === 1) {
+                return (async function* () {
+                  yield {
+                    choices: [
+                      {
+                        delta: {
+                          tool_calls: [
+                            {
+                              index: 0,
+                              id: "call_kb_1",
+                              function: {
+                                name: "kb_list",
+                                arguments: "{}",
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  };
+                })();
+              }
+              // Post-tool + forced recovery: thinking only, no content
+              return (async function* () {
+                yield {
+                  choices: [{ delta: { reasoning_content: "still only thinking…" } }],
+                };
+              })();
+            }
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "KB 一覧を見て報告して"));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+    const allDeltas = events
+      .filter((e) => e.event === "delta")
+      .map((e) => String(e.data.delta ?? ""))
+      .join("");
+
+    // Deterministic hook report (ja) must appear even if model never writes content
+    expect(allDeltas).toMatch(/自動報告|Auto-report/);
+    expect(allDeltas).toContain("kb_list");
+    expect(callCount).toBeGreaterThanOrEqual(2);
+  }, 30_000);
 });
 
 describe("POST /api/chat — tool-call markup leak prevention", () => {
