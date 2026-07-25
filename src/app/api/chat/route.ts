@@ -23,7 +23,15 @@ import { probeToolSupport, warmupToolProbe } from "@/lib/toolProbe";
 import type { ToolSupport } from "@/lib/toolProbe";
 import { buildSkillContext, attachUsageMessageIds, listSkills, createSkill, deleteSkill, updateSkillContent, type InjectedSkillInfo } from "@/lib/skillStore";
 import { buildMemoryContext } from "@/lib/memoryStore";
-import { buildKnowledgeContextMessage, createKnowledgeBase, listKnowledgeBases, ingestDocument, ingestFolder, searchKnowledgeBases } from "@/lib/kbStore";
+import {
+  buildKnowledgeContextMessage,
+  createKnowledgeBase,
+  listKnowledgeBases,
+  ingestDocument,
+  ingestFolder,
+  ingestJsonlFile,
+  searchKnowledgeBases,
+} from "@/lib/kbStore";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -1219,7 +1227,11 @@ function buildFinalMessages({
           "Reserve `sandbox_run` for executing code, not for file exploration.\n" +
           "11. Multi-step agent work (RAG build, data shaping, scripts): after tools finish, you MUST " +
           "always produce a user-visible answer in message content. Thinking is not the answer. " +
-          "If incomplete, report progress, artifacts written, and next steps — never end on thinking only.",
+          "If incomplete, report progress, artifacts written, and next steps — never end on thinking only.\n" +
+          "12. Bulk RAG: shape many documents with sandbox_run/write_file into one JSONL (one object per line " +
+          "with title/name + content), save via outputFiles to the workspace, then call kb_ingest_jsonl once. " +
+          "Do NOT call kb_ingest dozens of times in a loop — that will hit round limits and leave the job incomplete. " +
+          "Sandbox workspace path is /workspace (read-only); writable output is /out only.",
       }
     : null;
   return [
@@ -2055,9 +2067,8 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       name: "kb_ingest",
       description:
         "CRITICAL: You MUST call this tool to add documents to a knowledge base. Do NOT say 'ingested' or 'saved' without calling this tool — the data will NOT be stored. " +
-        "For large RAG builds: shape data with write_file/sandbox_run first (e.g. per-character JSONL), then ingest each document (or use kb_ingest_folder). " +
-        "Prefer many focused docs (one character, one story, one topic) over one giant blob so retrieval is precise. " +
-        "Returns the document id and chunk count.",
+        "For a single document only. For many docs (e.g. per-character dialogue), write a JSONL file then use kb_ingest_jsonl. " +
+        "Prefer many focused docs over one giant blob so retrieval is precise. Returns the document id and chunk count.",
       parameters: {
         type: "object",
         properties: {
@@ -2097,6 +2108,32 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           folder_path: { type: "string", description: "Path relative to workspace root (e.g. 'docs', 'src', '.'). The folder must exist in the workspace." },
         },
         required: ["knowledge_base_id", "folder_path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "kb_ingest_jsonl",
+      description:
+        "CRITICAL: Bulk-ingest a workspace JSONL file into a knowledge base (one JSON object per line → one document). " +
+        "PREFERRED for character/story RAG builds after sandbox_run writes e.g. character_dialogue.jsonl. " +
+        "Each line should include content (or text) and title or name (and optional character_id). " +
+        "Do NOT claim bulk ingest without calling this tool. Returns counts: ingested, skipped, cached, errors, sample titles.",
+      parameters: {
+        type: "object",
+        properties: {
+          knowledge_base_id: { type: "string", description: "The knowledge base id (from kb_create or kb_list)" },
+          path: {
+            type: "string",
+            description: "Workspace-relative path to the JSONL file (e.g. 'rag/character_dialogue.jsonl')",
+          },
+          max_lines: {
+            type: "number",
+            description: "Safety cap on lines to ingest (default 200, max 500)",
+          },
+        },
+        required: ["knowledge_base_id", "path"],
       },
     },
   },
@@ -2385,6 +2422,7 @@ async function streamCompletion({
           knowledge_base_id?: string; source_url?: string; folder_path?: string;
           pattern?: string; glob?: string; depth?: number; max_results?: number;
           max_matches?: number; case_insensitive?: boolean; fixed_string?: boolean;
+          max_lines?: number;
         };
         try {
           parsedArgs = JSON.parse(tc.arguments) as typeof parsedArgs;
@@ -2742,6 +2780,32 @@ async function streamCompletion({
             toolContent = `Failed to ingest folder: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "kb_ingest_folder", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_ingest_jsonl" && parsedArgs.knowledge_base_id && parsedArgs.path) {
+          send?.("status", { label: t(locale, "chat.statusToolKbIngestJsonl") });
+          const tTool = Date.now();
+          try {
+            const result = await ingestJsonlFile(
+              parsedArgs.knowledge_base_id,
+              parsedArgs.path,
+              userId,
+              {
+                maxLines:
+                  typeof parsedArgs.max_lines === "number" ? parsedArgs.max_lines : undefined,
+              },
+            );
+            toolContent =
+              `JSONL ingest complete for ${parsedArgs.path}: ` +
+              `ingested=${result.ingested}, cached=${result.cached}, skipped=${result.skipped}, errors=${result.errors.length}` +
+              (result.titles.length > 0 ? `\nSample titles: ${result.titles.join(", ")}` : "");
+            if (result.errors.length > 0) {
+              toolContent +=
+                `\nErrors:\n${result.errors.slice(0, 8).join("\n")}` +
+                (result.errors.length > 8 ? `\n... and ${result.errors.length - 8} more` : "");
+            }
+          } catch (err) {
+            toolContent = `Failed to ingest JSONL: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_ingest_jsonl", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
           // MCP tool: function name format "{serverName}__{toolName}"
           const parsed = parseMcpToolFunctionName(tc.name);
@@ -2914,6 +2978,17 @@ async function streamCompletion({
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // Last resort: recovery still produced only thinking / empty content.
+  // Always leave something user-visible so the UI is not a silent thinking-only end.
+  if (emittedContentChars === 0) {
+    const fallback =
+      locale === "ja"
+        ? "回答本文を生成できませんでした（思考のみで終了）。ツール結果や途中成果（workspace のファイル・KB id）があれば再生成で続きを依頼してください。"
+        : "Could not produce a user-visible answer (thinking-only end). If tools wrote files or created a KB, ask to continue from those artifacts.";
+    emitContent(fallback);
+    logger.warn("chat", "empty-content-fallback", { model: modelToUse, toolRounds: rounds });
   }
 
   logger.info("chat", "llm-stream-end", {

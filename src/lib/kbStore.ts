@@ -5,9 +5,9 @@ import { embedText, embedTexts, hashContent } from "@/lib/embed";
 import { chunkText } from "@/lib/chunker";
 import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join, relative, sep, extname, basename } from "node:path";
-import { getWorkspaceRoot } from "@/lib/workspace";
+import { getWorkspaceRoot, resolveWorkspacePath } from "@/lib/workspace";
 import { extractFileTextFromPath } from "@/lib/fileExtract";
 
 /**
@@ -295,6 +295,102 @@ export async function ingestFolder(
   }
 
   return { ingested, skipped, errors };
+}
+
+export type JsonlIngestResult = {
+  ingested: number;
+  skipped: number;
+  cached: number;
+  errors: string[];
+  /** Sample of ingested titles (up to 10) for the agent to report. */
+  titles: string[];
+};
+
+/**
+ * Bulk-ingest a workspace JSONL file into a knowledge base.
+ * Each non-empty line is one JSON object → one document.
+ *
+ * Supported line shapes (title/content resolved in order of preference):
+ * - `{ "title": "...", "content": "..." }`
+ * - `{ "name": "...", "content": "..." }`  (title falls back to name)
+ * - `{ "character_id": "...", "name": "...", "content": "..." }`
+ * - `{ "text": "..." }` with optional title/name
+ *
+ * Designed for agent RAG builds (e.g. one JSONL line per character) so the
+ * model does not need dozens of sequential kb_ingest tool rounds.
+ */
+export async function ingestJsonlFile(
+  kbId: string,
+  filePath: string,
+  userId: string,
+  options?: { maxLines?: number },
+): Promise<JsonlIngestResult> {
+  const abs = resolveWorkspacePath(filePath, userId);
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch {
+    throw new Error(`JSONL file not found: ${filePath}`);
+  }
+
+  const maxLines = Math.min(500, Math.max(1, options?.maxLines ?? 200));
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) {
+    return { ingested: 0, skipped: 0, cached: 0, errors: ["JSONL file is empty"], titles: [] };
+  }
+  if (lines.length > maxLines) {
+    throw new Error(
+      `JSONL has ${lines.length} lines (max ${maxLines}). Split the file or raise max_lines.`,
+    );
+  }
+
+  let ingested = 0;
+  let skipped = 0;
+  let cached = 0;
+  const errors: string[] = [];
+  const titles: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch (err) {
+      errors.push(`line ${i + 1}: invalid JSON (${err instanceof Error ? err.message : String(err)})`);
+      continue;
+    }
+
+    const content =
+      (typeof obj.content === "string" && obj.content) ||
+      (typeof obj.text === "string" && obj.text) ||
+      (typeof obj.body === "string" && obj.body) ||
+      "";
+    if (!content.trim()) {
+      skipped++;
+      continue;
+    }
+
+    const title =
+      (typeof obj.title === "string" && obj.title.trim()) ||
+      (typeof obj.name === "string" && obj.name.trim()) ||
+      (typeof obj.character_id === "string" && obj.character_id.trim()) ||
+      `${basename(filePath)}#${i + 1}`;
+
+    try {
+      const result = await ingestDocument(
+        kbId,
+        { title, sourceType: "file", sourceUrl: filePath, content },
+        userId,
+      );
+      if (result.cached) cached++;
+      else ingested++;
+      if (titles.length < 10) titles.push(title);
+    } catch (err) {
+      errors.push(`line ${i + 1} (${title}): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { ingested, skipped, cached, errors, titles };
 }
 
 // ── RAG search ──

@@ -28,8 +28,10 @@ describe("llm client", () => {
 
   it("createLLM sets timeout and maxRetries", () => {
     process.env.LLM_API_KEY = "sk-test";
+    delete process.env.LLM_TIMEOUT_MS;
     const client = createLLM();
-    expect(client.timeout).toBe(120_000);
+    // Default 5 minutes — high-thinking tool rounds exceed 2 minutes easily.
+    expect(client.timeout).toBe(300_000);
     expect(client.maxRetries).toBe(1);
   });
 

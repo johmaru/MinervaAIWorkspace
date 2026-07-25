@@ -492,6 +492,25 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 **Files**: `toolStreamPolicy.ts`, `streamCompletion` tail in `route.ts`.
 
 ---
+
+### 23. Multi-doc RAG jobs die mid-thinking (52× kb_ingest)
+
+**Symptom**: Agent explores JSON, may create a KB, plans “ingest 52 characters”, then ends mid-thinking with incomplete work. Same task works in OMP.
+
+**Causes**:
+1. Calling `kb_ingest` once per character burns `MAX_TOOL_ROUNDS` and thinking budget.
+2. LLM HTTP timeout default was 120s — high-thinking GLM streams alone can exceed it.
+3. Even with force-final-answer, the model may only *describe* remaining work instead of finishing bulk ingest.
+
+**Fix**:
+1. Prefer **`kb_ingest_jsonl`**: sandbox writes one JSONL (line = doc) under `/out` → workspace, then one bulk tool call (`ingestJsonlFile` in `kbStore.ts`).
+2. Sandbox workspace mount is **`/workspace`** (read-only); write under `/out` + `outputFiles`.
+3. `LLM_TIMEOUT_MS` default **300000** (5 min) via `llmTimeoutMs()`.
+4. If content still empty after recovery, emit a user-visible fallback sentence.
+
+**Agent recipe for ipr character RAG**: Message.json/HomeTalk.json → sandbox JSONL → `kb_create` → `kb_ingest_jsonl` → `kb_search`.
+
+---
 ## Basic Debugging Steps
 
 1. **Reproduce the symptom** — reliably reproduce via browser or curl

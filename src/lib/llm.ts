@@ -7,11 +7,21 @@ const UMANS_BASE_URL = "https://api.code.umans.ai/v1";
  * UmansAI client. Provider is fixed to UmansAI (no longer configurable).
  * Only LLM_API_KEY needs to be set in .env.
  */
+/**
+ * Per-request HTTP timeout for the LLM client.
+ * High-thinking models (e.g. GLM-5.2) + tool rounds often exceed 2 minutes on
+ * a single stream; default is 5 minutes. Override with LLM_TIMEOUT_MS.
+ */
+export function llmTimeoutMs(): number {
+  const v = Number(process.env.LLM_TIMEOUT_MS);
+  return v > 0 ? v : 300_000;
+}
+
 export function createLLM() {
   return new OpenAI({
     baseURL: UMANS_BASE_URL,
     apiKey: process.env.LLM_API_KEY ?? "missing",
-    timeout: 120_000,
+    timeout: llmTimeoutMs(),
     maxRetries: 1,
   });
 }
