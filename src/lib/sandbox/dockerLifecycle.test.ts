@@ -150,6 +150,20 @@ describe("buildDockerRunArgv", () => {
     const hasOutMount = argv.some((a) => a.includes(":/out:rw"));
     expect(hasOutMount).toBe(false);
   });
+
+  it("mounts host workspace path at /workspace:ro when WORKSPACE_HOST_PATH is set", () => {
+    const orig = process.env.WORKSPACE_HOST_PATH;
+    process.env.WORKSPACE_HOST_PATH = "/mnt/c/Users/test/workspace";
+    try {
+      const argv = buildDockerRunArgv(baseReq);
+      // Path passed through verbatim — operator sets the form dockerd expects.
+      const hasWsMount = argv.some((a, i) => a === "-v" && argv[i + 1] === "/mnt/c/Users/test/workspace:/workspace:ro");
+      expect(hasWsMount).toBe(true);
+    } finally {
+      if (orig === undefined) delete process.env.WORKSPACE_HOST_PATH;
+      else process.env.WORKSPACE_HOST_PATH = orig;
+    }
+  });
 });
 
 /**

@@ -102,16 +102,15 @@ export function buildDockerRunArgv(req: SandboxExecRequest): string[] {
     argv.push("-v", `${outVol}:/out:rw`);
   }
 
-  // Mount workspace read-only if available (enables file reading in sandbox)
-  // The workspace path is resolved the same way as getWorkspaceRoot.
+  // Mount workspace read-only if available (enables file reading in sandbox).
+  // The sandbox runs as a SIBLING container via the host Docker socket, so
+  // it cannot see /app/workspace (that path exists only inside the app
+  // container). We mount WORKSPACE_HOST_PATH verbatim — the operator must
+  // set it in the form the host dockerd understands (e.g. /mnt/c/Users/...
+  // on WSL2, /c/Users/... on Docker Desktop, or a native Linux path).
   const hostPath = process.env.WORKSPACE_HOST_PATH;
   if (hostPath) {
-    // Shared mount mode: /app/workspace is the container-side mount target
-    argv.push("-v", "/app/workspace:/workspace:ro");
-  } else {
-    // Per-user mode: mount the per-user workspace directory
-    // This requires the userId to be passed through; for now, skip if no
-    // shared mount is configured (sandbox workspace access is opt-in)
+    argv.push("-v", `${hostPath}:/workspace:ro`);
   }
 
   argv.push(req.image, ...languageCommand(req.language));
