@@ -46,10 +46,10 @@ function getDefaultTimeoutSec(): number {
   return Math.floor(raw);
 }
 
-/** Read the stdout/stderr cap env var (default 4096 chars). Invalid → 4096. */
+/** Read the stdout/stderr cap env var (default 32768 chars). Invalid → 32768. */
 function getStdoutMaxBytes(): number {
   const raw = Number(process.env.SANDBOX_STDOUT_MAX_BYTES);
-  if (!Number.isFinite(raw) || raw < 1) return 4096;
+  if (!Number.isFinite(raw) || raw < 1) return 32768;
   return Math.floor(raw);
 }
 

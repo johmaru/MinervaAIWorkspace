@@ -375,6 +375,7 @@ export async function POST(req: Request) {
           skillMessage,
           memoryMessage,
           knowledgeMessage,
+          useTools: false,
         });
         if (thread.responseMode === "council") {
           send("status", { label: t(locale, "chat.statusCouncilPreparing") });
@@ -507,6 +508,7 @@ export async function POST(req: Request) {
                   skillMessage,
                   memoryMessage,
                   knowledgeMessage,
+                  useTools: true,
                 })
               : finalMessages;
             await streamCompletion({
@@ -1161,6 +1163,7 @@ function buildFinalMessages({
   skillMessage,
   memoryMessage,
   knowledgeMessage,
+  useTools,
 }: {
   systemContent?: string | null;
   personalizationContent?: string | null;
@@ -1171,11 +1174,31 @@ function buildFinalMessages({
   skillMessage?: { role: "system"; content: string } | null;
   memoryMessage?: { role: "system"; content: string } | null;
   knowledgeMessage?: { role: "system"; content: string } | null;
+  useTools?: boolean;
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const toolGuardMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam | null = useTools
+    ? {
+        role: "system" as const,
+        content:
+          "TOOL USE RULES (mandatory):\n" +
+          "1. NEVER claim you checked/read/found something without an actual tool call returning that result. " +
+          "If you have not called a tool, you do not know it.\n" +
+          "2. If a tool returns empty output, an error, or 'not found', report that honestly. " +
+          "Do NOT fabricate plausible-sounding content to fill the gap.\n" +
+          "3. Do not repeat the same exploration more than twice. If two tool calls returned nothing, " +
+          "state what you could not find and ask the user for guidance.\n" +
+          "4. When a tool result is truncated, say 'output was truncated' — do not guess the missing part.\n" +
+          "5. Distinguish explicitly between 'confirmed via tool output' and 'inferred'. " +
+          "Use the exact phrasing: '[CONFIRMED]' vs '[INFERRED]'.\n" +
+          "6. Files generated inside sandbox_run are NOT visible to the host until saved via outputFiles. " +
+          "Never tell the user a file was written unless it appears in the tool result's outputs field.",
+      }
+    : null;
   return [
     { role: "system" as const, content: getEnvContext() },
     ...(personalizationContent ? [{ role: "system" as const, content: personalizationContent }] : []),
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
+    ...(toolGuardMessage ? [toolGuardMessage] : []),
     ...(skillMessage ? [skillMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...(knowledgeMessage ? [knowledgeMessage] : []),
