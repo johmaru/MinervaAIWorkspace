@@ -22,6 +22,20 @@ export const TOOL_GROUNDING_REMINDER =
   "in tool output. Prefer short quotes from tool results when stating facts.";
 
 /**
+ * Forced when the model finishes tool rounds (or the whole turn) with only
+ * reasoning_content and zero user-visible content — common with high-thinking
+ * GLM when intermediate prose was discarded.
+ */
+export const FINAL_ANSWER_REQUIRED_REMINDER =
+  "FINAL ANSWER REQUIRED: You produced no user-visible message content. " +
+  "The user cannot read your thinking block as the answer. " +
+  "Write the complete reply NOW in the assistant message content (not only in thinking). " +
+  "Do not call tools. Base claims on tool results already in this conversation. " +
+  "If the task is multi-step and incomplete, report: (1) what you confirmed, (2) files written " +
+  "or KB actions taken, (3) what is still missing, (4) the next concrete step. " +
+  "Never invent JSON fields or file contents that tools did not return.";
+
+/**
  * Decide what user-visible content to emit after a streamed completion ends.
  *
  * @returns text to emit via onDelta, or null if nothing should be shown
@@ -45,4 +59,14 @@ export function resolveBufferedToolRoundContent(args: {
   }
   const text = args.bufferedContent;
   return text.length > 0 ? text : null;
+}
+
+/** Whether to run one tools-off recovery completion after the main loop. */
+export function shouldForceFinalAnswer(args: {
+  /** Characters already emitted to the user via onDelta. */
+  emittedContentChars: number;
+  /** True if at least one tool round ran (rounds > 0) or we still have empty content. */
+  forceWhenEmpty: boolean;
+}): boolean {
+  return args.forceWhenEmpty && args.emittedContentChars === 0;
 }

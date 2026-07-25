@@ -57,7 +57,12 @@ import {
   searchWorkspaceFiles,
   grepWorkspaceContent,
 } from "@/lib/workspace";
-import { resolveBufferedToolRoundContent, TOOL_GROUNDING_REMINDER } from "@/lib/toolStreamPolicy";
+import {
+  resolveBufferedToolRoundContent,
+  shouldForceFinalAnswer,
+  TOOL_GROUNDING_REMINDER,
+  FINAL_ANSWER_REQUIRED_REMINDER,
+} from "@/lib/toolStreamPolicy";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
 import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
@@ -1211,7 +1216,10 @@ function buildFinalMessages({
           "10. Codebase exploration: prefer `search_files` (glob) and `grep_content` (text/regex) over " +
           "repeated `list_directory`. Use `read_file` for known paths. " +
           "Do NOT chain shallow list_directory calls guessing folder names. " +
-          "Reserve `sandbox_run` for executing code, not for file exploration.",
+          "Reserve `sandbox_run` for executing code, not for file exploration.\n" +
+          "11. Multi-step agent work (RAG build, data shaping, scripts): after tools finish, you MUST " +
+          "always produce a user-visible answer in message content. Thinking is not the answer. " +
+          "If incomplete, report progress, artifacts written, and next steps — never end on thinking only.",
       }
     : null;
   return [
@@ -2045,7 +2053,11 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_ingest",
-      description: "CRITICAL: You MUST call this tool to add documents to a knowledge base. Do NOT say 'ingested' or 'saved' without calling this tool — the data will NOT be stored. Call this when the user asks to add/save/store text or documents to a KB. Returns the document id and chunk count.",
+      description:
+        "CRITICAL: You MUST call this tool to add documents to a knowledge base. Do NOT say 'ingested' or 'saved' without calling this tool — the data will NOT be stored. " +
+        "For large RAG builds: shape data with write_file/sandbox_run first (e.g. per-character JSONL), then ingest each document (or use kb_ingest_folder). " +
+        "Prefer many focused docs (one character, one story, one topic) over one giant blob so retrieval is precise. " +
+        "Returns the document id and chunk count.",
       parameters: {
         type: "object",
         properties: {
@@ -2090,7 +2102,8 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
-const MAX_TOOL_ROUNDS = 8;
+/** Enough rounds for multi-step agent work (explore → script → run → kb_ingest → verify). */
+const MAX_TOOL_ROUNDS = 12;
 
 async function streamCompletion({
   llm,
@@ -2146,6 +2159,14 @@ async function streamCompletion({
 
   let currentMessages = messagesForModel;
   let rounds = 0;
+  // Track user-visible answer length (thinking does not count). Used to detect
+  // "thinking-only" completions after tool work and force a final content turn.
+  let emittedContentChars = 0;
+  const emitContent = (delta: string) => {
+    if (!delta) return;
+    emittedContentChars += delta.length;
+    onDelta(delta);
+  };
 
   // Tool-use mode: when tool_calls are detected during streaming,
   // execute the tools, append results as tool role messages, and re-stream.
@@ -2231,7 +2252,7 @@ async function streamCompletion({
           if (useToolsThisRound) {
             contentBuffer += contentDelta;
           } else {
-            onDelta(contentDelta);
+            emitContent(contentDelta);
           }
         }
 
@@ -2273,7 +2294,7 @@ async function streamCompletion({
         bufferedContent: contentBuffer,
       });
       if (toEmit) {
-        onDelta(toEmit);
+        emitContent(toEmit);
       } else if (useToolsThisRound && hadToolCalls && contentBuffer.length > 0) {
         logger.info("chat", "discarded-tool-round-content", {
           chars: contentBuffer.length,
@@ -2844,5 +2865,61 @@ async function streamCompletion({
       throw err;
     }
   }
-  logger.info("chat", "llm-stream-end", { model: modelToUse, duration: Date.now() - llmStreamStartedAt });
+
+  // Thinking-only / discarded-prose recovery: high-thinking models often end after
+  // tools with only reasoning_content. Force one tools-off content turn so the
+  // agent loop always leaves a user-visible answer (critical for RAG build etc.).
+  if (
+    shouldForceFinalAnswer({
+      emittedContentChars,
+      forceWhenEmpty: true,
+    })
+  ) {
+    logger.warn("chat", "force-final-answer", {
+      model: modelToUse,
+      toolRounds: rounds,
+      emittedContentChars,
+    });
+    send?.("status", { label: t(locale, "chat.statusFinalAnswerRequired") });
+    currentMessages = [
+      ...currentMessages,
+      { role: "system" as const, content: FINAL_ANSWER_REQUIRED_REMINDER },
+    ];
+    try {
+      const recovery = await llm.chat.completions.create({
+        model: modelToUse,
+        messages: currentMessages,
+        stream: true,
+        ...(reasoningEffort === "none"
+          ? disableReasoningParams
+          : reasoningEffort
+            ? { reasoning_effort: reasoningEffort }
+            : {}),
+        // No tools — answer only.
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+      for await (const chunk of recovery) {
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta as Record<string, unknown> | undefined;
+        const reasoningDelta =
+          delta && typeof delta === "object" && "reasoning_content" in delta && typeof delta.reasoning_content === "string"
+            ? delta.reasoning_content
+            : undefined;
+        if (reasoningDelta) onReasoning(reasoningDelta);
+        const contentDelta = choice.delta?.content;
+        if (contentDelta) emitContent(contentDelta);
+      }
+    } catch (err) {
+      logger.error("chat", "force-final-answer-failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  logger.info("chat", "llm-stream-end", {
+    model: modelToUse,
+    duration: Date.now() - llmStreamStartedAt,
+    emittedContentChars,
+    toolRounds: rounds,
+  });
 }

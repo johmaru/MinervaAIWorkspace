@@ -478,6 +478,20 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 **Files**: `src/lib/toolStreamPolicy.ts`, `src/app/api/chat/route.ts` (`streamCompletion`).
 
 ---
+
+### 22. Thinking-only end after tools (no user-visible answer)
+
+**Symptom**: Long `thinking` stream, tools may have run, then `done` with empty assistant bubble. User says “thinking で終わった”. Common on GLM with high reasoning after tool-round content buffering.
+
+**Cause**: Model puts the entire plan/summary in `reasoning_content` and emits zero `content`. Discarding tool-round prose is correct, but without a recovery turn the UI stays empty.
+
+**Fix**: After the main tool loop, if `emittedContentChars === 0`, inject `FINAL_ANSWER_REQUIRED_REMINDER` and run one **tools-off** stream (`force-final-answer` log). Status: `chat.statusFinalAnswerRequired`. Also raised `MAX_TOOL_ROUNDS` to 12 for multi-step agent work (explore → script → kb_ingest → verify).
+
+**Agent/RAG product note**: Workspace `ipr-master-diff` has dialogue-like data in `Message.json` / `HomeTalk.json` (characterId + text), not in `StoryPart.json` (no `text` field). Full ADV Line[] scripts are usually external (`adv_{id}.txt.json`), not in the master-diff dump.
+
+**Files**: `toolStreamPolicy.ts`, `streamCompletion` tail in `route.ts`.
+
+---
 ## Basic Debugging Steps
 
 1. **Reproduce the symptom** — reliably reproduce via browser or curl

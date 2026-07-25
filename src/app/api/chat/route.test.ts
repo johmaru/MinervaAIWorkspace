@@ -704,6 +704,88 @@ describe("POST /api/chat — tool-round content buffering", () => {
     // Tool round + answer round at minimum
     expect(callCount).toBeGreaterThanOrEqual(2);
   }, 30_000);
+
+  it("forces a final content turn when the model only thinks after tools", async () => {
+    const id = await createThread();
+    vi.mocked(probeToolSupport).mockResolvedValue({
+      supported: true,
+      checkedAt: new Date(),
+    });
+
+    const recovered = "Recovered user-facing answer after tools.";
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>) => {
+            callCount++;
+            if (params.stream) {
+              if (callCount === 1) {
+                return (async function* () {
+                  yield {
+                    choices: [
+                      {
+                        delta: {
+                          reasoning_content: "planning to list workspace…",
+                          tool_calls: [
+                            {
+                              index: 0,
+                              id: "call_list_2",
+                              function: {
+                                name: "list_directory",
+                                arguments: JSON.stringify({ path: "." }),
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  };
+                })();
+              }
+              if (callCount === 2) {
+                // Post-tool round: thinking only, no content (the hang pattern).
+                return (async function* () {
+                  yield {
+                    choices: [
+                      {
+                        delta: {
+                          reasoning_content:
+                            "I will shape RAG next but I am only thinking…",
+                        },
+                      },
+                    ],
+                  };
+                })();
+              }
+              // Forced recovery round (no tools in request).
+              expect(params.tools).toBeUndefined();
+              return (async function* () {
+                yield { choices: [{ delta: { content: recovered } }] };
+              })();
+            }
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "ipr-master-diff をキャラ別RAGにしたい"));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+    const allDeltas = events
+      .filter((e) => e.event === "delta")
+      .map((e) => String(e.data.delta ?? ""))
+      .join("");
+    const statuses = events
+      .filter((e) => e.event === "status")
+      .map((e) => String(e.data.label ?? ""));
+
+    expect(allDeltas).toContain(recovered);
+    expect(statuses.some((s) => /回答|final|visible/i.test(s))).toBe(true);
+    expect(callCount).toBeGreaterThanOrEqual(3);
+  }, 30_000);
 });
 
 describe("POST /api/chat — tool-call markup leak prevention", () => {
