@@ -45,11 +45,25 @@ export type SandboxErrorCode =
  * - `inputRef`: reserved for Tier >= 2 attached-file analysis. Any value is
  *   rejected in v0.4 (no silent Tier 1 downgrade — see spec §7.2).
  */
+export type SandboxOutputFile = {
+  /** Container path the sandbox code writes to. Must start with /out/, no .. segments. */
+  containerPath: string;
+  /** Workspace-relative destination. Must not start with /, no .. segments. */
+  workspacePath: string;
+};
+
 export type SandboxRunArgs = {
   preset: SandboxPresetName;
   language?: "python" | "javascript" | "typescript" | "bash";
   code?: string;
   inputRef?: string;
+  /**
+   * Files the sandbox code will produce under /out/ that should be recovered
+   * and written into the user's workspace. The orchestrator writes each file
+   * to its workspacePath; only the list of saved paths is returned to the LLM
+   * (never raw contents).
+   */
+  outputFiles?: SandboxOutputFile[];
 };
 
 /**
@@ -67,8 +81,13 @@ export type SandboxRunSuccess = {
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
   analysis?: Record<string, unknown>;
+  /**
+   * Workspace-relative paths of output files recovered from the sandbox and
+   * written to the user's workspace. Empty when no outputFiles were requested.
+   * Raw contents are never exposed to the LLM.
+   */
+  outputs?: string[];
 };
-
 /** Failed sandbox run result with a stable error code. */
 export type SandboxRunFailure = {
   ok: false;

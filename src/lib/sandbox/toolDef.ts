@@ -34,6 +34,24 @@ export function getSandboxToolDefinition(): OpenAI.Chat.Completions.ChatCompleti
             type: "string",
             description: "Inline source code to execute. Required for code_run.",
           },
+          outputFiles: {
+            type: "array",
+            description:
+              "Files the sandbox code will produce that should be saved to the user's workspace. " +
+              "Each entry maps a container path (must start with '/out/', no '..') to a workspace-relative destination (no leading '/', no '..'). " +
+              "The sandbox mounts a writable volume at /out (the only writable path in the container). " +
+              "After execution, each file is recovered and written to its workspacePath. " +
+              "Only saved paths are returned — file contents never appear in the tool result. " +
+              "Example: [{\"containerPath\":\"/out/ai_rag.jsonl\",\"workspacePath\":\"ai_rag.jsonl\"}]",
+            items: {
+              type: "object",
+              properties: {
+                containerPath: { type: "string", description: "Path inside the container where the code writes the file. Must start with /out/." },
+                workspacePath: { type: "string", description: "Workspace-relative destination path. No leading /, no .. segments." },
+              },
+              required: ["containerPath", "workspacePath"],
+            },
+          },
         },
         required: ["preset", "code"],
       },

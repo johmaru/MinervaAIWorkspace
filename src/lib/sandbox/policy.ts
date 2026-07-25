@@ -34,6 +34,8 @@ export type PolicyOk = {
   tier: 1;
   language: SupportedLanguage;
   code: string; // trimmed
+  /** Validated output file mappings (containerPath → workspacePath). */
+  outputFiles?: Array<{ containerPath: string; workspacePath: string }>;
 };
 
 /** Policy rejection — carries a fully-formed failure result. */
@@ -57,7 +59,7 @@ export function evaluateSandboxPolicy(args: unknown): PolicyOutcome {
   if (args === null || typeof args !== "object" || Array.isArray(args)) {
     return { ok: false, result: sandboxFail("invalid_args", "args must be an object") };
   }
-  const a = args as { preset?: unknown; language?: unknown; code?: unknown; inputRef?: unknown };
+  const a = args as { preset?: unknown; language?: unknown; code?: unknown; inputRef?: unknown; outputFiles?: unknown };
 
   // 2. Preset presence + type
   if (a.preset === undefined || a.preset === null) {
@@ -127,12 +129,51 @@ export function evaluateSandboxPolicy(args: unknown): PolicyOutcome {
     language = a.language as SupportedLanguage;
   }
 
-  // 7. Success
+  // 7. outputFiles (optional): validate each entry's paths.
+  let outputFiles: Array<{ containerPath: string; workspacePath: string }> | undefined;
+  if (a.outputFiles !== undefined && a.outputFiles !== null) {
+    if (!Array.isArray(a.outputFiles)) {
+      return { ok: false, result: sandboxFail("invalid_args", "outputFiles must be an array") };
+    }
+    outputFiles = [];
+    for (const entry of a.outputFiles) {
+      if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+        return { ok: false, result: sandboxFail("invalid_args", "outputFiles entries must be objects") };
+      }
+      const e = entry as { containerPath?: unknown; workspacePath?: unknown };
+      if (typeof e.containerPath !== "string" || typeof e.workspacePath !== "string") {
+        return { ok: false, result: sandboxFail("invalid_args", "outputFiles entries must have containerPath and workspacePath strings") };
+      }
+      const containerPath = e.containerPath.trim();
+      const workspacePath = e.workspacePath.trim();
+      // containerPath must start with /out/ and contain no .. segments
+      if (!containerPath.startsWith("/out/")) {
+        return { ok: false, result: sandboxFail("invalid_args", `containerPath must start with /out/ (got: ${containerPath})`) };
+      }
+      if (containerPath.includes("..")) {
+        return { ok: false, result: sandboxFail("invalid_args", `containerPath must not contain .. (got: ${containerPath})`) };
+      }
+      // workspacePath must be relative (no leading /) and contain no .. segments
+      if (workspacePath.startsWith("/")) {
+        return { ok: false, result: sandboxFail("invalid_args", `workspacePath must be relative (got: ${workspacePath})`) };
+      }
+      if (workspacePath.includes("..")) {
+        return { ok: false, result: sandboxFail("invalid_args", `workspacePath must not contain .. (got: ${workspacePath})`) };
+      }
+      if (workspacePath.length === 0) {
+        return { ok: false, result: sandboxFail("invalid_args", "workspacePath must not be empty") };
+      }
+      outputFiles.push({ containerPath, workspacePath });
+    }
+  }
+
+  // 8. Success
   return {
     ok: true,
     preset: "code_run",
     tier: 1,
     language,
     code,
+    outputFiles,
   };
 }

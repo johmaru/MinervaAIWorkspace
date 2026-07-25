@@ -36,6 +36,7 @@ import {
 import { sanitizeToolOutput } from "./sanitize";
 import { DockerLifecycle } from "./dockerLifecycle";
 import { sandboxFail, type SandboxRunResult } from "./types";
+import { writeWorkspaceFile } from "@/lib/workspace";
 import { getSandboxToolDefinition } from "./toolDef";
 
 /** Read the default timeout env var (default 30s). Invalid → 30. */
@@ -63,7 +64,7 @@ function newRunId(): string {
  *
  * @param args Raw tool-call arguments (unknown — policy gate validates).
  */
-export async function runSandbox(args: unknown): Promise<SandboxRunResult> {
+export async function runSandbox(args: unknown, userId: string): Promise<SandboxRunResult> {
   const startedAt = Date.now();
 
   // 1. Feature gate: if forced off, the tool should not have been offered.
@@ -109,19 +110,44 @@ export async function runSandbox(args: unknown): Promise<SandboxRunResult> {
         code: policy.code,
         timeoutSec,
         memLimitMb: 256,
+        outputFiles: policy.outputFiles,
       });
 
       // 7. Sanitize output (Tier 1 light).
       const out = sanitizeToolOutput(exec.stdout, maxChars);
       const err = sanitizeToolOutput(exec.stderr, maxChars);
 
+      // 8. Write recovered output files to the user's workspace.
+      //    Raw contents never go to the LLM — only saved workspace paths.
+      //    Run this BEFORE the timeout/exitCode early-returns: the lifecycle
+      //    recovers files from the output volume even on timeout, so a
+      //    partially-written file (e.g. a long JSONL generated before the
+      //    wall-clock fired) should still be saved rather than discarded.
+      let savedPaths: string[] = [];
+      if (exec.outputs && policy.outputFiles) {
+        for (const { containerPath, workspacePath } of policy.outputFiles) {
+          const content = exec.outputs[containerPath];
+          if (content !== undefined && content.length > 0) {
+            try {
+              await writeWorkspaceFile(workspacePath, content, userId);
+              savedPaths.push(workspacePath);
+            } catch (writeErr) {
+              err.text += `\n[failed to write ${workspacePath}: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}]`;
+            }
+          }
+        }
+      }
+
       // Map timeout → ok:false, code:timeout (clearer tool semantics).
+      // Surface saved paths in stderr so the LLM can tell the user which
+      // files were recovered before the wall-clock fired.
       if (exec.timedOut) {
+        const savedNote = savedPaths.length > 0 ? `. Saved files before timeout: ${savedPaths.join(", ")}` : "";
         return {
           ok: false,
           error: {
             code: "timeout",
-            message: `sandbox run exceeded ${timeoutSec}s timeout`,
+            message: `sandbox run exceeded ${timeoutSec}s timeout${savedNote}`,
           },
         };
       }
@@ -141,6 +167,7 @@ export async function runSandbox(args: unknown): Promise<SandboxRunResult> {
         stderr: err.text,
         stdoutTruncated: out.truncated,
         stderrTruncated: err.truncated,
+        outputs: savedPaths,
       };
     } catch (err) {
       return sandboxFail(

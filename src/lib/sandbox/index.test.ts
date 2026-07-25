@@ -97,26 +97,26 @@ afterEach(() => {
 
 describe("runSandbox — policy gate failures (no Docker touched)", () => {
   it("rejects invalid args with invalid_args", async () => {
-    const r = await runSandbox(null);
+    const r = await runSandbox(null, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("invalid_args");
     expect(sandboxState.capturedArgv).toBeNull();
   });
 
   it("rejects tier_forbidden preset (file_inspect)", async () => {
-    const r = await runSandbox({ preset: "file_inspect" });
+    const r = await runSandbox({ preset: "file_inspect" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("tier_forbidden");
   });
 
   it("rejects inputRef with tier_forbidden", async () => {
-    const r = await runSandbox({ preset: "code_run", code: "print(1)", inputRef: "x.exe" });
+    const r = await runSandbox({ preset: "code_run", code: "print(1)", inputRef: "x.exe" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("tier_forbidden");
   });
 
   it("rejects unsupported language with invalid_args", async () => {
-    const r = await runSandbox({ preset: "code_run", language: "rust", code: "fn main(){}" });
+    const r = await runSandbox({ preset: "code_run", language: "rust", code: "fn main(){}" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("invalid_args");
   });
@@ -125,21 +125,21 @@ describe("runSandbox — policy gate failures (no Docker touched)", () => {
 describe("runSandbox — feature gate / Docker failures", () => {
   it("returns docker_unavailable when SANDBOX_ENABLED=false", async () => {
     sandboxState.forcedOff = true;
-    const r = await runSandbox({ preset: "code_run", code: "print(1)" });
+    const r = await runSandbox({ preset: "code_run", code: "print(1)" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("docker_unavailable");
   });
 
   it("returns docker_unavailable when daemon not reachable", async () => {
     sandboxState.dockerAvailable = false;
-    const r = await runSandbox({ preset: "code_run", code: "print(1)" });
+    const r = await runSandbox({ preset: "code_run", code: "print(1)" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("docker_unavailable");
   });
 
   it("returns image_missing when image not present", async () => {
     sandboxState.imagePresent = false;
-    const r = await runSandbox({ preset: "code_run", code: "print(1)" });
+    const r = await runSandbox({ preset: "code_run", code: "print(1)" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("image_missing");
   });
@@ -150,7 +150,7 @@ describe("runSandbox — admission failures", () => {
     const os = await import("node:os");
     vi.mocked(os.freemem).mockReturnValue(0);
     vi.mocked(os.totalmem).mockReturnValue(16 * 1024 ** 3);
-    const r = await runSandbox({ preset: "code_run", code: "print(1)" });
+    const r = await runSandbox({ preset: "code_run", code: "print(1)" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("insufficient_host_memory");
     vi.mocked(os.freemem).mockReturnValue(8 * 1024 ** 3);
@@ -160,7 +160,7 @@ describe("runSandbox — admission failures", () => {
 describe("runSandbox — success path", () => {
   it("runs python code and returns sanitized stdout", async () => {
     sandboxState.runResult = { exitCode: 0, stdout: "42\n", stderr: "" };
-    const r = await runSandbox({ preset: "code_run", language: "python", code: "print(42)" });
+    const r = await runSandbox({ preset: "code_run", language: "python", code: "print(42)" }, "test-user-id");
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.preset).toBe("code_run");
@@ -179,7 +179,7 @@ describe("runSandbox — success path", () => {
 
   it("runs javascript code and returns sanitized stdout", async () => {
     sandboxState.runResult = { exitCode: 0, stdout: "99\n", stderr: "" };
-    const r = await runSandbox({ preset: "code_run", language: "javascript", code: "console.log(99)" });
+    const r = await runSandbox({ preset: "code_run", language: "javascript", code: "console.log(99)" }, "test-user-id");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.stdout).toBe("99\n");
     expect(sandboxState.capturedArgv).toContain("node");
@@ -192,7 +192,7 @@ describe("runSandbox — success path", () => {
       stdout: "",
       stderr: "Traceback (most recent call last):\n  NameError: name 'x' is not defined",
     };
-    const r = await runSandbox({ preset: "code_run", code: "print(x)" });
+    const r = await runSandbox({ preset: "code_run", code: "print(x)" }, "test-user-id");
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.exitCode).toBe(1);
@@ -203,7 +203,7 @@ describe("runSandbox — success path", () => {
   it("truncates stdout exceeding the cap", async () => {
     vi.stubEnv("SANDBOX_STDOUT_MAX_BYTES", "10");
     sandboxState.runResult = { exitCode: 0, stdout: "0123456789ABCDEF", stderr: "" };
-    const r = await runSandbox({ preset: "code_run", code: "print('long')" });
+    const r = await runSandbox({ preset: "code_run", code: "print('long')" }, "test-user-id");
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.stdout).toBe("0123456789");
@@ -213,7 +213,7 @@ describe("runSandbox — success path", () => {
 
   it("strips control chars from stdout", async () => {
     sandboxState.runResult = { exitCode: 0, stdout: "ok\x00done", stderr: "" };
-    const r = await runSandbox({ preset: "code_run", code: "print('x')" });
+    const r = await runSandbox({ preset: "code_run", code: "print('x')" }, "test-user-id");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.stdout).toBe("okdone");
   });
@@ -223,7 +223,7 @@ describe("runSandbox — timeout", () => {
   it("returns timeout error code when container times out", async () => {
     vi.stubEnv("SANDBOX_DEFAULT_TIMEOUT_SEC", "1");
     sandboxState.shouldHang = true;
-    const r = await runSandbox({ preset: "code_run", code: "while True: pass" });
+    const r = await runSandbox({ preset: "code_run", code: "while True: pass" }, "test-user-id");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("timeout");
   });
@@ -232,14 +232,14 @@ describe("runSandbox — timeout", () => {
 describe("runSandbox — volume cleanup", () => {
   it("creates and removes the staging volume on success", async () => {
     sandboxState.runResult = { exitCode: 0, stdout: "ok", stderr: "" };
-    await runSandbox({ preset: "code_run", code: "print(1)" });
+    await runSandbox({ preset: "code_run", code: "print(1)" }, "test-user-id");
     expect(sandboxState.volumeCreated).toBe(true);
     expect(sandboxState.volumeRemoved).toBe(true);
   });
 
   it("removes the volume even on container failure", async () => {
     sandboxState.runResult = { exitCode: 1, stdout: "", stderr: "error" };
-    await runSandbox({ preset: "code_run", code: "print(x)" });
+    await runSandbox({ preset: "code_run", code: "print(x)" }, "test-user-id");
     expect(sandboxState.volumeCreated).toBe(true);
     expect(sandboxState.volumeRemoved).toBe(true);
   });
@@ -247,7 +247,7 @@ describe("runSandbox — volume cleanup", () => {
   it("removes the volume even on timeout", async () => {
     vi.stubEnv("SANDBOX_DEFAULT_TIMEOUT_SEC", "1");
     sandboxState.shouldHang = true;
-    await runSandbox({ preset: "code_run", code: "while True: pass" });
+    await runSandbox({ preset: "code_run", code: "while True: pass" }, "test-user-id");
     expect(sandboxState.volumeCreated).toBe(true);
     expect(sandboxState.volumeRemoved).toBe(true);
   });

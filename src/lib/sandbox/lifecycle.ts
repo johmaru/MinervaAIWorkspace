@@ -21,6 +21,15 @@ export type SandboxExecRequest = {
   timeoutSec: number;
   /** Container memory cap in MB (e.g. 256). */
   memLimitMb?: number;
+  /**
+   * Output files to recover from the container after execution.
+   * Each entry maps a container path (must start with /out/, no ..) to a
+   * workspace-relative destination (must not start with /, no ..).
+   * The lifecycle layer creates a writable output volume mounted at /out,
+   * then after the run reads each containerPath back and returns its
+   * contents in `SandboxExecSuccess.outputs`.
+   */
+  outputFiles?: Array<{ containerPath: string; workspacePath: string }>;
 };
 
 /** Result of a sandbox execution. Always returns (never throws). */
@@ -30,6 +39,13 @@ export type SandboxExecSuccess = {
   stderr: string;
   /** True if the container was killed for exceeding the timeout. */
   timedOut: boolean;
+  /**
+   * Recovered output files, keyed by container path.
+   * Only populated when `outputFiles` was set on the request.
+   * Contents are raw (uncapped) — the orchestrator writes them to the
+   * workspace and never forwards raw contents to the LLM.
+   */
+  outputs?: Record<string, string>;
 };
 
 /**

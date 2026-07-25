@@ -2306,7 +2306,7 @@ async function streamCompletion({
           try {
             // runSandbox accepts unknown and validates via the policy gate.
             // Pass the full parsed args; never pass host paths through.
-            const result = await runSandbox(parsedArgs);
+            const result = await runSandbox(parsedArgs, userId);
             // Mark the output as untrusted so the model treats stdout/stderr
             // as data, not instructions (Tier 1 light sanitize, spec §7.1).
             toolContent = "[sandbox untrusted output]\n" + JSON.stringify(result);

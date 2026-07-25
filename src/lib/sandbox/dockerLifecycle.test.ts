@@ -5,6 +5,10 @@ import {
   buildWriteCodeArgv,
   buildVolumeCreateArgv,
   buildVolumeRmArgv,
+  buildOutputVolumeCreateArgv,
+  buildOutputVolumeRmArgv,
+  buildOutputVolumeInitArgv,
+  buildOutputRecoveryArgv,
   DockerLifecycle,
 } from "./dockerLifecycle";
 import type { SandboxExecRequest } from "./lifecycle";
@@ -130,13 +134,31 @@ describe("buildDockerRunArgv", () => {
     const argv = buildDockerRunArgv({ ...baseReq, image: "custom:v2" });
     expect(argv).toContain("custom:v2");
   });
+
+  it("mounts the output volume at /out:rw when outputFiles is set", () => {
+    const argv = buildDockerRunArgv({
+      ...baseReq,
+      outputFiles: [{ containerPath: "/out/result.json", workspacePath: "result.json" }],
+    });
+    const idx = argv.indexOf("-v");
+    const hasOutMount = argv.some((a, i) => a === "-v" && argv[i + 1]?.includes(":/out:rw"));
+    expect(hasOutMount).toBe(true);
+  });
+
+  it("does NOT mount the output volume when outputFiles is absent", () => {
+    const argv = buildDockerRunArgv(baseReq);
+    const hasOutMount = argv.some((a) => a.includes(":/out:rw"));
+    expect(hasOutMount).toBe(false);
+  });
 });
 
 /**
- * Fake runner that distinguishes the 4 lifecycle steps by argv shape:
- *   - argv[0] === "volume"  → volume create or rm
- *   - argv[0] === "run" && mount contains ":rw" → write-code step
- *   - argv[0] === "run" && mount contains ":ro" → code-exec step (the real run)
+ * Fake runner that distinguishes lifecycle steps by argv shape:
+ *   - argv[0] === "volume"                 → volume create or rm (staging + output)
+ *   - argv[0] === "run" && --user 0        → output volume chown init step
+ *   - argv[0] === "run" && /work:rw        → write-code step
+ *   - argv[0] === "run" && /out:ro        → output recovery step (cat)
+ *   - argv[0] === "run" (else)             → code-exec step (the real run)
  */
 function makeFakeRunner(opts: {
   volumeCreateExit?: number;
@@ -145,6 +167,9 @@ function makeFakeRunner(opts: {
   runStdout?: string;
   runStderr?: string;
   hangOnRun?: boolean;
+  initExit?: number;
+  recoveryContent?: Record<string, string>;
+  recoveryExit?: number;
 }): RunCommandFn {
   return async (argv) => {
     // Volume create / rm
@@ -155,12 +180,29 @@ function makeFakeRunner(opts: {
       // rm
       return { exitCode: 0, stdout: "", stderr: "" };
     }
-    // Write-code step: mount has :rw
-    const volMount = argv.find((a) => a.includes(":/work:"));
-    if (argv[0] === "run" && volMount?.includes(":rw")) {
+    // Output volume chown init step: --user 0
+    const userIdx = argv.indexOf("--user");
+    if (argv[0] === "run" && userIdx > -1 && argv[userIdx + 1] === "0") {
+      return { exitCode: opts.initExit ?? 0, stdout: "", stderr: "" };
+    }
+    // Write-code step: mount has /work:rw
+    const workMount = argv.find((a) => a.includes(":/work:"));
+    if (argv[0] === "run" && workMount?.includes(":rw")) {
       return { exitCode: opts.writeExit ?? 0, stdout: "", stderr: "" };
     }
-    // Code-exec step: mount has :ro
+    // Output recovery step: mount has /out:ro
+    const outMount = argv.find((a) => a.includes(":/out:"));
+    if (argv[0] === "run" && outMount?.includes(":ro")) {
+      const catIdx = argv.indexOf("cat");
+      const containerPath = catIdx > -1 ? argv[catIdx + 1] : "";
+      const content = opts.recoveryContent?.[containerPath] ?? "";
+      return {
+        exitCode: opts.recoveryExit ?? (content.length > 0 ? 0 : 1),
+        stdout: content,
+        stderr: content.length > 0 ? "" : "No such file",
+      };
+    }
+    // Code-exec step
     if (opts.hangOnRun) {
       return new Promise(() => { /* never resolves */ });
     }
@@ -253,5 +295,106 @@ describe("DockerLifecycle.exec", () => {
     const result = await lc.exec(baseReq);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("NameError");
+  });
+});
+
+describe("buildOutputVolumeCreateArgv", () => {
+  it("creates the output volume name", () => {
+    expect(buildOutputVolumeCreateArgv("run_abc123")).toEqual([
+      "volume", "create", "sandbox-output-run_abc123",
+    ]);
+  });
+});
+
+describe("buildOutputVolumeRmArgv", () => {
+  it("removes the output volume name", () => {
+    expect(buildOutputVolumeRmArgv("run_abc123")).toEqual([
+      "volume", "rm", "sandbox-output-run_abc123",
+    ]);
+  });
+});
+
+describe("buildOutputVolumeInitArgv", () => {
+  it("chowns the output volume as root", () => {
+    const argv = buildOutputVolumeInitArgv("run_abc123", "umanschat-sandbox-python:v0.4");
+    expect(argv).toContain("run");
+    expect(argv).toContain("--rm");
+    const userIdx = argv.indexOf("--user");
+    expect(argv[userIdx + 1]).toBe("0");
+    const volIdx = argv.indexOf("-v");
+    expect(argv[volIdx + 1]).toBe("sandbox-output-run_abc123:/out");
+    expect(argv).toContain("chown");
+    expect(argv).toContain("10001:10001");
+    expect(argv).toContain("/out");
+  });
+});
+
+describe("buildOutputRecoveryArgv", () => {
+  it("mounts the output volume read-only and cats the file", () => {
+    const argv = buildOutputRecoveryArgv("run_abc123", "umanschat-sandbox-python:v0.4", "/out/data.jsonl");
+    expect(argv).toContain("run");
+    expect(argv).toContain("--rm");
+    const volIdx = argv.indexOf("-v");
+    expect(argv[volIdx + 1]).toBe("sandbox-output-run_abc123:/out:ro");
+    expect(argv).toContain("cat");
+    expect(argv).toContain("/out/data.jsonl");
+  });
+});
+
+describe("DockerLifecycle.exec with outputFiles", () => {
+  const reqWithOutput: SandboxExecRequest = {
+    ...baseReq,
+    outputFiles: [{ containerPath: "/out/result.json", workspacePath: "result.json" }],
+  };
+
+  it("creates output volume, chowns it, recovers files, and removes both volumes", async () => {
+    const calls: string[][] = [];
+    const fake: RunCommandFn = async (argv) => {
+      calls.push(argv);
+      return makeFakeRunner({
+        runStdout: "done",
+        recoveryContent: { "/out/result.json": '{"answer": 42}' },
+      })(argv);
+    };
+    const lc = new DockerLifecycle(fake);
+    const result = await lc.exec(reqWithOutput);
+
+    // staging volume create
+    expect(calls[0]).toEqual(["volume", "create", "sandbox-staging-run_abc123"]);
+    // output volume create
+    expect(calls[1]).toEqual(["volume", "create", "sandbox-output-run_abc123"]);
+    // output volume chown init
+    expect(calls[2]).toContain("chown");
+    // write code
+    expect(calls[3]).toContain("sandbox-staging-run_abc123:/work:rw");
+    // code-exec run
+    expect(calls[4]).toContain("sandbox-output-run_abc123:/out:rw");
+    // recovery cat
+    expect(calls[5]).toContain("sandbox-output-run_abc123:/out:ro");
+    expect(calls[5]).toContain("cat");
+    expect(calls[5]).toContain("/out/result.json");
+    // staging volume rm
+    const rmCalls = calls.filter((c) => c[0] === "volume" && c[1] === "rm");
+    expect(rmCalls).toContainEqual(["volume", "rm", "sandbox-staging-run_abc123"]);
+    expect(rmCalls).toContainEqual(["volume", "rm", "sandbox-output-run_abc123"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.outputs?.["/out/result.json"]).toBe('{"answer": 42}');
+  });
+
+  it("returns empty string when recovery finds no file", async () => {
+    const lc = new DockerLifecycle(makeFakeRunner({ runStdout: "" }));
+    const result = await lc.exec(reqWithOutput);
+    expect(result.outputs?.["/out/result.json"]).toBe("");
+    expect(result.stderr).toContain("output recovery failed");
+  });
+
+  it("fails when output volume create fails", async () => {
+    const lc = new DockerLifecycle(makeFakeRunner({ volumeCreateExit: 1 }));
+    const result = await lc.exec(reqWithOutput);
+    // volume create fails on the FIRST call (staging volume), not output volume.
+    // When staging create fails, we never reach output volume creation.
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderr).toContain("failed to create staging volume");
   });
 });
