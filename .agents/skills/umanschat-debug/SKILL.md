@@ -508,7 +508,9 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 3. `LLM_TIMEOUT_MS` default **300000** (5 min) via `llmTimeoutMs()`.
 4. If content still empty after recovery, emit a user-visible fallback sentence.
 
-**Agent recipe for ipr character RAG**: Message.json/HomeTalk.json → sandbox JSONL → `kb_create` → `kb_ingest_jsonl` → `kb_search`.
+**Agent recipe for ipr character RAG**: Prefer **`rag_build_character_dialogue`** (one-shot server tool: JSONL + KB + ingest + optional verify). Do not ask the model to author long Python in thinking — streams die mid-plan. Fallback: sandbox only for custom transforms, then `kb_ingest_jsonl`.
+
+**Files**: `src/lib/characterDialogueRag.ts`, `STREAM_TOOLS` in `route.ts`.
 
 ---
 ## Basic Debugging Steps

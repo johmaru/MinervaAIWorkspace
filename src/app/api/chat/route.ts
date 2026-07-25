@@ -32,6 +32,7 @@ import {
   ingestJsonlFile,
   searchKnowledgeBases,
 } from "@/lib/kbStore";
+import { buildAndIngestCharacterDialogueRag } from "@/lib/characterDialogueRag";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -1228,10 +1229,11 @@ function buildFinalMessages({
           "11. Multi-step agent work (RAG build, data shaping, scripts): after tools finish, you MUST " +
           "always produce a user-visible answer in message content. Thinking is not the answer. " +
           "If incomplete, report progress, artifacts written, and next steps — never end on thinking only.\n" +
-          "12. Bulk RAG: shape many documents with sandbox_run/write_file into one JSONL (one object per line " +
-          "with title/name + content), save via outputFiles to the workspace, then call kb_ingest_jsonl once. " +
-          "Do NOT call kb_ingest dozens of times in a loop — that will hit round limits and leave the job incomplete. " +
-          "Sandbox workspace path is /workspace (read-only); writable output is /out only.",
+          "12. Bulk character dialogue RAG from game master data (Character/Message/HomeTalk JSON): " +
+          "call `rag_build_character_dialogue` ONCE — do NOT invent long Python in thinking/sandbox for this. " +
+          "That one-shot tool builds JSONL, creates the KB, bulk-ingests, and can verify with a search query. " +
+          "For other bulk RAG, write JSONL then kb_ingest_jsonl. Never call kb_ingest dozens of times. " +
+          "Sandbox (if used): read /workspace, write /out only + outputFiles.",
       }
     : null;
   return [
@@ -2117,8 +2119,8 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       name: "kb_ingest_jsonl",
       description:
         "CRITICAL: Bulk-ingest a workspace JSONL file into a knowledge base (one JSON object per line → one document). " +
-        "PREFERRED for character/story RAG builds after sandbox_run writes e.g. character_dialogue.jsonl. " +
         "Each line should include content (or text) and title or name (and optional character_id). " +
+        "For Character+Message+HomeTalk game data, prefer rag_build_character_dialogue instead. " +
         "Do NOT claim bulk ingest without calling this tool. Returns counts: ingested, skipped, cached, errors, sample titles.",
       parameters: {
         type: "object",
@@ -2134,6 +2136,47 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
         },
         required: ["knowledge_base_id", "path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "rag_build_character_dialogue",
+      description:
+        "ONE-SHOT agent tool: build per-character dialogue RAG from Character.json + Message.json + HomeTalk.json. " +
+        "Writes JSONL (one line per character with profile + dialogue), creates a knowledge base, bulk-ingests, " +
+        "and optionally runs kb search to verify. " +
+        "PREFERRED over sandbox_run Python for this task — long scripts in thinking/tool-args often get cut off. " +
+        "Default paths assume files under ipr-master-diff/. Returns kb_id, counts, sample names, and verify hits.",
+      parameters: {
+        type: "object",
+        properties: {
+          character_path: {
+            type: "string",
+            description: "Workspace path to Character.json (default: ipr-master-diff/Character.json)",
+          },
+          message_path: {
+            type: "string",
+            description: "Workspace path to Message.json (default: ipr-master-diff/Message.json)",
+          },
+          home_talk_path: {
+            type: "string",
+            description: "Workspace path to HomeTalk.json (default: ipr-master-diff/HomeTalk.json)",
+          },
+          output_path: {
+            type: "string",
+            description: "Where to write JSONL (default: rag/character_dialogue.jsonl)",
+          },
+          kb_name: {
+            type: "string",
+            description: "Knowledge base name (default: ipr-character-dialogue)",
+          },
+          verify_query: {
+            type: "string",
+            description: "Optional search query after ingest (e.g. はまってる) to return sample hits",
+          },
+        },
       },
     },
   },
@@ -2423,6 +2466,8 @@ async function streamCompletion({
           pattern?: string; glob?: string; depth?: number; max_results?: number;
           max_matches?: number; case_insensitive?: boolean; fixed_string?: boolean;
           max_lines?: number;
+          character_path?: string; message_path?: string; home_talk_path?: string;
+          output_path?: string; kb_name?: string; verify_query?: string;
         };
         try {
           parsedArgs = JSON.parse(tc.arguments) as typeof parsedArgs;
@@ -2806,6 +2851,43 @@ async function streamCompletion({
             toolContent = `Failed to ingest JSONL: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "kb_ingest_jsonl", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "rag_build_character_dialogue") {
+          send?.("status", { label: t(locale, "chat.statusToolRagBuildCharacterDialogue") });
+          const tTool = Date.now();
+          try {
+            const result = await buildAndIngestCharacterDialogueRag(userId, {
+              characterPath: parsedArgs.character_path,
+              messagePath: parsedArgs.message_path,
+              homeTalkPath: parsedArgs.home_talk_path,
+              outputPath: parsedArgs.output_path,
+              kbName: parsedArgs.kb_name,
+              verifyQuery: parsedArgs.verify_query,
+            });
+            toolContent =
+              `Character dialogue RAG ready.\n` +
+              `kb_id=${result.kbId}\n` +
+              `kb_name=${result.kbName}\n` +
+              `jsonl=${result.build.outputPath} lines=${result.build.lineCount} bytes=${result.build.totalBytes}\n` +
+              `with_dialogue=${result.build.charactersWithDialogue} profile_only=${result.build.charactersProfileOnly}\n` +
+              `ingest: ingested=${result.ingest.ingested} cached=${result.ingest.cached} skipped=${result.ingest.skipped} errors=${result.ingest.errors.length}\n` +
+              `sample_names=${result.build.sampleNames.join(", ")}`;
+            if (result.verify) {
+              toolContent += `\nverify_query=${JSON.stringify(result.verify.query)} hits=${result.verify.results.length}`;
+              for (const hit of result.verify.results.slice(0, 3)) {
+                toolContent += `\n- [${hit.similarity}] ${hit.title}: ${hit.text.slice(0, 160).replace(/\n/g, " ")}`;
+              }
+            }
+            if (result.ingest.errors.length > 0) {
+              toolContent += `\nIngest errors:\n${result.ingest.errors.slice(0, 5).join("\n")}`;
+            }
+          } catch (err) {
+            toolContent = `Failed rag_build_character_dialogue: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", {
+            tool: "rag_build_character_dialogue",
+            round: rounds,
+            duration: Date.now() - tTool,
+          });
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
           // MCP tool: function name format "{serverName}__{toolName}"
           const parsed = parseMcpToolFunctionName(tc.name);

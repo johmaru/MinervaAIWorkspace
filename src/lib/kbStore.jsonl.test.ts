@@ -16,7 +16,7 @@ vi.mock("@/lib/embed", () => ({
   hashContent: (s: string) => `hash:${s.length}:${s.slice(0, 24)}`,
 }));
 
-const USER = "test-user-id";
+const USER = "jsonl-test-user";
 const prevHost = process.env.WORKSPACE_HOST_PATH;
 let wsRoot: string;
 let kbId: string;
@@ -24,11 +24,12 @@ let kbId: string;
 describe("ingestJsonlFile", () => {
   beforeAll(async () => {
     delete process.env.WORKSPACE_HOST_PATH;
-    await db.insert(users).values({ id: USER, nickname: "t", email: "t@example.com" }).onConflictDoNothing();
+    await db
+      .insert(users)
+      .values({ id: USER, nickname: "jsonl", email: "jsonl@example.com" })
+      .onConflictDoNothing();
     const kb = await createKnowledgeBase(USER, "jsonl-test-kb");
     kbId = kb.id;
-    // Isolate workspace under tmp via getUserDataRoot mock? workspace uses getUserDataRoot when HOST unset.
-    // Ensure files under the user's workspace path.
     const { getWorkspaceRoot } = await import("@/lib/workspace");
     wsRoot = getWorkspaceRoot(USER);
     mkdirSync(join(wsRoot, "rag"), { recursive: true });
