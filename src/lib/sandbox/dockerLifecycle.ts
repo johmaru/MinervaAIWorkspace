@@ -105,14 +105,25 @@ export function buildDockerRunArgv(req: SandboxExecRequest): string[] {
   // Mount workspace read-only if available (enables file reading in sandbox).
   // The sandbox runs as a SIBLING container via the host Docker socket, so
   // it cannot see /app/workspace (that path exists only inside the app
-  // container). We mount WORKSPACE_HOST_PATH verbatim — the operator must
-  // set it in the form the host dockerd understands (e.g. /mnt/c/Users/...
-  // on WSL2, /c/Users/... on Docker Desktop, or a native Linux path).
-  const hostPath = process.env.WORKSPACE_HOST_PATH;
-  if (hostPath) {
-    argv.push("-v", `${hostPath}:/workspace:ro`);
+  // container). WORKSPACE_HOST_PATH is mounted verbatim — the operator
+  // must set it in a form the host dockerd understands.
+  //
+  // Convenience: Windows-style paths (C:\... or C:/...) are auto-converted
+  // to the Docker Desktop bind form (/c/...). This covers the common case
+  // on Windows hosts. Linux-style paths (already /-prefixed) pass through
+  // unchanged. If the host uses a different scheme (e.g. WSL2 native
+  // Docker with /mnt/c/...), set the path in that form directly.
+  const rawHostPath = process.env.WORKSPACE_HOST_PATH;
+  if (rawHostPath) {
+    // Normalize Windows drive path to Docker Desktop bind form:
+    //   C:\Users\foo  -> /c/Users/foo
+    //   C:/Users/foo  -> /c/Users/foo
+    //   /mnt/c/Users  -> /mnt/c/Users (unchanged, already Linux-style)
+    const dockerPath = /^[A-Za-z]:[\\/]/.test(rawHostPath)
+      ? rawHostPath.replace(/^([A-Za-z]):[\\/]/, (_m, d) => `/${d.toLowerCase()}/`).replace(/\\/g, "/")
+      : rawHostPath;
+    argv.push("-v", `${dockerPath}:/workspace:ro`);
   }
-
   argv.push(req.image, ...languageCommand(req.language));
   return argv;
 }
