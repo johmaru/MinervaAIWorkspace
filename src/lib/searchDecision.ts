@@ -103,7 +103,7 @@ Return JSON:
 
 
 const EXPLICIT_SEARCH_PATTERN =
-  /(web\s*search|search\s+the\s+web|look\s+up|verify|check\s+online|web検索|検索して|検索し|調べて|確認して|見て|最新|現在|直近|最近|いま|今日|latest|current|recent|today|up[- ]?to[- ]?date)/i;
+  /(web\s*search|search\s+the\s+web|look\s+up|verify|check\s+online|web検索|検索して|検索し|調べて|確認して|最新|現在|直近|最近|いま|今日|latest|current|recent|today|up[- ]?to[- ]?date)/i;
 
 const VOLATILE_INFO_PATTERN =
   /(steam|レビュー|評価|評判|口コミ|ratings?|reviews?|price|prices?|価格|値段|schedule|release|patch|update|version|人口|同接|ニュース|news|法律|law|sports?|score)/i;

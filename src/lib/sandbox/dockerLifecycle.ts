@@ -71,7 +71,12 @@ function volumeName(runId: string): string {
 export function buildDockerRunArgv(req: SandboxExecRequest): string[] {
   const memMb = req.memLimitMb ?? DEFAULT_MEM_LIMIT_MB;
   const vol = volumeName(req.runId);
-  return [
+
+  // Determine the workspace mount path (shared mount or per-user)
+  // When WORKSPACE_HOST_PATH is set, workspace is at /app/workspace.
+  // Otherwise, fall back to per-user workspace (also under /app or cwd).
+  // We mount it read-only into /workspace so sandbox code can read files.
+  const argv = [
     "run",
     "--rm",
     "--name", `sandbox-${req.runId}`,
@@ -82,9 +87,22 @@ export function buildDockerRunArgv(req: SandboxExecRequest): string[] {
     "--tmpfs", `/tmp:rw,noexec,nosuid,size=${TMPFS_SIZE}`,
     "-v", `${vol}:/work:ro`,
     "-w", "/work",
-    req.image,
-    ...languageCommand(req.language),
   ];
+
+  // Mount workspace read-only if available (enables file reading in sandbox)
+  // The workspace path is resolved the same way as getWorkspaceRoot.
+  const hostPath = process.env.WORKSPACE_HOST_PATH;
+  if (hostPath) {
+    // Shared mount mode: /app/workspace is the container-side mount target
+    argv.push("-v", "/app/workspace:/workspace:ro");
+  } else {
+    // Per-user mode: mount the per-user workspace directory
+    // This requires the userId to be passed through; for now, skip if no
+    // shared mount is configured (sandbox workspace access is opt-in)
+  }
+
+  argv.push(req.image, ...languageCommand(req.language));
+  return argv;
 }
 
 /**

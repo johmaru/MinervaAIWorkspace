@@ -99,15 +99,14 @@ describe("isAllowedCommand", () => {
 
   // --- Blocked binaries ---
 
-  it("blocks node", () => {
-    const result = isAllowedCommand(parseCommandTokens("node --version"));
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("not in the allowed list");
+  it("allows node script.js", () => {
+    const result = isAllowedCommand(parseCommandTokens("node script.js"));
+    expect(result.allowed).toBe(true);
   });
 
-  it("blocks python", () => {
-    const result = isAllowedCommand(parseCommandTokens("python3 --version"));
-    expect(result.allowed).toBe(false);
+  it("allows python script.py", () => {
+    const result = isAllowedCommand(parseCommandTokens("python3 script.py"));
+    expect(result.allowed).toBe(true);
   });
 
   it("blocks npm", () => {
@@ -147,17 +146,18 @@ describe("isAllowedCommand", () => {
 
   // --- Blocked flags (code execution) ---
 
-  it("blocks node -e even if node were allowed", () => {
-    // node is blocked at binary level, but test the flag logic too
+  it("blocks node -e (flag check)", () => {
+    // node binary is allowed, but -e flag is blocked
     const result = isAllowedCommand(["node", "-e", "console.log(1)"]);
     expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked");
   });
 
-  it("blocks python -c via binary check", () => {
+  it("blocks python -c (flag check)", () => {
     const result = isAllowedCommand(parseCommandTokens("python -c 'import os'"));
     expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked");
   });
-
   // --- Blocked git subcommands ---
 
   it("blocks git add", () => {

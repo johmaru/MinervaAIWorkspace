@@ -13,10 +13,13 @@
  */
 
 /**
- * Allowed binaries (read-only / info commands only).
+ * Allowed binaries.
+ *
+ * Code-execution flags (-e, -c, --eval, etc.) are blocked separately
+ * via BLOCKED_FLAGS. This allows `python script.py` and `node script.js`
+ * while still blocking `python -c 'import os; ...'` and `node -e '...'`.
  *
  * Excluded by design:
- * - node, bun, python, python3 — can execute arbitrary code via -e/-c
  * - npx, npm — can run arbitrary packages/scripts
  * - env — can execute other commands
  * - curl, wget, nc, ssh — network tools
@@ -24,48 +27,58 @@
  * - sh, bash, cmd, powershell — shells
  * - eval, exec, source — indirect execution
  */
-const ALLOWED_BINARIES = new Set([
+const ALLOWED_BINARIES: Record<string, true> = {
   // Version control (read-only subcommands enforced via flag check)
-  "git",
+  git: true,
   // File listing / info
-  "ls", "dir", "pwd", "file",
+  ls: true, dir: true, pwd: true, file: true,
   // File reading
-  "cat", "head", "tail", "less", "more",
+  cat: true, head: true, tail: true, less: true, more: true,
   // Search
-  "grep", "rg", "find", "ack",
+  grep: true, rg: true, find: true, ack: true,
   // Counting
-  "wc",
+  wc: true,
   // Echo (safe: no shell to interpret output)
-  "echo",
+  echo: true,
   // Tree
-  "tree",
-]);
+  tree: true,
+  // Script runtimes (script files only; -e/-c flags blocked via BLOCKED_FLAGS)
+  python: true, python3: true, node: true,
+  // JSON processing
+  jq: true,
+  // Text processing
+  sed: true, awk: true, sort: true, uniq: true, cut: true, tr: true, paste: true,
+  // Diff
+  diff: true,
+  // Statistics
+  stat: true,
+};
 
 /**
  * Flags that enable code execution — always blocked.
  * Matches as prefix of any token (e.g. "-e", "-c", "--eval").
  */
-const BLOCKED_FLAGS = new Set([
-  "-e", "--eval",           // node, bun: code execution
-  "-c",                     // python, sh, bash: code execution
-  "-exec", "-execdir",      // find: arbitrary command execution
-  "--exec", "--execdir",    // find: long-form variants
-  "--require",              // node require
-  "--import",               // node import
-  "-i", "--interactive",    // interactive mode
-]);
+const BLOCKED_FLAGS: Record<string, true> = {
+  "-e": true, "--eval": true,           // node, bun: code execution
+  "-c": true,                           // python, sh, bash: code execution
+  "-exec": true, "-execdir": true,     // find: arbitrary command execution
+  "--exec": true, "--execdir": true,   // find: long-form variants
+  "--require": true,                   // node require
+  "--import": true,                    // node import
+  "-i": true, "--interactive": true,  // interactive mode
+};
 
 /**
  * Git subcommands that modify state — blocked.
  * Only read-only git operations are allowed.
  */
-const BLOCKED_GIT_SUBCOMMANDS = new Set([
-  "add", "commit", "push", "pull", "fetch", "merge", "rebase",
-  "reset", "revert", "checkout", "switch", "branch -d", "tag -d",
-  "stash", "stash drop", "clean", "rm", "mv", "init", "clone",
-  "remote add", "remote remove", "remote set-url",
-  "worktree add", "worktree remove", "cherry-pick", "bisect",
-]);
+const BLOCKED_GIT_SUBCOMMANDS: Record<string, true> = {
+  "add": true, "commit": true, "push": true, "pull": true, "fetch": true, "merge": true, "rebase": true,
+  "reset": true, "revert": true, "checkout": true, "switch": true, "branch -d": true, "tag -d": true,
+  "stash": true, "stash drop": true, "clean": true, "rm": true, "mv": true, "init": true, "clone": true,
+  "remote add": true, "remote remove": true, "remote set-url": true,
+  "worktree add": true, "worktree remove": true, "cherry-pick": true, "bisect": true,
+};
 
 export type ValidationResult = {
   allowed: boolean;
@@ -173,14 +186,14 @@ export function isAllowedCommand(tokens: string[]): ValidationResult {
   const binaryName = extractBinaryName(tokens[0]);
 
   // 1. Binary must be in the whitelist
-  if (!ALLOWED_BINARIES.has(binaryName)) {
+  if (!ALLOWED_BINARIES[binaryName]) {
     return { allowed: false, reason: `binary "${binaryName}" is not in the allowed list` };
   }
 
   // 2. Check for blocked flags in any position
   for (let i = 1; i < tokens.length; i++) {
     const flag = tokens[i].toLowerCase();
-    if (BLOCKED_FLAGS.has(flag)) {
+    if (BLOCKED_FLAGS[flag]) {
       return { allowed: false, reason: `flag "${tokens[i]}" is blocked (code execution)` };
     }
   }
@@ -190,22 +203,22 @@ export function isAllowedCommand(tokens: string[]): ValidationResult {
     const subcommand = tokens[1].toLowerCase();
 
     // Check for blocked subcommands
-    if (BLOCKED_GIT_SUBCOMMANDS.has(subcommand)) {
+    if (BLOCKED_GIT_SUBCOMMANDS[subcommand]) {
       return { allowed: false, reason: `git "${subcommand}" is not allowed (write operation)` };
     }
 
     // Allow only known read-only subcommands
-    const READONLY_GIT_SUBCOMMANDS = new Set([
-      "status", "log", "diff", "show", "branch", "blame",
-      "remote", "ls-files", "ls-remote", "describe", "tag",
-      "rev-parse", "shortlog", "name-rev",
-      "reflog", "rev-list", "cat-file", "symbolic-ref",
-      "config",
-    ]);
+    const READONLY_GIT_SUBCOMMANDS: Record<string, true> = {
+      "status": true, "log": true, "diff": true, "show": true, "branch": true, "blame": true,
+      "remote": true, "ls-files": true, "ls-remote": true, "describe": true, "tag": true,
+      "rev-parse": true, "shortlog": true, "name-rev": true,
+      "reflog": true, "rev-list": true, "cat-file": true, "symbolic-ref": true,
+      "config": true,
+    };
 
     // Special case: "git branch" without -d is allowed (listing)
     // "git tag" without -d is allowed (listing)
-    if (!READONLY_GIT_SUBCOMMANDS.has(subcommand)) {
+    if (!READONLY_GIT_SUBCOMMANDS[subcommand]) {
       // Could be "git --version" etc.
       if (subcommand.startsWith("-")) {
         // Flags like --version are OK
@@ -219,10 +232,10 @@ export function isAllowedCommand(tokens: string[]): ValidationResult {
     // --add, --unset, --replace-all, --unset-all are write (blocked)
     // 2+ non-flag args means a value assignment (write)
     if (subcommand === "config") {
-      const CONFIG_WRITE_FLAGS = new Set(["--add", "--unset", "--replace-all", "--unset-all"]);
+      const CONFIG_WRITE_FLAGS: Record<string, true> = { "--add": true, "--unset": true, "--replace-all": true, "--unset-all": true };
       for (let i = 2; i < tokens.length; i++) {
         const flag = tokens[i].toLowerCase();
-        if (CONFIG_WRITE_FLAGS.has(flag)) {
+        if (CONFIG_WRITE_FLAGS[flag]) {
           return { allowed: false, reason: "git config write operations are blocked" };
         }
       }
@@ -236,7 +249,7 @@ export function isAllowedCommand(tokens: string[]): ValidationResult {
     // Block code-execution flags on git
     for (let i = 2; i < tokens.length; i++) {
       const flag = tokens[i].toLowerCase();
-      if (BLOCKED_FLAGS.has(flag)) {
+      if (BLOCKED_FLAGS[flag]) {
         return { allowed: false, reason: `git flag "${tokens[i]}" is blocked` };
       }
     }
