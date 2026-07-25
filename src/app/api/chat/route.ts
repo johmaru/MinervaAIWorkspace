@@ -57,6 +57,7 @@ import {
   searchWorkspaceFiles,
   grepWorkspaceContent,
 } from "@/lib/workspace";
+import { resolveBufferedToolRoundContent, TOOL_GROUNDING_REMINDER } from "@/lib/toolStreamPolicy";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
 import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
@@ -2200,6 +2201,10 @@ async function streamCompletion({
         { id: string; name: string; arguments: string }
       > = {};
       let hadToolCalls = false;
+      // When tools are offered, buffer content until we know whether this round
+      // is a tool-call round. Intermediate "I confirmed X" narration must not
+      // hit the UI or the saved assistant answer (see toolStreamPolicy).
+      let contentBuffer = "";
 
       for await (const chunk of completion) {
         const choice = chunk.choices?.[0];
@@ -2214,6 +2219,7 @@ async function streamCompletion({
             firstDeltaReceived = true;
             clearTimeout(ttftTimer ?? undefined);
           }
+          // Thinking stays visible during tool rounds (plan/explore); only answer prose is gated.
           onReasoning(reasoningDelta);
         }
         const contentDelta = choice.delta?.content;
@@ -2222,7 +2228,11 @@ async function streamCompletion({
             firstDeltaReceived = true;
             clearTimeout(ttftTimer ?? undefined);
           }
-          onDelta(contentDelta);
+          if (useToolsThisRound) {
+            contentBuffer += contentDelta;
+          } else {
+            onDelta(contentDelta);
+          }
         }
 
         // Accumulate tool_calls delta
@@ -2255,6 +2265,21 @@ async function streamCompletion({
       }
 
       clearTimeout(ttftTimer ?? undefined);
+
+      // Flush or discard buffered answer prose for tools-offered rounds.
+      const toEmit = resolveBufferedToolRoundContent({
+        toolsOffered: useToolsThisRound,
+        hadToolCalls,
+        bufferedContent: contentBuffer,
+      });
+      if (toEmit) {
+        onDelta(toEmit);
+      } else if (useToolsThisRound && hadToolCalls && contentBuffer.length > 0) {
+        logger.info("chat", "discarded-tool-round-content", {
+          chars: contentBuffer.length,
+          round: rounds + 1,
+        });
+      }
 
       if (!hadToolCalls || !useToolsThisRound) {
         // No tool calls, or max rounds exceeded → done
@@ -2303,6 +2328,7 @@ async function streamCompletion({
             content: "LOOP DETECTED: You have already called this tool with the same arguments. " +
               "Do not repeat the same call. Summarize what you found so far and answer the user.",
           })),
+          { role: "system" as const, content: TOOL_GROUNDING_REMINDER },
         ];
         send?.("status", { label: t(locale, "chat.statusToolLoopDetected") });
         // Disable tools for ONE round to break the loop, then re-enable
@@ -2776,6 +2802,13 @@ async function streamCompletion({
       }
 
       if (sources.length > 0) send?.("sources", { sources });
+
+      // Keep grounding near the latest tool results so the next completion
+      // is constrained to quote/observe instead of narrating unfounded checks.
+      currentMessages = [
+        ...currentMessages,
+        { role: "system" as const, content: TOOL_GROUNDING_REMINDER },
+      ];
 
       if (rounds >= MAX_TOOL_ROUNDS) {
         send?.("status", { label: t(locale, "chat.statusSearchLimit") });

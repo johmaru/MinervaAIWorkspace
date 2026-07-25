@@ -462,6 +462,22 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 **Still not fixed by code alone**: multi-turn history still drops tool transcripts; models can still ignore results. Prefer better exploration tools + thinking over more system-prompt rules.
 
 ---
+
+### 21. Tool-round narration leaks into the user answer (false “I confirmed”)
+
+**Symptom**: Model streams “確認した / StoryPart.text は…” *before* tool results, and that text stays in the bubble / DB answer even when tools later contradict it. Looks like high hallucination; same GLM elsewhere is fine.
+
+**Cause**: `streamCompletion` called `onDelta` for every content chunk, including completions that also emit `tool_calls`. History stores those assistant turns as `content: null` + `tool_calls`, so only the **user** kept the lie; the model never “owned” it on the next round. Final prose was then **appended** on top of the intermediate text in `assistantContent`.
+
+**Fix**:
+1. When tools are offered, buffer content until the stream ends (`toolStreamPolicy.resolveBufferedToolRoundContent`).
+2. If the round had `tool_calls`, discard the buffer (log `discarded-tool-round-content`).
+3. If no tool_calls, flush the buffer as the user-visible answer.
+4. After tool results, inject `TOOL_GROUNDING_REMINDER` system message.
+
+**Files**: `src/lib/toolStreamPolicy.ts`, `src/app/api/chat/route.ts` (`streamCompletion`).
+
+---
 ## Basic Debugging Steps
 
 1. **Reproduce the symptom** — reliably reproduce via browser or curl

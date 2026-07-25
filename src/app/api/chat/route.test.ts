@@ -630,6 +630,82 @@ describe("POST /api/chat — exclude pre-search message during tool use", () => 
 });
 
 
+describe("POST /api/chat — tool-round content buffering", () => {
+  afterEach(() => {
+    vi.mocked(createLLM).mockReset();
+    vi.mocked(probeToolSupport).mockReset();
+    vi.mocked(probeToolSupport).mockResolvedValue({ supported: false, checkedAt: new Date() });
+  });
+
+  it("discards intermediate content streamed in the same round as tool_calls; only final answer is shown", async () => {
+    const id = await createThread();
+    vi.mocked(probeToolSupport).mockResolvedValue({
+      supported: true,
+      checkedAt: new Date(),
+    });
+
+    const intermediate = "I CONFIRMED StoryPart.text exists and maps to dialogue.";
+    const finalAnswer = "Tool results only: no such field was returned.";
+
+    let callCount = 0;
+    vi.mocked(createLLM).mockReturnValue({
+      chat: {
+        completions: {
+          create: vi.fn(async (params: Record<string, unknown>) => {
+            callCount++;
+            if (params.stream) {
+              if (callCount === 1) {
+                // Narration + tool_calls in the same completion (the leak pattern).
+                return (async function* () {
+                  yield { choices: [{ delta: { content: intermediate } }] };
+                  yield {
+                    choices: [
+                      {
+                        delta: {
+                          tool_calls: [
+                            {
+                              index: 0,
+                              id: "call_list_1",
+                              function: {
+                                name: "list_directory",
+                                arguments: JSON.stringify({ path: "." }),
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  };
+                })();
+              }
+              // Second round: final answer after tools (may still offer tools).
+              return (async function* () {
+                yield { choices: [{ delta: { content: finalAnswer } }] };
+              })();
+            }
+            return { choices: [{ message: { content: "summary" } }] };
+          }),
+        },
+      },
+    } as never);
+
+    const res = await POST(chatReq(id, "StoryPart の text はセリフ？"));
+    expect(res.status).toBe(200);
+    const raw = await sseChunks(res);
+    const events = parseEvents(raw);
+    const allDeltas = events
+      .filter((e) => e.event === "delta")
+      .map((e) => String(e.data.delta ?? ""))
+      .join("");
+
+    expect(allDeltas).not.toContain("I CONFIRMED");
+    expect(allDeltas).not.toContain("StoryPart.text exists");
+    expect(allDeltas).toContain(finalAnswer);
+    // Tool round + answer round at minimum
+    expect(callCount).toBeGreaterThanOrEqual(2);
+  }, 30_000);
+});
+
 describe("POST /api/chat — tool-call markup leak prevention", () => {
   afterEach(() => vi.mocked(createLLM).mockReset());
 
