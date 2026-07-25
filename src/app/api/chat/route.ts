@@ -1199,7 +1199,10 @@ function buildFinalMessages({
           "to look for it yourself first. Explore with tools before asking.\n" +
           "9. If a tool call returned results but you cannot find what you need in them, say exactly: " +
           "'I looked at [X] using [tool] and found [Y], but could not find [Z].' " +
-          "Do NOT say 'I couldn't see it' if you haven't called the tool.",
+          "Do NOT say 'I couldn't see it' if you haven't called the tool.\n" +
+          "10. For reading files or exploring the workspace, use `read_file` and `list_directory` — " +
+          "they are faster and more reliable than `sandbox_run`. " +
+          "Reserve `sandbox_run` for executing code, not for file exploration.",
       }
     : null;
   return [
@@ -2005,7 +2008,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 8;
 
 async function streamCompletion({
   llm,
@@ -2075,6 +2078,9 @@ async function streamCompletion({
   let useToolsThisRoundOverride = true;
   while (true) {
     const useToolsThisRound = useTools && !fallbackRetried && rounds < MAX_TOOL_ROUNDS && useToolsThisRoundOverride;
+    // Re-enable tools after a loop-break round (override was set false
+    // to skip one round, then restored so different calls can proceed).
+    if (!useToolsThisRoundOverride) useToolsThisRoundOverride = true;
 
     // TTFT timeout: only on the first round, before any delta has been received.
     // Once we fall back (or fallback is disabled), no timeout is set.
@@ -2215,7 +2221,8 @@ async function streamCompletion({
           })),
         ];
         send?.("status", { label: t(locale, "chat.statusToolLoopDetected") });
-        // Force-disable tools for the next (final) round.
+        // Disable tools for ONE round to break the loop, then re-enable
+        // so the AI can make a different useful call if needed.
         useToolsThisRoundOverride = false;
         continue;
       }
