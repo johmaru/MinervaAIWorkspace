@@ -49,7 +49,14 @@ import {
 import { hasToolCallMarkup, sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
 import { buildPersonalizationMessage } from "@/lib/personalization";
 import { appendChatExport } from "@/lib/chatExport";
-import { readWorkspaceFile, writeWorkspaceFile, listWorkspaceDirectory, runWorkspaceCommand } from "@/lib/workspace";
+import {
+  readWorkspaceFile,
+  writeWorkspaceFile,
+  listWorkspaceDirectory,
+  runWorkspaceCommand,
+  searchWorkspaceFiles,
+  grepWorkspaceContent,
+} from "@/lib/workspace";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
 import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
@@ -1192,16 +1199,17 @@ function buildFinalMessages({
           "Use the exact phrasing: '[CONFIRMED]' vs '[INFERRED]'.\n" +
           "6. Files generated inside sandbox_run are NOT visible to the host until saved via outputFiles. " +
           "Never tell the user a file was written unless it appears in the tool result's outputs field.\n" +
-          "7. When you call list_directory or run_command, you MUST report the actual output in your response. " +
+          "7. When you call exploration tools, you MUST report the actual output in your response. " +
           "Do NOT say 'I checked it' without quoting what the tool returned. " +
           "If the tool returned a file list, paste the list. If it returned file contents, summarize with quotes.\n" +
-          "8. Do NOT ask the user 'where is the file' if you have not yet called list_directory or run_command " +
-          "to look for it yourself first. Explore with tools before asking.\n" +
+          "8. Do NOT ask the user 'where is the file' if you have not yet searched with tools first. " +
+          "Explore with tools before asking.\n" +
           "9. If a tool call returned results but you cannot find what you need in them, say exactly: " +
           "'I looked at [X] using [tool] and found [Y], but could not find [Z].' " +
           "Do NOT say 'I couldn't see it' if you haven't called the tool.\n" +
-          "10. For reading files or exploring the workspace, use `read_file` and `list_directory` — " +
-          "they are faster and more reliable than `sandbox_run`. " +
+          "10. Codebase exploration: prefer `search_files` (glob) and `grep_content` (text/regex) over " +
+          "repeated `list_directory`. Use `read_file` for known paths. " +
+          "Do NOT chain shallow list_directory calls guessing folder names. " +
           "Reserve `sandbox_run` for executing code, not for file exploration.",
       }
     : null;
@@ -1731,7 +1739,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "read_file",
-      description: "Read the contents of a file within the workspace. Returns the text content. Use for reading source code, config files, or any text file.",
+      description: "Read the contents of a file within the workspace. Returns the text content. Use when you already know the path (from search_files, grep_content, or the user).",
       parameters: {
         type: "object",
         properties: {
@@ -1760,13 +1768,86 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "list_directory",
-      description: "List files and directories at the given path within the workspace. Returns names with type indicators (file/dir). Use to explore the workspace structure.",
+      description:
+        "List files and directories at a path. depth=1 (default) is a single level; raise depth (max 6) for a shallow tree. " +
+        "For finding files by name pattern or text content, prefer search_files / grep_content instead of repeated list_directory.",
       parameters: {
         type: "object",
         properties: {
           path: { type: "string", description: "Path relative to workspace root. Use '.' for workspace root." },
+          depth: {
+            type: "number",
+            description: "How many directory levels to include (default 1, max 6). Use 2–3 for a compact tree.",
+          },
         },
         required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_files",
+      description:
+        "Find files by glob pattern under the workspace (e.g. '**/*.json', '**/Story*.tsx', 'package.json'). " +
+        "PREFERRED for locating files. Returns matching paths or [SEARCH empty] if none. Skips node_modules/.git/.next.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "Glob pattern. Supports *, **, ?. Examples: '**/*.ts', 'data/**/*.json', 'README*'",
+          },
+          path: {
+            type: "string",
+            description: "Optional subdirectory to search under (relative to workspace root). Default '.'",
+          },
+          max_results: {
+            type: "number",
+            description: "Max paths to return (default 200)",
+          },
+        },
+        required: ["pattern"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "grep_content",
+      description:
+        "Search file contents with a regex or fixed string (like ripgrep). " +
+        "PREFERRED for finding symbols, field names, imports, or UI labels. " +
+        "Returns path:line:snippet lines or [GREP empty] if none. Skips node_modules/.git/.next and binary files.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "Regex pattern (default) or fixed string when fixed_string=true",
+          },
+          path: {
+            type: "string",
+            description: "Optional subdirectory to search under. Default '.'",
+          },
+          glob: {
+            type: "string",
+            description: "Optional file-name glob filter (e.g. '*.ts', '**/*.{ts,tsx}')",
+          },
+          case_insensitive: {
+            type: "boolean",
+            description: "Case-insensitive match (default true)",
+          },
+          fixed_string: {
+            type: "boolean",
+            description: "Treat pattern as literal text, not regex (default false)",
+          },
+          max_matches: {
+            type: "number",
+            description: "Max match lines to return (default 100)",
+          },
+        },
+        required: ["pattern"],
       },
     },
   },
@@ -2097,7 +2178,10 @@ async function streamCompletion({
         model: modelToUse,
         messages: currentMessages,
         stream: true,
-        ...(useToolsThisRound || reasoningEffort === "none"
+        // Keep reasoning on during tool rounds so the model can plan exploration
+        // (disabling thinking only when effort is explicitly "none"). Tool-time
+        // thinking-off was a major cause of shallow list_directory loops + fabrication.
+        ...(reasoningEffort === "none"
           ? disableReasoningParams
           : reasoningEffort
             ? { reasoning_effort: reasoningEffort }
@@ -2245,9 +2329,18 @@ async function streamCompletion({
       // Execute each tool call and append the result as a tool role message
       for (const tc of toolCalls) {
         let toolContent: string = "";
-        let parsedArgs: { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string; folder_path?: string };
+        let parsedArgs: {
+          url?: string; query?: string; path?: string; content?: string; command?: string;
+          tailLines?: number; minLevel?: string; title?: string; description?: string;
+          priority?: string; due_at?: string | null; status?: string; id?: string;
+          preset?: string; language?: string; code?: string; inputRef?: string; name?: string;
+          kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean;
+          knowledge_base_id?: string; source_url?: string; folder_path?: string;
+          pattern?: string; glob?: string; depth?: number; max_results?: number;
+          max_matches?: number; case_insensitive?: boolean; fixed_string?: boolean;
+        };
         try {
-          parsedArgs = JSON.parse(tc.arguments) as { url?: string; query?: string; path?: string; content?: string; command?: string; tailLines?: number; minLevel?: string; title?: string; description?: string; priority?: string; due_at?: string | null; status?: string; id?: string; preset?: string; language?: string; code?: string; inputRef?: string; name?: string; kind?: string; trigger?: string; tags?: string[]; include_duplicates?: boolean; knowledge_base_id?: string; source_url?: string; folder_path?: string };
+          parsedArgs = JSON.parse(tc.arguments) as typeof parsedArgs;
         } catch {
           parsedArgs = {};
         }
@@ -2371,12 +2464,43 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolListDir") });
           const tTool = Date.now();
           try {
-            const result = await listWorkspaceDirectory(parsedArgs.path, userId);
+            const result = await listWorkspaceDirectory(parsedArgs.path, userId, {
+              depth: typeof parsedArgs.depth === "number" ? parsedArgs.depth : undefined,
+            });
             toolContent = result;
           } catch (err) {
             toolContent = `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "list_directory", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "search_files" && parsedArgs.pattern) {
+          send?.("status", { label: t(locale, "chat.statusToolSearchFiles") });
+          const tTool = Date.now();
+          try {
+            const result = await searchWorkspaceFiles(parsedArgs.pattern, userId, {
+              path: parsedArgs.path,
+              maxResults: typeof parsedArgs.max_results === "number" ? parsedArgs.max_results : undefined,
+            });
+            toolContent = result;
+          } catch (err) {
+            toolContent = `Failed to search files: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "search_files", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "grep_content" && parsedArgs.pattern) {
+          send?.("status", { label: t(locale, "chat.statusToolGrepContent") });
+          const tTool = Date.now();
+          try {
+            const result = await grepWorkspaceContent(parsedArgs.pattern, userId, {
+              path: parsedArgs.path,
+              glob: parsedArgs.glob,
+              caseInsensitive: parsedArgs.case_insensitive,
+              fixedString: parsedArgs.fixed_string === true,
+              maxMatches: typeof parsedArgs.max_matches === "number" ? parsedArgs.max_matches : undefined,
+            });
+            toolContent = result;
+          } catch (err) {
+            toolContent = `Failed to grep content: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "grep_content", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "run_command" && parsedArgs.command) {
           send?.("status", { label: t(locale, "chat.statusToolRunCommand") });
           const tTool = Date.now();

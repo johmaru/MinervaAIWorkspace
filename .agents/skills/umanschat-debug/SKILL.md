@@ -441,6 +441,27 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 **Fix**: In `chat/route.ts`, look up `folders.instruction` via `thread.folderId` (ownership check via `folders.userId === user.id`). Trim-only whitespace is excluded. Prepend to `systemContent`.
 
 ---
+
+### 20. GLM tool loops + fabricated file structure (agent tooling)
+
+**Symptom**: GLM-5.2 with tools enabled repeatedly calls `list_directory` on slightly different paths (`src/`, `src/components/`, …), says it “couldn’t see it well”, then fabricates paths/fields that were never in tool results. Same model on Oh My Pi / coding agents looks much smarter.
+
+**Causes (stack, not just “model is dumb”)**:
+1. **Tool rounds forced thinking off** — historically `streamCompletion` applied `disableReasoningParams` whenever `useToolsThisRound` was true. GLM then explores without planning.
+2. **Only shallow list + read** — no first-class glob/grep tools; models invent directory trees via repeated one-level lists.
+3. **Exact-signature loop detection** — different path args never hit dedup.
+4. **Prompt rules alone** — models ignore long TOOL USE RULES when results are empty/ambiguous.
+
+**Fix (implemented)**:
+1. Keep `reasoning_effort` during tool rounds; only disable thinking when effort is explicitly `"none"`.
+2. Prefer `search_files` (glob) and `grep_content` (regex) for exploration; `list_directory` supports `depth` (1–6). Empty results are tagged `[SEARCH empty]` / `[GREP empty]` / `[LIST empty]`.
+3. Tool guard rule 10 tells the model to use search/grep instead of list chains / sandbox.
+
+**Files**: `src/app/api/chat/route.ts` (`streamCompletion`, `STREAM_TOOLS`), `src/lib/workspace.ts`.
+
+**Still not fixed by code alone**: multi-turn history still drops tool transcripts; models can still ignore results. Prefer better exploration tools + thinking over more system-prompt rules.
+
+---
 ## Basic Debugging Steps
 
 1. **Reproduce the symptom** — reliably reproduce via browser or curl

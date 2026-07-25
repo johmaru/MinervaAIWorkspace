@@ -70,6 +70,143 @@ export function resolveWorkspacePath(relativePath: string, userId: string): stri
 // readFileSync is capped at 1MB to prevent memory exhaustion on huge files
 const MAX_READ_SIZE = 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
+const MAX_LIST_LINES = 500;
+const MAX_SEARCH_RESULTS = 200;
+const MAX_GREP_MATCHES = 100;
+const MAX_GREP_FILE_BYTES = 512 * 1024;
+const MAX_LIST_DEPTH = 6;
+const DEFAULT_LIST_DEPTH = 1;
+
+/** Directories skipped during recursive workspace walks (exploration tools). */
+const SKIP_DIR_NAMES = new Set([
+  "node_modules",
+  ".git",
+  ".next",
+  "dist",
+  "build",
+  "coverage",
+  ".turbo",
+  "__pycache__",
+  ".venv",
+  "venv",
+  ".cache",
+]);
+
+/** Normalize path separators for stable glob matching. */
+function toPosixRel(p: string): string {
+  return p.split(sep).join("/");
+}
+
+/** Expand one level of `{a,b,c}` brace lists (nested braces expanded recursively). */
+function expandBraces(glob: string): string[] {
+  const m = /\{([^{}]+)\}/.exec(glob);
+  if (!m || m.index === undefined) return [glob];
+  const before = glob.slice(0, m.index);
+  const after = glob.slice(m.index + m[0].length);
+  const alts = m[1]!.split(",");
+  return alts.flatMap((alt) => expandBraces(before + alt + after));
+}
+
+/** Convert a single brace-free glob to a RegExp source (without ^$). */
+function globToRegExpSource(glob: string): string {
+  const normalized = glob.replace(/\\/g, "/").replace(/^\.\//, "");
+  let i = 0;
+  let out = "";
+  while (i < normalized.length) {
+    const ch = normalized[i]!;
+    if (ch === "*" && normalized[i + 1] === "*") {
+      // ** or **/
+      if (normalized[i + 2] === "/") {
+        out += "(?:.*/)?";
+        i += 3;
+      } else {
+        out += ".*";
+        i += 2;
+      }
+      continue;
+    }
+    if (ch === "*") {
+      out += "[^/]*";
+      i += 1;
+      continue;
+    }
+    if (ch === "?") {
+      out += "[^/]";
+      i += 1;
+      continue;
+    }
+    if ("\\.()+|^$[]{}!".includes(ch)) {
+      out += "\\" + ch;
+    } else {
+      out += ch;
+    }
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * Convert a simple glob (supports *, **, ?, and brace lists) to a RegExp matching
+ * POSIX-relative paths. Examples: double-star slash star.ts, Story*.json, *.{ts,tsx}
+ */
+export function globToRegExp(glob: string): RegExp {
+  const expanded = expandBraces(glob);
+  if (expanded.length === 1) {
+    return new RegExp(`^${globToRegExpSource(expanded[0]!)}$`, "i");
+  }
+  const alts = expanded.map((g) => globToRegExpSource(g));
+  return new RegExp(`^(?:${alts.join("|")})$`, "i");
+}
+
+type WalkHit = { abs: string; rel: string; isDir: boolean; size: number };
+
+/**
+ * Walk workspace tree under startAbs. relBase is the workspace-relative prefix
+ * for startAbs ("" for workspace root). Skips SKIP_DIR_NAMES.
+ * maxDepth is the maximum directory depth to descend (0 = only startAbs's children).
+ */
+function walkWorkspace(
+  startAbs: string,
+  relBase: string,
+  maxDepth: number,
+  onHit: (hit: WalkHit) => boolean | void,
+): void {
+  const stack: { abs: string; rel: string; depth: number }[] = [
+    { abs: startAbs, rel: relBase, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    let names: string[];
+    try {
+      names = readdirSync(cur.abs);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (SKIP_DIR_NAMES.has(name)) continue;
+      const childAbs = join(cur.abs, name);
+      let st;
+      try {
+        st = statSync(childAbs);
+      } catch {
+        continue;
+      }
+      const childRel = cur.rel ? `${cur.rel}/${name}` : name;
+      const posixRel = toPosixRel(childRel);
+      if (st.isDirectory()) {
+        const cont = onHit({ abs: childAbs, rel: posixRel, isDir: true, size: st.size });
+        if (cont === false) return;
+        // depth 1 means list children only; recurse when next level is still within maxDepth
+        if (cur.depth + 1 < maxDepth) {
+          stack.push({ abs: childAbs, rel: childRel, depth: cur.depth + 1 });
+        }
+      } else if (st.isFile()) {
+        const cont = onHit({ abs: childAbs, rel: posixRel, isDir: false, size: st.size });
+        if (cont === false) return;
+      }
+    }
+  }
+}
 
 export async function readWorkspaceFile(relativePath: string, userId: string): Promise<string> {
   const abs = resolveWorkspacePath(relativePath, userId);
@@ -88,14 +225,185 @@ export async function writeWorkspaceFile(relativePath: string, content: string, 
   return `File written: ${relativePath} (${content.length} bytes)`;
 }
 
-export async function listWorkspaceDirectory(relativePath: string, userId: string): Promise<string> {
+/**
+ * List files/dirs under path. depth=1 is flat (default); higher values recurse
+ * (max MAX_LIST_DEPTH). Output is capped at MAX_LIST_LINES.
+ */
+export async function listWorkspaceDirectory(
+  relativePath: string,
+  userId: string,
+  options?: { depth?: number },
+): Promise<string> {
   const abs = resolveWorkspacePath(relativePath, userId);
-  const entries = readdirSync(abs);
-  const lines = entries.map(name => {
-    const stat = statSync(join(abs, name));
-    return `${stat.isDirectory() ? "[DIR]" : "[FILE]"} ${name} (${stat.size} bytes)`;
+  const rawDepth = options?.depth ?? DEFAULT_LIST_DEPTH;
+  const depth = Math.max(1, Math.min(MAX_LIST_DEPTH, Math.floor(rawDepth) || DEFAULT_LIST_DEPTH));
+  const baseLabel = relativePath === "." || relativePath === "" ? "." : relativePath.replace(/\\/g, "/");
+
+  if (depth === 1) {
+    const entries = readdirSync(abs);
+    const lines = entries.map((name) => {
+      const stat = statSync(join(abs, name));
+      return `${stat.isDirectory() ? "[DIR]" : "[FILE]"} ${name} (${stat.size} bytes)`;
+    });
+    if (lines.length === 0) {
+      return `[LIST empty] path=${baseLabel} (empty directory)`;
+    }
+    return lines.join("\n");
+  }
+
+  const lines: string[] = [];
+  let truncated = false;
+  walkWorkspace(abs, "", depth, (hit) => {
+    if (lines.length >= MAX_LIST_LINES) {
+      truncated = true;
+      return false;
+    }
+    lines.push(`${hit.isDir ? "[DIR]" : "[FILE]"} ${hit.rel} (${hit.size} bytes)`);
   });
-  return lines.join("\n") || "(empty directory)";
+  if (lines.length === 0) {
+    return `[LIST empty] path=${baseLabel} depth=${depth} (no entries)`;
+  }
+  let out = lines.join("\n");
+  if (truncated) {
+    out += `\n[truncated] listed ${MAX_LIST_LINES} entries under path=${baseLabel} depth=${depth}`;
+  }
+  return out;
+}
+
+/**
+ * Find files by glob pattern under an optional workspace-relative path.
+ * Prefer this over repeated list_directory for codebase exploration.
+ */
+export async function searchWorkspaceFiles(
+  pattern: string,
+  userId: string,
+  options?: { path?: string; maxResults?: number },
+): Promise<string> {
+  const pat = pattern?.trim();
+  if (!pat) return "[SEARCH empty] pattern is required";
+
+  const subPath = options?.path?.trim() || ".";
+  const startAbs = resolveWorkspacePath(subPath, userId);
+  const maxResults = Math.max(
+    1,
+    Math.min(MAX_SEARCH_RESULTS, Math.floor(options?.maxResults ?? MAX_SEARCH_RESULTS) || MAX_SEARCH_RESULTS),
+  );
+  const re = globToRegExp(pat);
+  const hits: string[] = [];
+  let truncated = false;
+
+  walkWorkspace(startAbs, "", 32, (hit) => {
+    if (hit.isDir) return;
+    // Match against path relative to the search root AND basename for short patterns like *.json
+    const base = hit.rel.includes("/") ? hit.rel.slice(hit.rel.lastIndexOf("/") + 1) : hit.rel;
+    if (re.test(hit.rel) || re.test(base)) {
+      if (hits.length >= maxResults) {
+        truncated = true;
+        return false;
+      }
+      hits.push(hit.rel);
+    }
+  });
+
+  const rootLabel = subPath === "." || subPath === "" ? "." : subPath.replace(/\\/g, "/");
+  if (hits.length === 0) {
+    return `[SEARCH empty] No files matched pattern=${JSON.stringify(pat)} under path=${rootLabel}`;
+  }
+  let out = hits.map((h) => `[FILE] ${h}`).join("\n");
+  if (truncated) {
+    out += `\n[truncated] showing first ${maxResults} matches for pattern=${JSON.stringify(pat)}`;
+  }
+  return out;
+}
+
+/**
+ * Search file contents with a regex (or fixed string). Skips binary/large files
+ * and SKIP_DIR_NAMES. Prefer this over list_directory when looking for symbols/fields.
+ */
+export async function grepWorkspaceContent(
+  pattern: string,
+  userId: string,
+  options?: {
+    path?: string;
+    glob?: string;
+    caseInsensitive?: boolean;
+    maxMatches?: number;
+    fixedString?: boolean;
+  },
+): Promise<string> {
+  const pat = pattern?.trim();
+  if (!pat) return "[GREP empty] pattern is required";
+
+  const subPath = options?.path?.trim() || ".";
+  const startAbs = resolveWorkspacePath(subPath, userId);
+  const maxMatches = Math.max(
+    1,
+    Math.min(MAX_GREP_MATCHES, Math.floor(options?.maxMatches ?? MAX_GREP_MATCHES) || MAX_GREP_MATCHES),
+  );
+  const globRe = options?.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
+
+  let re: RegExp;
+  try {
+    if (options?.fixedString) {
+      const escaped = pat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      re = new RegExp(escaped, options.caseInsensitive === false ? "" : "i");
+    } else {
+      re = new RegExp(pat, options?.caseInsensitive === false ? "" : "i");
+    }
+  } catch (err) {
+    return `[GREP error] Invalid regex: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  const lines: string[] = [];
+  let truncated = false;
+  let filesScanned = 0;
+
+  walkWorkspace(startAbs, "", 32, (hit) => {
+    if (hit.isDir) return;
+    if (globRe) {
+      const base = hit.rel.includes("/") ? hit.rel.slice(hit.rel.lastIndexOf("/") + 1) : hit.rel;
+      if (!globRe.test(hit.rel) && !globRe.test(base)) return;
+    }
+    if (hit.size > MAX_GREP_FILE_BYTES || hit.size === 0) return;
+
+    let text: string;
+    try {
+      const buf = readFileSync(hit.abs);
+      // Skip likely binary
+      if (buf.includes(0)) return;
+      text = buf.toString("utf8");
+    } catch {
+      return;
+    }
+    filesScanned += 1;
+    const fileLines = text.split(/\r?\n/);
+    for (let li = 0; li < fileLines.length; li++) {
+      const line = fileLines[li]!;
+      if (re.test(line)) {
+        if (lines.length >= maxMatches) {
+          truncated = true;
+          return false;
+        }
+        // Reset lastIndex for global-less regex safety if flags change later
+        const snippet = line.length > 240 ? line.slice(0, 240) + "…" : line;
+        lines.push(`${hit.rel}:${li + 1}:${snippet}`);
+      }
+    }
+  });
+
+  const rootLabel = subPath === "." || subPath === "" ? "." : subPath.replace(/\\/g, "/");
+  if (lines.length === 0) {
+    return (
+      `[GREP empty] No matches for pattern=${JSON.stringify(pat)} under path=${rootLabel}` +
+      (options?.glob ? ` glob=${JSON.stringify(options.glob)}` : "") +
+      ` (scanned ${filesScanned} files)`
+    );
+  }
+  let out = lines.join("\n");
+  if (truncated) {
+    out += `\n[truncated] showing first ${maxMatches} matches`;
+  }
+  return out;
 }
 
 export type WorkspaceEntry = {
