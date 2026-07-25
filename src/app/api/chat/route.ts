@@ -1903,7 +1903,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_create",
-      description: "Create a new knowledge base (RAG database). Use when the user asks to create a knowledge base for a specific topic or purpose. Documents can be added later via kb_ingest.",
+      description: "CRITICAL: You MUST call this tool to create a knowledge base. Do NOT say 'created' without calling this tool — the user will verify in the UI. Creates a new knowledge base (RAG database). Call this when the user asks to create a knowledge base. Returns the KB id needed for kb_ingest.",
       parameters: {
         type: "object",
         properties: {
@@ -1918,7 +1918,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_list",
-      description: "List the user's knowledge bases. Use when the user asks to see their knowledge bases or check which ones exist.",
+      description: "CRITICAL: You MUST call this tool to list knowledge bases. Do NOT fabricate KB names or claim they exist without calling this tool. Returns the actual KB list from the database.",
       parameters: {
         type: "object",
         properties: {},
@@ -1929,7 +1929,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_ingest",
-      description: "Add a document to a knowledge base. The text is automatically chunked and embedded for RAG search. Use when the user asks to add, store, or save text/URLs/documents to a knowledge base.",
+      description: "CRITICAL: You MUST call this tool to add documents to a knowledge base. Do NOT say 'ingested' or 'saved' without calling this tool — the data will NOT be stored. Call this when the user asks to add/save/store text or documents to a KB. Returns the document id and chunk count.",
       parameters: {
         type: "object",
         properties: {
@@ -1946,7 +1946,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_search",
-      description: "Search a knowledge base for relevant chunks matching the query. Returns top results with similarity scores. Use when the user asks to search within their knowledge base or find specific information.",
+      description: "CRITICAL: You MUST call this tool to search a knowledge base. Do NOT fabricate search results or quote content without calling this tool — fabricated results mislead the user. Returns actual matching chunks with similarity scores from the database.",
       parameters: {
         type: "object",
         properties: {
@@ -1961,7 +1961,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_ingest_folder",
-      description: "Recursively scan a folder in the workspace and ingest all text files (.txt, .md, .json, .csv, .xml, .yml, .yaml, .ts, .js, .py, .html) into a knowledge base. Each file becomes one document with chunked embeddings. Use when the user asks to bulk-import a folder or multiple files at once.",
+      description: "CRITICAL: You MUST call this tool to bulk-import a folder into a knowledge base. Do NOT claim files were ingested without calling this tool — the data will NOT be stored. Returns the count of files ingested, skipped, and errors. Each text file becomes one document with chunked embeddings.",
       parameters: {
         type: "object",
         properties: {
