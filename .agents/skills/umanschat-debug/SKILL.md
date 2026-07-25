@@ -514,6 +514,21 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
+### 25. KB documentCount always 0 / sparse character RAG
+
+**Symptom**: KB list badge shows `0` documents though expand shows docs; character RAG feels thin (~80 chunks/char) and lines mix speakers.
+
+**Causes**:
+1. `listKnowledgeBases` correlated COUNT used drizzle column objects inside the subquery → wrong SQL, count always 0.
+2. One-giant-doc-per-character JSONL + 512-char chunks under-reports volume and mixes many threads into one blob; message lines only took `message.characterId` owner rows.
+
+**Fix**:
+1. COUNT with raw `kb_documents.knowledge_base_id = knowledge_bases.id` + `mapWith(Number)`.
+2. `characterDialogueRag` emits profile + per-message + per-home-talk docs; attributes lines by `detail.characterId`; `replaceExisting` deletes same-name KBs; `kb_delete` tool for agents.
+3. `ingestJsonlFile` default max lines raised to 10k (cap 20k).
+
+---
+
 ### 24. Agent hooks: always report in message body (OMP-style)
 
 **Symptom**: Tools ran (KB created, JSONL written) but the user only sees thinking — no usable body.

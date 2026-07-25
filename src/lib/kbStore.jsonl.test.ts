@@ -68,6 +68,11 @@ describe("ingestJsonlFile", () => {
       .from(kbDocuments)
       .where(eq(kbDocuments.knowledgeBaseId, kbId));
     expect(docs.map((d) => d.title).sort()).toEqual(["井川葵", "小美山愛"].sort());
+
+    const { listKnowledgeBases } = await import("./kbStore");
+    const listed = await listKnowledgeBases(USER);
+    const row = listed.find((k) => k.id === kbId);
+    expect(row?.documentCount).toBe(2);
   });
 
   it("rejects paths outside workspace", async () => {

@@ -21,7 +21,10 @@ import { extractFileTextFromPath } from "@/lib/fileExtract";
 // ── Knowledge Base CRUD ──
 
 export async function listKnowledgeBases(userId: string) {
-  return db
+  // Correlated COUNT must use raw table/column names. Interpolating drizzle
+  // column objects in a subquery can bind values instead of correlating,
+  // which made documentCount always 0 in the UI despite documents existing.
+  const rows = await db
     .select({
       id: knowledgeBases.id,
       name: knowledgeBases.name,
@@ -29,13 +32,17 @@ export async function listKnowledgeBases(userId: string) {
       createdAt: knowledgeBases.createdAt,
       updatedAt: knowledgeBases.updatedAt,
       documentCount: sql<number>`(
-        SELECT COUNT(*) FROM ${kbDocuments}
-        WHERE ${kbDocuments.knowledgeBaseId} = ${knowledgeBases.id}
-      )`.as("document_count"),
+        SELECT COUNT(*) FROM kb_documents
+        WHERE kb_documents.knowledge_base_id = knowledge_bases.id
+      )`.mapWith(Number),
     })
     .from(knowledgeBases)
     .where(eq(knowledgeBases.userId, userId))
     .orderBy(sql`${knowledgeBases.createdAt} DESC`);
+  return rows.map((r) => ({
+    ...r,
+    documentCount: Number(r.documentCount) || 0,
+  }));
 }
 
 export async function createKnowledgeBase(
@@ -333,7 +340,8 @@ export async function ingestJsonlFile(
     throw new Error(`JSONL file not found: ${filePath}`);
   }
 
-  const maxLines = Math.min(500, Math.max(1, options?.maxLines ?? 200));
+  // Conversation-unit RAG can be thousands of lines; default cap is 10k.
+  const maxLines = Math.min(20_000, Math.max(1, options?.maxLines ?? 10_000));
   const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) {
     return { ingested: 0, skipped: 0, cached: 0, errors: ["JSONL file is empty"], titles: [] };

@@ -1,22 +1,24 @@
 /**
  * Server-side builder for per-character dialogue RAG JSONL.
  *
- * Agents frequently fail when asked to invent large Python scripts inside
- * sandbox_run / thinking (stream cuts mid-plan). This module implements the
- * stable pipeline: Character + Message + HomeTalk → one JSONL line per character
- * → optional KB create + bulk ingest + verify search.
+ * Emits one document per conversation unit (message thread / home talk) plus
+ * one profile doc per character — better retrieval than one giant blob per char.
+ *
+ * Dialogue lines are attributed by detail.characterId / homeTalk.characterId so
+ * lines spoken in another character's thread still land on the correct speaker.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { mkdirSync } from "node:fs";
 import {
   resolveWorkspacePath,
   writeWorkspaceFile,
 } from "@/lib/workspace";
 import {
   createKnowledgeBase,
+  deleteKnowledgeBase,
   ingestJsonlFile,
+  listKnowledgeBases,
   searchKnowledgeBases,
   type JsonlIngestResult,
   type KbSearchResult,
@@ -41,6 +43,7 @@ type CharRow = {
 };
 
 type HomeTalkRow = {
+  homeTalkId?: string;
   characterId?: string;
   title?: string;
   managerText?: string;
@@ -49,9 +52,15 @@ type HomeTalkRow = {
 };
 
 type MessageRow = {
+  id?: string;
   characterId?: string;
   name?: string;
-  details?: Array<{ characterId?: string; text?: string }>;
+  details?: Array<{
+    messageDetailId?: string;
+    characterId?: string;
+    text?: string;
+    nextMessageDetailIds?: string[];
+  }>;
 };
 
 function readJsonArray(absPath: string, label: string): unknown[] {
@@ -74,7 +83,13 @@ function readJsonArray(absPath: string, label: string): unknown[] {
 }
 
 function cleanText(s: string): string {
-  return s.replace(/\r\n/g, "\n").replace(/\n+/g, " ").trim();
+  return s.replace(/\r\n/g, "\n").trim();
+}
+
+function detailSortKey(id: string | undefined): number {
+  if (!id) return 0;
+  const n = Number(id);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function buildProfileBlock(c: CharRow): string {
@@ -101,12 +116,23 @@ export type BuildCharacterDialogueJsonlResult = {
   lineCount: number;
   charactersWithDialogue: number;
   charactersProfileOnly: number;
+  messageDocs: number;
+  homeTalkDocs: number;
+  profileDocs: number;
   totalBytes: number;
   sampleNames: string[];
 };
 
+type JsonlDoc = {
+  character_id: string;
+  name: string;
+  title: string;
+  content: string;
+  kind: "profile" | "message" | "home_talk";
+};
+
 /**
- * Build one JSONL line per character from game master-data style files.
+ * Build JSONL: profile doc + one doc per message thread + one per home talk.
  * Paths are workspace-relative.
  */
 export async function buildCharacterDialogueJsonl(
@@ -127,6 +153,55 @@ export async function buildCharacterDialogueJsonl(
   const messages = readJsonArray(msgAbs, "Message.json") as MessageRow[];
   const homeTalks = readJsonArray(homeAbs, "HomeTalk.json") as HomeTalkRow[];
 
+  const charName = new Map<string, string>();
+  for (const c of characters) {
+    if (c.id) charName.set(c.id, c.name?.trim() || c.id);
+  }
+
+  // Speakers in messages: group by detail.characterId (not only message owner)
+  // so lines spoken in another character's thread still attach to the speaker.
+  type MsgBucket = {
+    messageId: string;
+    messageName: string;
+    ownerId: string;
+    lines: string[];
+  };
+  const msgDocsByChar = new Map<string, MsgBucket[]>();
+
+  for (const m of messages) {
+    const ownerId = m.characterId ?? "";
+    const mname = m.name?.trim() || "(メッセージ)";
+    const mid = m.id || mname;
+    const details = [...(m.details ?? [])].sort(
+      (a, b) => detailSortKey(a.messageDetailId) - detailSortKey(b.messageDetailId),
+    );
+
+    // Collect lines per speaking character within this message
+    const bySpeaker = new Map<string, string[]>();
+    for (const d of details) {
+      const speaker = (d.characterId || "").trim();
+      if (!speaker) continue; // skip pure player choices
+      const txt = cleanText(d.text ?? "");
+      if (!txt) continue;
+      const list = bySpeaker.get(speaker) ?? [];
+      list.push(txt);
+      bySpeaker.set(speaker, list);
+    }
+
+    for (const [speaker, lines] of bySpeaker) {
+      if (lines.length === 0) continue;
+      const bucket: MsgBucket = {
+        messageId: mid,
+        messageName: mname,
+        ownerId,
+        lines,
+      };
+      const arr = msgDocsByChar.get(speaker) ?? [];
+      arr.push(bucket);
+      msgDocsByChar.set(speaker, arr);
+    }
+  }
+
   const homeByChar = new Map<string, HomeTalkRow[]>();
   for (const ht of homeTalks) {
     const cid = ht.characterId;
@@ -136,88 +211,97 @@ export async function buildCharacterDialogueJsonl(
     homeByChar.set(cid, list);
   }
 
-  const msgByChar = new Map<string, MessageRow[]>();
-  for (const m of messages) {
-    const cid = m.characterId;
-    if (!cid) continue;
-    const list = msgByChar.get(cid) ?? [];
-    list.push(m);
-    msgByChar.set(cid, list);
-  }
-
-  const linesOut: string[] = [];
+  const docs: JsonlDoc[] = [];
   let withDialogue = 0;
   let profileOnly = 0;
+  let messageDocs = 0;
+  let homeTalkDocs = 0;
+  let profileDocs = 0;
   const sampleNames: string[] = [];
 
   for (const c of characters) {
     const cid = c.id;
     if (!cid) continue;
     const name = c.name?.trim() || cid;
+    if (sampleNames.length < 8) sampleNames.push(name);
 
     const profile = buildProfileBlock(c);
-    const talkLines: string[] = [];
-    for (const ht of homeByChar.get(cid) ?? []) {
+    docs.push({
+      character_id: cid,
+      name,
+      title: `${name} | プロフィール`,
+      content: `【キャラクター】${name}（${cid}）\n\n【プロフィール】\n${profile}`,
+      kind: "profile",
+    });
+    profileDocs++;
+
+    const msgBuckets = msgDocsByChar.get(cid) ?? [];
+    const homeList = homeByChar.get(cid) ?? [];
+    if (msgBuckets.length + homeList.length > 0) withDialogue++;
+    else profileOnly++;
+
+    for (const mb of msgBuckets) {
+      const header =
+        `【キャラクター】${name}（${cid}）\n` +
+        `【種別】メッセージ\n` +
+        `【タイトル】${mb.messageName}\n` +
+        (mb.ownerId && mb.ownerId !== cid
+          ? `【スレッド所有者】${charName.get(mb.ownerId) || mb.ownerId}\n`
+          : "") +
+        `\n【セリフ】\n`;
+      const body = mb.lines.map((l) => `${name}: ${l}`).join("\n");
+      docs.push({
+        character_id: cid,
+        name,
+        title: `${name} | メッセージ | ${mb.messageName}`,
+        content: header + body,
+        kind: "message",
+      });
+      messageDocs++;
+    }
+
+    for (const ht of homeList) {
       const title = ht.title?.trim() || "(ホーム会話)";
       const segs: string[] = [];
-      if (ht.managerText?.trim()) segs.push(`[マネージャー] ${cleanText(ht.managerText)}`);
+      if (ht.managerText?.trim()) {
+        segs.push(`マネージャー: ${cleanText(ht.managerText)}`);
+      }
       if (ht.choiceText?.trim() && ht.choiceText !== ht.managerText) {
-        segs.push(`[選択肢] ${cleanText(ht.choiceText)}`);
+        segs.push(`選択肢: ${cleanText(ht.choiceText)}`);
       }
       for (const t of ht.characterTalks ?? []) {
         const txt = cleanText(t.text ?? "");
-        if (txt) segs.push(txt);
+        if (txt) segs.push(`${name}: ${txt}`);
       }
-      if (segs.length > 0) talkLines.push(`[${title}] ${segs.join(" / ")}`);
-    }
-
-    const msgLines: string[] = [];
-    for (const m of msgByChar.get(cid) ?? []) {
-      const mname = m.name?.trim() || "(メッセージ)";
-      const segs: string[] = [];
-      for (const d of m.details ?? []) {
-        // Keep lines spoken by this character (skip pure player choices)
-        if (d.characterId && d.characterId !== cid) continue;
-        if (!d.characterId && !d.text) continue;
-        // Player choice rows often have empty characterId — skip those
-        if (!d.characterId) continue;
-        const txt = cleanText(d.text ?? "");
-        if (txt) segs.push(txt);
-      }
-      if (segs.length > 0) msgLines.push(`[${mname}] ${segs.join(" / ")}`);
-    }
-
-    const parts: string[] = [`【プロフィール】\n${profile}`];
-    if (talkLines.length > 0) {
-      parts.push(`【ホーム会話セリフ】\n${talkLines.join("\n")}`);
-    }
-    if (msgLines.length > 0) {
-      parts.push(`【メッセージセリフ】\n${msgLines.join("\n")}`);
-    }
-
-    if (talkLines.length + msgLines.length > 0) withDialogue++;
-    else profileOnly++;
-
-    const content = parts.join("\n\n");
-    linesOut.push(
-      JSON.stringify({
+      if (segs.length === 0) continue;
+      const header =
+        `【キャラクター】${name}（${cid}）\n` +
+        `【種別】ホーム会話\n` +
+        `【タイトル】${title}\n\n【セリフ】\n`;
+      docs.push({
         character_id: cid,
         name,
-        content,
-      }),
-    );
-    if (sampleNames.length < 8) sampleNames.push(name);
+        title: `${name} | ホーム会話 | ${title}`,
+        content: header + segs.join("\n"),
+        kind: "home_talk",
+      });
+      homeTalkDocs++;
+    }
   }
 
   mkdirSync(dirname(outAbs), { recursive: true });
-  const body = linesOut.join("\n") + (linesOut.length ? "\n" : "");
+  const body =
+    docs.map((d) => JSON.stringify(d)).join("\n") + (docs.length ? "\n" : "");
   await writeWorkspaceFile(args.outputPath, body, userId);
 
   return {
     outputPath: args.outputPath,
-    lineCount: linesOut.length,
+    lineCount: docs.length,
     charactersWithDialogue: withDialogue,
     charactersProfileOnly: profileOnly,
+    messageDocs,
+    homeTalkDocs,
+    profileDocs,
     totalBytes: Buffer.byteLength(body, "utf8"),
     sampleNames,
   };
@@ -228,12 +312,13 @@ export type BuildAndIngestCharacterDialogueResult = {
   kbId: string;
   kbName: string;
   ingest: JsonlIngestResult;
+  deletedSameNameKbIds: string[];
   verify?: { query: string; results: KbSearchResult[] };
 };
 
 /**
  * One-shot: JSONL build + create KB + bulk ingest + optional verify search.
- * Prefer this for agent reliability over multi-step sandbox Python plans.
+ * Deletes existing KBs with the same name for this user (keeps a single latest).
  */
 export async function buildAndIngestCharacterDialogueRag(
   userId: string,
@@ -244,6 +329,8 @@ export async function buildAndIngestCharacterDialogueRag(
     outputPath?: string;
     kbName?: string;
     verifyQuery?: string;
+    /** When true (default), remove prior KBs with the same name before create. */
+    replaceExisting?: boolean;
   },
 ): Promise<BuildAndIngestCharacterDialogueResult> {
   const characterPath = args.characterPath?.trim() || "ipr-master-diff/Character.json";
@@ -251,6 +338,7 @@ export async function buildAndIngestCharacterDialogueRag(
   const homeTalkPath = args.homeTalkPath?.trim() || "ipr-master-diff/HomeTalk.json";
   const outputPath = args.outputPath?.trim() || "rag/character_dialogue.jsonl";
   const kbName = args.kbName?.trim() || "ipr-character-dialogue";
+  const replaceExisting = args.replaceExisting !== false;
 
   const build = await buildCharacterDialogueJsonl(userId, {
     characterPath,
@@ -259,13 +347,26 @@ export async function buildAndIngestCharacterDialogueRag(
     outputPath,
   });
 
+  const deletedSameNameKbIds: string[] = [];
+  if (replaceExisting) {
+    const existing = await listKnowledgeBases(userId);
+    for (const kb of existing) {
+      if (kb.name === kbName) {
+        const ok = await deleteKnowledgeBase(kb.id, userId);
+        if (ok) deletedSameNameKbIds.push(kb.id);
+      }
+    }
+  }
+
   const kb = await createKnowledgeBase(
     userId,
     kbName,
-    "Per-character dialogue from Message.json + HomeTalk.json (auto-built)",
+    "Character dialogue RAG (profile + message + home talk units from Message/HomeTalk)",
   );
 
-  const ingest = await ingestJsonlFile(kb.id, outputPath, userId, { maxLines: 500 });
+  const ingest = await ingestJsonlFile(kb.id, outputPath, userId, {
+    maxLines: 20_000,
+  });
 
   let verify: BuildAndIngestCharacterDialogueResult["verify"];
   if (args.verifyQuery?.trim()) {
@@ -279,5 +380,5 @@ export async function buildAndIngestCharacterDialogueRag(
     verify = { query: args.verifyQuery.trim(), results };
   }
 
-  return { build, kbId: kb.id, kbName, ingest, verify };
+  return { build, kbId: kb.id, kbName, ingest, deletedSameNameKbIds, verify };
 }

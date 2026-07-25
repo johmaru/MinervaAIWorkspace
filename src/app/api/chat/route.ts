@@ -26,6 +26,7 @@ import { buildMemoryContext } from "@/lib/memoryStore";
 import {
   buildKnowledgeContextMessage,
   createKnowledgeBase,
+  deleteKnowledgeBase,
   listKnowledgeBases,
   ingestDocument,
   ingestFolder,
@@ -2058,10 +2059,29 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "kb_list",
-      description: "CRITICAL: You MUST call this tool to list knowledge bases. Do NOT fabricate KB names or claim they exist without calling this tool. Returns the actual KB list from the database.",
+      description:
+        "CRITICAL: You MUST call this tool to list knowledge bases. Do NOT fabricate KB names or claim they exist without calling this tool. " +
+        "Returns id, name, description, documentCount, createdAt. Use documentCount to see if a KB is empty.",
       parameters: {
         type: "object",
         properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "kb_delete",
+      description:
+        "CRITICAL: Permanently delete a knowledge base and all its documents/chunks. " +
+        "Use when cleaning duplicate KBs (e.g. keep only the latest ipr-character-dialogue). " +
+        "Call kb_list first to get ids. Returns whether deletion succeeded.",
+      parameters: {
+        type: "object",
+        properties: {
+          knowledge_base_id: { type: "string", description: "KB id from kb_list" },
+        },
+        required: ["knowledge_base_id"],
       },
     },
   },
@@ -2146,11 +2166,10 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "rag_build_character_dialogue",
       description:
-        "ONE-SHOT agent tool: build per-character dialogue RAG from Character.json + Message.json + HomeTalk.json. " +
-        "Writes JSONL (one line per character with profile + dialogue), creates a knowledge base, bulk-ingests, " +
-        "and optionally runs kb search to verify. " +
-        "PREFERRED over sandbox_run Python for this task — long scripts in thinking/tool-args often get cut off. " +
-        "Default paths assume files under ipr-master-diff/. Returns kb_id, counts, sample names, and verify hits.",
+        "ONE-SHOT agent tool: build character dialogue RAG from Character.json + Message.json + HomeTalk.json. " +
+        "Writes JSONL with one document per profile / message thread / home talk (not one giant blob per character), " +
+        "deletes prior KBs with the same name, creates a new KB, bulk-ingests, optional verify search. " +
+        "PREFERRED over sandbox_run Python. Default paths under ipr-master-diff/. Returns kb_id, doc counts, verify hits.",
       parameters: {
         type: "object",
         properties: {
@@ -2764,11 +2783,31 @@ async function streamCompletion({
             const kbs = await listKnowledgeBases(userId);
             toolContent = kbs.length === 0
               ? "No knowledge bases found."
-              : JSON.stringify(kbs.map((kb) => ({ id: kb.id, name: kb.name, description: kb.description, documentCount: kb.documentCount })));
+              : JSON.stringify(
+                  kbs.map((kb) => ({
+                    id: kb.id,
+                    name: kb.name,
+                    description: kb.description,
+                    documentCount: kb.documentCount,
+                    createdAt: kb.createdAt,
+                  })),
+                );
           } catch (err) {
             toolContent = `Failed to list knowledge bases: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "kb_list", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_delete" && parsedArgs.knowledge_base_id) {
+          send?.("status", { label: t(locale, "chat.statusToolKbDelete") });
+          const tTool = Date.now();
+          try {
+            const ok = await deleteKnowledgeBase(parsedArgs.knowledge_base_id, userId);
+            toolContent = ok
+              ? `Knowledge base deleted: ${parsedArgs.knowledge_base_id}`
+              : `Knowledge base not found or not owned: ${parsedArgs.knowledge_base_id}`;
+          } catch (err) {
+            toolContent = `Failed to delete knowledge base: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_delete", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_ingest" && parsedArgs.knowledge_base_id && parsedArgs.title) {
           send?.("status", { label: t(locale, "chat.statusToolKbIngest") });
           const tTool = Date.now();
@@ -2872,9 +2911,14 @@ async function streamCompletion({
               `kb_id=${result.kbId}\n` +
               `kb_name=${result.kbName}\n` +
               `jsonl=${result.build.outputPath} lines=${result.build.lineCount} bytes=${result.build.totalBytes}\n` +
-              `with_dialogue=${result.build.charactersWithDialogue} profile_only=${result.build.charactersProfileOnly}\n` +
+              `docs: profile=${result.build.profileDocs} message=${result.build.messageDocs} home_talk=${result.build.homeTalkDocs}\n` +
+              `with_dialogue_chars=${result.build.charactersWithDialogue} profile_only_chars=${result.build.charactersProfileOnly}\n` +
               `ingest: ingested=${result.ingest.ingested} cached=${result.ingest.cached} skipped=${result.ingest.skipped} errors=${result.ingest.errors.length}\n` +
-              `sample_names=${result.build.sampleNames.join(", ")}`;
+              `deleted_same_name_kbs=${result.deletedSameNameKbIds.length}` +
+              (result.deletedSameNameKbIds.length
+                ? ` (${result.deletedSameNameKbIds.join(", ")})`
+                : "") +
+              `\nsample_names=${result.build.sampleNames.join(", ")}`;
             if (result.verify) {
               toolContent += `\nverify_query=${JSON.stringify(result.verify.query)} hits=${result.verify.results.length}`;
               for (const hit of result.verify.results.slice(0, 3)) {

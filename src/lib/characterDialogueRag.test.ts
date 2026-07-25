@@ -3,12 +3,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { db } from "@/db";
-import { knowledgeBases, users } from "@/db/schema";
+import { knowledgeBases, users, kbDocuments } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import {
   buildCharacterDialogueJsonl,
   buildAndIngestCharacterDialogueRag,
 } from "./characterDialogueRag";
+import { listKnowledgeBases } from "./kbStore";
 
 vi.mock("@/lib/embed", () => ({
   embedText: vi.fn(async () => Array.from({ length: 8 }, (_, i) => i * 0.01)),
@@ -56,9 +57,11 @@ describe("characterDialogueRag", () => {
           name: "湯けむり",
           characterId: "char-ai",
           details: [
-            { characterId: "char-ai", text: "私、サンバにはまってるんです" },
-            { characterId: "", text: "そうなのか？" },
-            { characterId: "char-ai", text: "はい！" },
+            { messageDetailId: "1", characterId: "char-ai", text: "私、サンバにはまってるんです" },
+            { messageDetailId: "2", characterId: "", text: "そうなのか？" },
+            { messageDetailId: "3", characterId: "char-ai", text: "はい！" },
+            // Spoken by aoi inside ai's thread — must go to aoi's docs
+            { messageDetailId: "4", characterId: "char-aoi", text: "愛、それはいいね" },
           ],
         },
       ]),
@@ -92,35 +95,60 @@ describe("characterDialogueRag", () => {
     }
   });
 
-  it("buildCharacterDialogueJsonl writes one line per character with dialogue", async () => {
+  it("emits profile + message + home units with correct speaker attribution", async () => {
     const result = await buildCharacterDialogueJsonl(USER, {
       characterPath: "ipr-master-diff/Character.json",
       messagePath: "ipr-master-diff/Message.json",
       homeTalkPath: "ipr-master-diff/HomeTalk.json",
       outputPath: "rag/character_dialogue.jsonl",
     });
-    expect(result.lineCount).toBe(2);
-    expect(result.charactersWithDialogue).toBe(1);
-    expect(result.charactersProfileOnly).toBe(1);
+    // 2 profiles + 2 message docs (ai + aoi lines) + 1 home talk
+    expect(result.profileDocs).toBe(2);
+    expect(result.messageDocs).toBe(2);
+    expect(result.homeTalkDocs).toBe(1);
+    expect(result.lineCount).toBe(5);
+    expect(result.charactersWithDialogue).toBe(2);
 
     const raw = readFileSync(join(wsRoot, "rag", "character_dialogue.jsonl"), "utf8");
-    const lines = raw.trim().split("\n").map((l) => JSON.parse(l) as { name: string; content: string });
-    const ai = lines.find((l) => l.name === "小美山愛");
-    expect(ai?.content).toContain("サンバにはまってる");
-    expect(ai?.content).toContain("最近ハマってることがあって");
-    expect(ai?.content).not.toContain("そうなのか？"); // player choice skipped
+    const lines = raw
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { title: string; name: string; content: string; character_id: string });
+
+    const aiMsg = lines.find((l) => l.title.includes("メッセージ") && l.character_id === "char-ai");
+    expect(aiMsg?.content).toContain("サンバにはまってる");
+    expect(aiMsg?.content).not.toContain("そうなのか？");
+    expect(aiMsg?.content).not.toContain("愛、それはいいね"); // aoi's line
+
+    const aoiMsg = lines.find((l) => l.title.includes("メッセージ") && l.character_id === "char-aoi");
+    expect(aoiMsg?.content).toContain("愛、それはいいね");
+    expect(aoiMsg?.content).toContain("スレッド所有者");
   });
 
-  it("buildAndIngestCharacterDialogueRag creates KB and ingests", async () => {
-    // Skip verify_query here: searchKnowledgeBases needs real embedding dims / sqlite-vec.
-    const result = await buildAndIngestCharacterDialogueRag(USER, {
+  it("buildAndIngest creates KB, replaces same name, and documentCount is accurate", async () => {
+    const first = await buildAndIngestCharacterDialogueRag(USER, {
       kbName: "test-char-rag",
-      outputPath: "rag/character_dialogue2.jsonl",
+      outputPath: "rag/character_dialogue_a.jsonl",
     });
-    createdKbIds.push(result.kbId);
-    expect(result.kbId).toBeTruthy();
-    expect(result.ingest.ingested).toBeGreaterThanOrEqual(1);
-    expect(result.build.lineCount).toBe(2);
-    expect(result.verify).toBeUndefined();
+    createdKbIds.push(first.kbId);
+    expect(first.ingest.ingested).toBe(5);
+
+    const second = await buildAndIngestCharacterDialogueRag(USER, {
+      kbName: "test-char-rag",
+      outputPath: "rag/character_dialogue_b.jsonl",
+    });
+    createdKbIds.push(second.kbId);
+    expect(second.deletedSameNameKbIds).toContain(first.kbId);
+
+    const listed = await listKnowledgeBases(USER);
+    const ragKbs = listed.filter((k) => k.name === "test-char-rag");
+    expect(ragKbs).toHaveLength(1);
+    expect(ragKbs[0]!.documentCount).toBe(5);
+
+    const docs = await db
+      .select({ title: kbDocuments.title })
+      .from(kbDocuments)
+      .where(eq(kbDocuments.knowledgeBaseId, second.kbId));
+    expect(docs.length).toBe(5);
   });
 });
