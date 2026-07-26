@@ -26,6 +26,7 @@ import { buildMemoryContext } from "@/lib/memoryStore";
 import {
   buildKnowledgeContextMessage,
   createKnowledgeBase,
+  createKnowledgeBaseFromJsonl,
   deleteKnowledgeBase,
   listKnowledgeBases,
   ingestDocument,
@@ -33,6 +34,7 @@ import {
   ingestJsonlFile,
   searchKnowledgeBases,
 } from "@/lib/kbStore";
+import { buildJsonlFilterFromToolArgs } from "@/lib/jsonlFilter";
 import { buildAndIngestCharacterDialogueRag } from "@/lib/characterDialogueRag";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
@@ -1234,11 +1236,11 @@ function buildFinalMessages({
           "Reserve `sandbox_run` for executing code, not for file exploration.\n" +
           "11. Multi-step agent work: after tools finish, you MUST produce a user-visible answer in message content. " +
           "Thinking is not the answer. Server hooks will force a final report if content is missing — still write it yourself.\n" +
-          "12. Bulk character dialogue RAG from Character/Message/HomeTalk: prefer `rag_build_character_dialogue` ONCE. " +
-          "Single-character KB (e.g. 愛 only): call it ONCE with character_names=\"小美山愛\" or character_ids=\"char-ai\" " +
-          "(optional source_jsonl_path=rag/character_dialogue.jsonl to filter an existing full JSONL). " +
-          "Do NOT read multi-MB JSONL with read_file (will fail size limit). Do not invent long Python for that task. " +
-          "Other bulk RAG: JSONL + kb_ingest_jsonl. Sandbox: read /workspace, write /out only + outputFiles.",
+          "12. Subset / themed knowledge bases (GENERIC): use `kb_from_jsonl` ONCE — path to any workspace JSONL + " +
+          "filter_equals / filter_contains / filter_any_fields+filter_any_value (any top-level fields: name, title, kind, tag, project, …). " +
+          "Do NOT read multi-MB JSONL with read_file. Do NOT hand-filter in sandbox. " +
+          "Character+Message+HomeTalk game data only: `rag_build_character_dialogue` (optional character_ids/names). " +
+          "Other bulk: kb_ingest_jsonl (same filters). Sandbox: read /workspace, write /out only + outputFiles.",
       }
     : null;
   return [
@@ -2142,9 +2144,9 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "kb_ingest_jsonl",
       description:
-        "CRITICAL: Bulk-ingest a workspace JSONL file into a knowledge base (one JSON object per line → one document). " +
-        "Each line should include content (or text) and title or name (and optional character_id). " +
-        "For Character+Message+HomeTalk game data, prefer rag_build_character_dialogue instead. " +
+        "CRITICAL: Bulk-ingest a workspace JSONL file into an EXISTING knowledge base (one JSON object per line → one document). " +
+        "Optional generic field filters (filter_equals / filter_contains / filter_any_*) keep only matching lines. " +
+        "To create a new KB and ingest in one step, prefer kb_from_jsonl. " +
         "Do NOT claim bulk ingest without calling this tool. Returns counts: ingested, skipped, cached, errors, sample titles.",
       parameters: {
         type: "object",
@@ -2158,6 +2160,26 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             type: "number",
             description: "Safety cap on lines to ingest (default 10000, max 20000)",
           },
+          filter_equals: {
+            type: "string",
+            description: "Optional exact field matches as k=v pairs, e.g. 'kind=message,character_id=char-ai'",
+          },
+          filter_contains: {
+            type: "string",
+            description: "Optional substring field matches as k=v pairs, e.g. 'name=愛' or 'title=プロジェクトA'",
+          },
+          filter_any_fields: {
+            type: "string",
+            description: "Optional comma-separated fields for OR contains (with filter_any_value), e.g. 'name,title,tags'",
+          },
+          filter_any_value: {
+            type: "string",
+            description: "Value that must appear in at least one of filter_any_fields",
+          },
+          filter_json: {
+            type: "string",
+            description: "Optional full filter as JSON: {equals,contains,in,anyFieldContains}",
+          },
         },
         required: ["knowledge_base_id", "path"],
       },
@@ -2166,14 +2188,69 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "kb_from_jsonl",
+      description:
+        "GENERIC one-shot: create a knowledge base from a workspace JSONL (optionally filtered by any top-level fields), " +
+        "then bulk-ingest. Use for themed/subset KBs: by name, title, kind, tag, project, author, character_id, etc. " +
+        "Replaces same-name KBs by default. Do NOT read multi-MB JSONL with read_file — filter here. " +
+        "For building dialogue JSONL from Character/Message/HomeTalk masters, use rag_build_character_dialogue first (or filter an existing JSONL with this tool).",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "New knowledge base name (e.g. 'work-docs-q3', 'ipr-dialogue-小美山愛')",
+          },
+          path: {
+            type: "string",
+            description: "Workspace-relative JSONL path (one JSON object per line with content/text)",
+          },
+          description: {
+            type: "string",
+            description: "Optional KB description",
+          },
+          filter_equals: {
+            type: "string",
+            description: "Exact field matches: 'kind=message,character_id=char-ai'",
+          },
+          filter_contains: {
+            type: "string",
+            description: "Substring field matches: 'name=愛' or 'title=契約書'",
+          },
+          filter_any_fields: {
+            type: "string",
+            description: "OR-contains fields: 'name,title,tags' (with filter_any_value)",
+          },
+          filter_any_value: {
+            type: "string",
+            description: "Needle for filter_any_fields",
+          },
+          filter_json: {
+            type: "string",
+            description: "Full filter JSON if needed",
+          },
+          max_lines: {
+            type: "number",
+            description: "Safety cap (default 10000, max 20000)",
+          },
+          replace_existing: {
+            type: "boolean",
+            description: "Delete existing KBs with the same name first (default true)",
+          },
+        },
+        required: ["name", "path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "rag_build_character_dialogue",
       description:
-        "ONE-SHOT agent tool: build character dialogue RAG from Character.json + Message.json + HomeTalk.json " +
-        "(or filter an existing JSONL). Writes JSONL (profile + message + home talk units), " +
-        "deletes prior KBs with the same name, creates a new KB, bulk-ingests, optional verify search. " +
-        "For a single character (e.g. 小美山愛 only) set character_names or character_ids — do NOT try to " +
-        "read multi-MB JSONL with read_file or hand-filter in sandbox. " +
-        "PREFERRED over sandbox_run Python. Returns kb_id, doc counts, verify hits.",
+        "DOMAIN convenience (idol/game Character+Message+HomeTalk only): build dialogue JSONL then create+ingest a KB. " +
+        "For generic subset KBs from any JSONL, use kb_from_jsonl instead. " +
+        "Optional character_ids/character_names filter speakers. Optional source_jsonl_path to filter existing JSONL. " +
+        "Do NOT read multi-MB JSONL with read_file. Returns kb_id, doc counts, verify hits.",
       parameters: {
         type: "object",
         properties: {
@@ -2513,6 +2590,9 @@ async function streamCompletion({
           character_path?: string; message_path?: string; home_talk_path?: string;
           output_path?: string; kb_name?: string; verify_query?: string;
           character_ids?: string; character_names?: string; source_jsonl_path?: string;
+          filter_equals?: string; filter_contains?: string;
+          filter_any_fields?: string; filter_any_value?: string; filter_json?: string;
+          replace_existing?: boolean;
         };
         try {
           parsedArgs = JSON.parse(tc.arguments) as typeof parsedArgs;
@@ -2909,6 +2989,7 @@ async function streamCompletion({
           send?.("status", { label: t(locale, "chat.statusToolKbIngestJsonl") });
           const tTool = Date.now();
           try {
+            const filter = buildJsonlFilterFromToolArgs(parsedArgs);
             const result = await ingestJsonlFile(
               parsedArgs.knowledge_base_id,
               parsedArgs.path,
@@ -2916,6 +2997,7 @@ async function streamCompletion({
               {
                 maxLines:
                   typeof parsedArgs.max_lines === "number" ? parsedArgs.max_lines : undefined,
+                filter,
                 onProgress: (done, total, phase) => {
                   // Keep SSE alive and show progress so the UI does not look hung
                   // while thousands of chunks are embedded.
@@ -2940,6 +3022,7 @@ async function streamCompletion({
             toolContent =
               `JSONL ingest complete for ${parsedArgs.path}: ` +
               `ingested=${result.ingested}, cached=${result.cached}, skipped=${result.skipped}, errors=${result.errors.length}` +
+              (filter ? `\nfilter applied` : "") +
               (result.titles.length > 0 ? `\nSample titles: ${result.titles.join(", ")}` : "");
             if (result.errors.length > 0) {
               toolContent +=
@@ -2950,6 +3033,59 @@ async function streamCompletion({
             toolContent = `Failed to ingest JSONL: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "kb_ingest_jsonl", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "kb_from_jsonl" && parsedArgs.name && parsedArgs.path) {
+          send?.("status", { label: t(locale, "chat.statusToolKbFromJsonl") });
+          const tTool = Date.now();
+          try {
+            const filter = buildJsonlFilterFromToolArgs(parsedArgs);
+            const result = await createKnowledgeBaseFromJsonl(userId, {
+              name: parsedArgs.name,
+              description: parsedArgs.description,
+              path: parsedArgs.path,
+              filter,
+              maxLines:
+                typeof parsedArgs.max_lines === "number" ? parsedArgs.max_lines : undefined,
+              replaceExisting: parsedArgs.replace_existing !== false,
+              onProgress: (done, total, phase) => {
+                if (phase === "embed") {
+                  send?.("status", {
+                    label: t(locale, "chat.statusToolKbEmbedProgress", {
+                      done: String(done),
+                      total: String(total),
+                    }),
+                  });
+                } else if (phase === "write" && (done % 100 === 0 || done === total)) {
+                  send?.("status", {
+                    label: t(locale, "chat.statusToolKbWriteProgress", {
+                      done: String(done),
+                      total: String(total),
+                    }),
+                  });
+                }
+              },
+            });
+            toolContent =
+              `KB created from JSONL.\n` +
+              `kb_id=${result.kbId}\n` +
+              `kb_name=${result.kbName}\n` +
+              `path=${parsedArgs.path}\n` +
+              `filter=${result.filterDescription}\n` +
+              `ingest: ingested=${result.ingest.ingested} cached=${result.ingest.cached} skipped=${result.ingest.skipped} errors=${result.ingest.errors.length}\n` +
+              `deleted_same_name_kbs=${result.deletedSameNameKbIds.length}` +
+              (result.ingest.titles.length
+                ? `\nSample titles: ${result.ingest.titles.join(", ")}`
+                : "");
+            if (result.ingest.errors.length > 0) {
+              toolContent +=
+                `\nErrors:\n${result.ingest.errors.slice(0, 8).join("\n")}` +
+                (result.ingest.errors.length > 8
+                  ? `\n... and ${result.ingest.errors.length - 8} more`
+                  : "");
+            }
+          } catch (err) {
+            toolContent = `Failed kb_from_jsonl: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          logger.info("search-timing", "tool", { tool: "kb_from_jsonl", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "rag_build_character_dialogue") {
           send?.("status", { label: t(locale, "chat.statusToolRagBuildCharacterDialogue") });
           const tTool = Date.now();

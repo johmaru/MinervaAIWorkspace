@@ -8,6 +8,7 @@ import { knowledgeBases, kbDocuments, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import {
   createKnowledgeBase,
+  createKnowledgeBaseFromJsonl,
   ingestJsonlFile,
   searchKnowledgeBases,
   buildKnowledgeContextMessage,
@@ -83,6 +84,27 @@ describe("ingestJsonlFile", () => {
 
   it("rejects paths outside workspace", async () => {
     await expect(ingestJsonlFile(kbId, "../etc/passwd", USER)).rejects.toThrow(/outside the workspace/i);
+  });
+
+  it("createKnowledgeBaseFromJsonl filters generically by field contains", async () => {
+    const created = await createKnowledgeBaseFromJsonl(USER, {
+      name: "subset-ai",
+      path: "rag/chars.jsonl",
+      filter: { contains: { name: "愛" } },
+      replaceExisting: true,
+    });
+    expect(created.ingest.ingested).toBe(1);
+    expect(created.ingest.titles).toEqual(expect.arrayContaining(["小美山愛"]));
+    expect(created.filterDescription).toMatch(/愛/);
+
+    const docs = await db
+      .select({ title: kbDocuments.title })
+      .from(kbDocuments)
+      .where(eq(kbDocuments.knowledgeBaseId, created.kbId));
+    expect(docs).toHaveLength(1);
+    expect(docs[0]!.title).toContain("小美山愛");
+
+    await db.delete(knowledgeBases).where(eq(knowledgeBases.id, created.kbId));
   });
 
   it("searchKnowledgeBases returns hits (IN clause must be parenthesized)", async () => {

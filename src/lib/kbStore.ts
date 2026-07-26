@@ -16,6 +16,12 @@ import {
   prefixChunkWithTitle,
   type RankableKbHit,
 } from "@/lib/kbSearchRank";
+import {
+  describeJsonlFilter,
+  jsonlLineMatches,
+  type JsonlLineFilter,
+} from "@/lib/jsonlFilter";
+import { writeWorkspaceFile } from "@/lib/workspace";
 
 /** Chunk content and stamp each piece with the document title/speaker when missing. */
 function chunkDocument(title: string, content: string): { text: string; ordinal: number }[] {
@@ -343,6 +349,9 @@ export type JsonlIngestResult = {
  * - `{ "name": "...", "content": "..." }`  (title falls back to name)
  * - `{ "character_id": "...", "name": "...", "content": "..." }`
  * - `{ "text": "..." }` with optional title/name
+ *
+ * Optional `filter` (JsonlLineFilter) keeps only matching lines — domain-agnostic
+ * field equals/contains (not limited to character dialogue).
  */
 export async function ingestJsonlFile(
   kbId: string,
@@ -350,6 +359,8 @@ export async function ingestJsonlFile(
   userId: string,
   options?: {
     maxLines?: number;
+    /** Keep only lines matching this filter (applied after JSON parse). */
+    filter?: JsonlLineFilter;
     /** Progress callback: (docsDone, docsTotal, phase) for SSE status. */
     onProgress?: (done: number, total: number, phase: "parse" | "embed" | "write") => void;
   },
@@ -392,10 +403,19 @@ export async function ingestJsonlFile(
   const pending: PendingDoc[] = [];
   let skipped = 0;
   let cached = 0;
+  let filteredOut = 0;
   const errors: string[] = [];
   const titles: string[] = [];
+  const filter = options?.filter;
 
   options?.onProgress?.(0, lines.length, "parse");
+  if (filter) {
+    logger.info("kbStore", "jsonl-filter", {
+      kbId,
+      filter: describeJsonlFilter(filter),
+      totalLines: lines.length,
+    });
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
@@ -404,6 +424,11 @@ export async function ingestJsonlFile(
       obj = JSON.parse(line) as Record<string, unknown>;
     } catch (err) {
       errors.push(`line ${i + 1}: invalid JSON (${err instanceof Error ? err.message : String(err)})`);
+      continue;
+    }
+
+    if (!jsonlLineMatches(obj, filter)) {
+      filteredOut++;
       continue;
     }
 
@@ -451,7 +476,12 @@ export async function ingestJsonlFile(
   }
 
   if (pending.length === 0) {
-    return { ingested: 0, skipped, cached, errors, titles };
+    if (filteredOut > 0 && skipped === 0 && errors.length === 0) {
+      errors.push(
+        `All ${filteredOut} lines were excluded by filter ${describeJsonlFilter(filter)}`,
+      );
+    }
+    return { ingested: 0, skipped: skipped + filteredOut, cached, errors, titles };
   }
 
   // Flatten all chunks for one batched embed pipeline
@@ -570,10 +600,121 @@ export async function ingestJsonlFile(
     ingested,
     cached,
     skipped,
+    filteredOut,
     errors: errors.length,
   });
 
-  return { ingested, skipped, cached, errors, titles };
+  return { ingested, skipped: skipped + filteredOut, cached, errors, titles };
+}
+
+export type CreateKbFromJsonlResult = {
+  kbId: string;
+  kbName: string;
+  ingest: JsonlIngestResult;
+  deletedSameNameKbIds: string[];
+  filterDescription: string;
+};
+
+/**
+ * Generic one-shot: create a knowledge base and bulk-ingest a workspace JSONL,
+ * optionally filtered by field equals/contains (any schema — not character-only).
+ *
+ * Use this for "subset KB" workflows: tag=work, project=foo, name⊃愛, kind=message, etc.
+ * Domain builders (e.g. rag_build_character_dialogue) can call this after writing JSONL.
+ */
+export async function createKnowledgeBaseFromJsonl(
+  userId: string,
+  args: {
+    name: string;
+    description?: string;
+    path: string;
+    filter?: JsonlLineFilter;
+    maxLines?: number;
+    /** When true (default), delete existing KBs with the same name first. */
+    replaceExisting?: boolean;
+    onProgress?: (done: number, total: number, phase: "parse" | "embed" | "write") => void;
+  },
+): Promise<CreateKbFromJsonlResult> {
+  const kbName = args.name.trim();
+  if (!kbName) throw new Error("Knowledge base name is required");
+  const path = args.path.trim();
+  if (!path) throw new Error("JSONL path is required");
+
+  const deletedSameNameKbIds: string[] = [];
+  if (args.replaceExisting !== false) {
+    const existing = await listKnowledgeBases(userId);
+    for (const kb of existing) {
+      if (kb.name === kbName) {
+        const ok = await deleteKnowledgeBase(kb.id, userId);
+        if (ok) deletedSameNameKbIds.push(kb.id);
+      }
+    }
+  }
+
+  const filterDesc = describeJsonlFilter(args.filter);
+  const description =
+    args.description?.trim() ||
+    (args.filter
+      ? `From ${path} filtered by ${filterDesc}`
+      : `From ${path}`);
+
+  const kb = await createKnowledgeBase(userId, kbName, description);
+  const ingest = await ingestJsonlFile(kb.id, path, userId, {
+    maxLines: args.maxLines,
+    filter: args.filter,
+    onProgress: args.onProgress,
+  });
+
+  return {
+    kbId: kb.id,
+    kbName,
+    ingest,
+    deletedSameNameKbIds,
+    filterDescription: filterDesc,
+  };
+}
+
+/**
+ * Write a filtered copy of a workspace JSONL (line-by-line, no full re-schema).
+ * Prefer createKnowledgeBaseFromJsonl when the goal is a KB; use this to materialize
+ * a subset file for inspection or repeated ingests.
+ */
+export async function writeFilteredJsonl(
+  userId: string,
+  sourcePath: string,
+  outputPath: string,
+  filter: JsonlLineFilter,
+): Promise<{ lineCount: number; outputPath: string; bytes: number }> {
+  const abs = resolveWorkspacePath(sourcePath, userId);
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch {
+    throw new Error(`JSONL file not found: ${sourcePath}`);
+  }
+  const kept: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (jsonlLineMatches(obj, filter)) kept.push(JSON.stringify(obj));
+  }
+  if (kept.length === 0) {
+    throw new Error(
+      `No lines matched filter ${describeJsonlFilter(filter)} in ${sourcePath}`,
+    );
+  }
+  const body = kept.join("\n") + "\n";
+  await writeWorkspaceFile(outputPath, body, userId);
+  return {
+    lineCount: kept.length,
+    outputPath,
+    bytes: Buffer.byteLength(body, "utf8"),
+  };
 }
 
 // ── RAG search ──

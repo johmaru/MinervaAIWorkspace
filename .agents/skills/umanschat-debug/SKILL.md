@@ -536,19 +536,25 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
-### 29. Agent cannot create single-character KB (read_file on multi-MB JSONL)
+### 29. Agent cannot create subset KB (read_file on multi-MB JSONL)
 
-**Symptom**: User asks for「愛だけのKB」. Agent lists KBs, tries `read_file` on `character_dialogue.jsonl` (~2–3MB), hits size limit, then auto-reports with no KB created.
+**Symptom**: User asks for「愛だけのKB」or any themed subset. Agent tries `read_file` on large JSONL, hits size limit, no KB created.
 
-**Cause**: No first-class filter on `rag_build_character_dialogue`; agent invents a filter-by-read pipeline that fails.
+**Cause**: No first-class generic “create KB from filtered JSONL” path; character-only helpers looked domain-specific.
 
-**Fix**: `rag_build_character_dialogue` accepts `character_ids` / `character_names` (and optional `source_jsonl_path` to filter existing JSONL). One tool call builds + creates + ingests filtered KB. Tool guard: do not `read_file` multi-MB JSONL.
+**Fix**:
+1. **Generic**: `kb_from_jsonl` + `JsonlLineFilter` (`filter_equals` / `filter_contains` / `filter_any_*` / `filter_json`) on any top-level fields.
+2. **Domain**: `rag_build_character_dialogue` still builds Character/Message/HomeTalk JSONL (optional character filter).
+3. Tool guard: do not `read_file` multi-MB JSONL.
 
-**Example**: `character_names="小美山愛"` or `character_ids="char-ai"` → KB `ipr-dialogue-小美山愛` (~Ai docs only).
+**Examples**:
+- `kb_from_jsonl` name=`work-q3` path=`docs/notes.jsonl` filter_contains=`tag=work`
+- `kb_from_jsonl` name=`ai-only` path=`rag/character_dialogue.jsonl` filter_contains=`name=小美山愛`
 
-**Files**: `characterDialogueRag.ts`, STREAM_TOOLS `rag_build_character_dialogue`.
+**Files**: `jsonlFilter.ts`, `kbStore.createKnowledgeBaseFromJsonl`, STREAM_TOOLS `kb_from_jsonl`.
 
 ---
+
 
 ### 28. KB RAG wrong speaker (vector-only precision)
 
