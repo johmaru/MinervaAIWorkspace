@@ -6,12 +6,18 @@ import { tmpdir } from "node:os";
 import { db } from "@/db";
 import { knowledgeBases, kbDocuments, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { createKnowledgeBase, ingestJsonlFile } from "./kbStore";
+import {
+  createKnowledgeBase,
+  ingestJsonlFile,
+  searchKnowledgeBases,
+  buildKnowledgeContextMessage,
+} from "./kbStore";
 
 vi.mock("@/lib/embed", () => ({
-  embedText: vi.fn(async () => Array.from({ length: 8 }, (_, i) => i * 0.01)),
+  // Fixed non-zero vector so query and stored chunks share high cosine similarity.
+  embedText: vi.fn(async () => Array.from({ length: 8 }, (_, i) => 0.1 + i * 0.01)),
   embedTexts: vi.fn(async (texts: string[]) =>
-    texts.map((_, ti) => Array.from({ length: 8 }, (__, i) => (ti + 1) * 0.01 + i * 0.001)),
+    texts.map(() => Array.from({ length: 8 }, (_, i) => 0.1 + i * 0.01)),
   ),
   hashContent: (s: string) => `hash:${s.length}:${s.slice(0, 24)}`,
 }));
@@ -77,5 +83,30 @@ describe("ingestJsonlFile", () => {
 
   it("rejects paths outside workspace", async () => {
     await expect(ingestJsonlFile(kbId, "../etc/passwd", USER)).rejects.toThrow(/outside the workspace/i);
+  });
+
+  it("searchKnowledgeBases returns hits (IN clause must be parenthesized)", async () => {
+    // Ensure data exists even if previous test order changes
+    await ingestJsonlFile(kbId, "rag/chars.jsonl", USER);
+
+    // Single-id IN (?) — previously generated bare IN ? → SQLite "near ?": syntax error
+    const hits = await searchKnowledgeBases("はまってる サンバ", [kbId], USER, 5, 0.1);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.title).toMatch(/愛|葵/);
+    expect(hits[0]!.text.length).toBeGreaterThan(0);
+    expect(hits[0]!.similarity).toBeGreaterThan(0.1);
+
+    // Multi-id IN (?, ?) path
+    const hitsMulti = await searchKnowledgeBases("はまってる", [kbId, "nonexistent-kb-id"], USER, 5, 0.1);
+    expect(hitsMulti.length).toBeGreaterThan(0);
+
+    // Ownership: other user sees nothing
+    const none = await searchKnowledgeBases("はまってる", [kbId], "other-user", 5, 0.1);
+    expect(none).toEqual([]);
+
+    const ctx = await buildKnowledgeContextMessage("はまってる", [kbId], USER);
+    expect(ctx).not.toBeNull();
+    expect(ctx!.role).toBe("system");
+    expect(ctx!.content).toMatch(/knowledge bases|はまって|サンバ|小美山/i);
   });
 });

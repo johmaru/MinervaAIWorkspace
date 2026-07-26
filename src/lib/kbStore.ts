@@ -599,6 +599,13 @@ export async function searchKnowledgeBases(
   const queryBuf = toVecBuffer(queryVector);
   const maxDistance = 1 - threshold;
 
+  // IN (...) needs parentheses. Without them SQLite throws: near "?": syntax error
+  // (broken both auto-RAG via activeKbIds and the kb_search tool).
+  const kbIdList = sql.join(
+    kbIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
+
   const rows = await db.all(sql`
     SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
            kc.text, kc.ordinal,
@@ -608,10 +615,7 @@ export async function searchKnowledgeBases(
     INNER JOIN kb_documents d ON kc.document_id = d.id
     INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
     WHERE kb.user_id = ${userId}
-      AND kc.knowledge_base_id IN ${sql.join(
-        kbIds.map((id) => sql`${id}`),
-        sql`, `,
-      )}
+      AND kc.knowledge_base_id IN (${kbIdList})
       AND vec_distance_cosine(kc.embedding, ${queryBuf}) < ${maxDistance}
     ORDER BY distance
     LIMIT ${limit}

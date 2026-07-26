@@ -524,6 +524,19 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
+### 27. Knowledge bases ON but never used / kb_search `near "?"`
+
+**Symptom**: Thread has active KB checked; chat still ignores RAG. Agent `kb_search` fails with `near "?": syntax error` (or Japanese queries look broken). Model falls back to "記憶にない".
+
+**Cause**: `searchKnowledgeBases` built `IN ${sql.join(...)}` **without parentheses** → SQL like `IN ?` / `IN ?, ?`. SQLite rejects that. Auto-inject (`buildKnowledgeContextMessage`) caught the error and returned null; tool path returned the error string to the model.
+
+**Fix**: `IN (${sql.join(kbIds.map(id => sql\`${id}\`), sql\`, \`)})`. Cover with a search test (single + multi id).
+
+**Files**: `src/lib/kbStore.ts` (`searchKnowledgeBases`).
+
+---
+
+
 ### 25. KB documentCount always 0 / sparse character RAG
 
 **Symptom**: KB list badge shows `0` documents though expand shows docs; character RAG feels thin (~80 chunks/char) and lines mix speakers.
