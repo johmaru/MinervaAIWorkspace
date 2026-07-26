@@ -487,30 +487,28 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 **Fix**: After the main tool loop, if `emittedContentChars === 0`, inject `FINAL_ANSWER_REQUIRED_REMINDER` and run one **tools-off** stream (`force-final-answer` log). Status: `chat.statusFinalAnswerRequired`. Also raised `MAX_TOOL_ROUNDS` to 12 for multi-step agent work (explore → script → kb_ingest → verify).
 
-**Agent/RAG product note**: Workspace `ipr-master-diff` has dialogue-like data in `Message.json` / `HomeTalk.json` (characterId + text), not in `StoryPart.json` (no `text` field). Full ADV Line[] scripts are usually external (`adv_{id}.txt.json`), not in the master-diff dump.
-
 **Files**: `toolStreamPolicy.ts`, `streamCompletion` tail in `route.ts`.
 
 ---
 
-### 23. Multi-doc RAG jobs die mid-thinking (52× kb_ingest)
+### 23. Multi-doc RAG jobs die mid-thinking (N× kb_ingest)
 
-**Symptom**: Agent explores JSON, may create a KB, plans “ingest 52 characters”, then ends mid-thinking with incomplete work. Same task works in OMP.
+**Symptom**: Agent plans many single `kb_ingest` calls, then ends mid-thinking with incomplete work.
 
 **Causes**:
-1. Calling `kb_ingest` once per character burns `MAX_TOOL_ROUNDS` and thinking budget.
-2. LLM HTTP timeout default was 120s — high-thinking GLM streams alone can exceed it.
-3. Even with force-final-answer, the model may only *describe* remaining work instead of finishing bulk ingest.
+1. One `kb_ingest` per document burns `MAX_TOOL_ROUNDS` and thinking budget.
+2. LLM HTTP timeout default was 120s — high-thinking streams can exceed it.
+3. Even with force-final-answer, the model may only *describe* remaining work.
 
 **Fix**:
-1. Prefer **`kb_ingest_jsonl`**: sandbox writes one JSONL (line = doc) under `/out` → workspace, then one bulk tool call (`ingestJsonlFile` in `kbStore.ts`).
-2. Sandbox workspace mount is **`/workspace`** (read-only); write under `/out` + `outputFiles`.
-3. `LLM_TIMEOUT_MS` default **300000** (5 min) via `llmTimeoutMs()`.
-4. If content still empty after recovery, emit a user-visible fallback sentence.
+1. Prefer **`kb_from_jsonl`** / **`kb_ingest_jsonl`**: one JSONL (line = doc), one bulk call.
+2. Transform proprietary formats via **sandbox** → JSONL, then bulk ingest — do **not** ship domain-specific builders in core agent tools.
+3. Sandbox: read `/workspace`, write `/out` + `outputFiles`.
+4. `LLM_TIMEOUT_MS` default **300000** (5 min).
 
-**Agent recipe for ipr character RAG**: Prefer **`rag_build_character_dialogue`** (one-shot server tool: JSONL + KB + ingest + optional verify). Do not ask the model to author long Python in thinking — streams die mid-plan. Fallback: sandbox only for custom transforms, then `kb_ingest_jsonl`.
+**Product rule**: Core tools stay schema-agnostic (`kb_*`, workspace, sandbox). User-specific data shapes belong in workspace scripts/JSONL, not in STREAM_TOOLS.
 
-**Files**: `src/lib/characterDialogueRag.ts`, `STREAM_TOOLS` in `route.ts`.
+**Files**: `kbStore.ts`, STREAM_TOOLS in `route.ts`.
 
 ---
 
@@ -538,58 +536,51 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ### 29. Agent cannot create subset KB (read_file on multi-MB JSONL)
 
-**Symptom**: User asks for「愛だけのKB」or any themed subset. Agent tries `read_file` on large JSONL, hits size limit, no KB created.
+**Symptom**: User wants a filtered/themed KB. Agent `read_file`s large JSONL, hits size limit, no KB created.
 
-**Cause**: No first-class generic “create KB from filtered JSONL” path; character-only helpers looked domain-specific.
+**Cause**: No first-class “create KB from filtered JSONL” tool.
 
-**Fix**:
-1. **Generic**: `kb_from_jsonl` + `JsonlLineFilter` (`filter_equals` / `filter_contains` / `filter_any_*` / `filter_json`) on any top-level fields.
-2. **Domain**: `rag_build_character_dialogue` still builds Character/Message/HomeTalk JSONL (optional character filter).
-3. Tool guard: do not `read_file` multi-MB JSONL.
+**Fix**: `kb_from_jsonl` + `JsonlLineFilter` (`filter_equals` / `filter_contains` / `filter_any_*` / `filter_json`). Do not `read_file` multi-MB JSONL.
 
 **Examples**:
 - `kb_from_jsonl` name=`work-q3` path=`docs/notes.jsonl` filter_contains=`tag=work`
-- `kb_from_jsonl` name=`ai-only` path=`rag/character_dialogue.jsonl` filter_contains=`name=小美山愛`
+- `kb_from_jsonl` name=`alice-notes` path=`export.jsonl` filter_contains=`name=Alice`
 
 **Files**: `jsonlFilter.ts`, `kbStore.createKnowledgeBaseFromJsonl`, STREAM_TOOLS `kb_from_jsonl`.
 
 ---
 
+### 28. KB RAG wrong entity attribution (vector-only precision)
 
-### 28. KB RAG wrong speaker (vector-only precision)
+**Symptom**: Question names person/project A; answer quotes chunks about B. Search "works" but precision is bad.
 
-**Symptom**: Question about 小美山愛's hobby; answer cites 白石沙季「ハマッています」. Search "works" but precision is bad.
-
-**Cause**: Pure cosine on「愛が過去にはまってる」embeds as generic "someone was into X". Docs with explicit ハマ rank above the named character's hobby lines that never say はま. Model then attributes the top hit's lines without strict speaker filter.
+**Cause**: Pure cosine matches topical verbs/phrases over the named entity. Model attributes top hit without checking title label.
 
 **Fix** (hybrid):
-1. Vector recall (wider limit/threshold) + keyword LIKE (subject/hobby tokens, はま/ハマ variants).
-2. Re-rank with speaker boost from title (`小美山愛 | …`) via `kbSearchRank.ts`.
-3. Auto-inject prompt: only attribute to title speaker; prefer matching person.
-4. Stamp multi-chunk docs with title/speaker when missing (`prefixChunkWithTitle`).
+1. Vector recall (wider) + keyword LIKE + re-rank with title-prefix / subject boost (`kbSearchRank.ts`).
+2. Auto-inject prompt: attribute only to title speaker/label (prefix before `|`).
+3. Stamp multi-chunk docs with title when missing (`prefixChunkWithTitle`).
 
-**After deploy**: re-run `rag_build_character_dialogue` so new chunks get title stamps (re-rank works without re-ingest).
-
-**Files**: `src/lib/kbSearchRank.ts`, `src/lib/kbStore.ts`, chat `kb_search` tool payload.
+**Files**: `src/lib/kbSearchRank.ts`, `src/lib/kbStore.ts`.
 
 ---
 
+### 25. KB documentCount always 0
 
+**Symptom**: KB list badge shows `0` documents though expand shows docs.
 
-### 25. KB documentCount always 0 / sparse character RAG
+**Cause**: `listKnowledgeBases` correlated COUNT used drizzle column objects inside the subquery → wrong SQL, count always 0.
 
-**Symptom**: KB list badge shows `0` documents though expand shows docs; character RAG feels thin (~80 chunks/char) and lines mix speakers.
-
-**Causes**:
-1. `listKnowledgeBases` correlated COUNT used drizzle column objects inside the subquery → wrong SQL, count always 0.
-2. One-giant-doc-per-character JSONL + 512-char chunks under-reports volume and mixes many threads into one blob; message lines only took `message.characterId` owner rows.
-
-**Fix**:
-1. COUNT with raw `kb_documents.knowledge_base_id = knowledge_bases.id` + `mapWith(Number)`.
-2. `characterDialogueRag` emits profile + per-message + per-home-talk docs; attributes lines by `detail.characterId`; `replaceExisting` deletes same-name KBs; `kb_delete` tool for agents.
-3. `ingestJsonlFile` default max lines raised to 10k (cap 20k).
+**Fix**: COUNT with raw `kb_documents.knowledge_base_id = knowledge_bases.id` + `mapWith(Number)`. Prefer many focused JSONL docs over one giant blob for retrieval quality. `ingestJsonlFile` default max lines 10k (cap 20k).
 
 ---
+
+### 30. Do not ship personal domain tools in public core
+
+**Rule**: UmansChat is public. Agent tools and `src/lib` product APIs must stay **schema-agnostic** (JSONL fields, workspace files, sandbox). Do not add STREAM_TOOLS or core libs that encode one user's game/data format (e.g. Character/Message/HomeTalk one-shot builders). Domain transforms live in the user's workspace (scripts + JSONL) or optional external plugins — not in the shared app.
+
+---
+
 
 ### 24. Agent hooks: always report in message body (OMP-style)
 

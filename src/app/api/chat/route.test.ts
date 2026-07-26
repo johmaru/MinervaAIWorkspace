@@ -770,7 +770,7 @@ describe("POST /api/chat — tool-round content buffering", () => {
       },
     } as never);
 
-    const res = await POST(chatReq(id, "ipr-master-diff をキャラ別RAGにしたい"));
+    const res = await POST(chatReq(id, "workspace の notes.jsonl から KB を作りたい"));
     expect(res.status).toBe(200);
     const raw = await sseChunks(res);
     const events = parseEvents(raw);

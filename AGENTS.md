@@ -187,6 +187,9 @@ See `skill://work-completion-checklist` section 7 (Skill Creation After Implemen
 - **Runtime Skills** (DB `skills` table): User-facing reusable prompts stored in SQLite, searched via embedding and injected into chat system context. Managed via the Skill Manager UI (sidebar 🛠️ button) and auto-extracted as draft candidates from conversations.
 - These are separate systems with different purposes; do not mix them. The `.agents/skills/` directory is never read by the running app, and the `skills` DB table is never read by dev agents.
 
+### Public product vs personal domain logic
+UmansChat is a **public** app. Core agent tools (`STREAM_TOOLS`) and `src/lib` product APIs must stay **schema-agnostic** (JSONL fields, workspace files, sandbox, generic KB). Do **not** add tools or libraries that encode one developer's private data format (game dumps, personal pipelines). Domain transforms belong in the user's workspace (scripts → JSONL → `kb_from_jsonl`), runtime skills, or out-of-tree plugins — not in the shared core.
+
 
 ## Release & Distribution
 

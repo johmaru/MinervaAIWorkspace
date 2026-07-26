@@ -2,8 +2,7 @@
  * Generic JSONL line filters for bulk KB ingest.
  *
  * Domain-agnostic: any top-level string fields on each JSON object
- * (name, title, kind, tag, project, character_id, …). Character dialogue
- * is just one schema that happens to use name/character_id.
+ * (name, title, kind, tag, project, author, …).
  */
 
 export type JsonlLineFilter = {
@@ -80,9 +79,9 @@ export function parseKeyValuePairs(raw: unknown): Record<string, string> {
 /**
  * Build a filter from tool string args.
  *
- * - filter_equals: "character_id=char-ai,kind=message"
- * - filter_contains: "name=愛"
- * - filter_any_fields + filter_any_value: fields "name,title" value "愛"
+ * - filter_equals: "kind=note,project=alpha"
+ * - filter_contains: "title=Q3"
+ * - filter_any_fields + filter_any_value: fields "name,title,tags" value "contract"
  * - filter_json: full JsonlLineFilter as JSON string (overrides/merges last)
  */
 export function buildJsonlFilterFromToolArgs(args: {

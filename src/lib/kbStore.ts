@@ -620,7 +620,7 @@ export type CreateKbFromJsonlResult = {
  * optionally filtered by field equals/contains (any schema — not character-only).
  *
  * Use this for "subset KB" workflows: tag=work, project=foo, name⊃愛, kind=message, etc.
- * Domain builders (e.g. rag_build_character_dialogue) can call this after writing JSONL.
+ * Callers that transform domain-specific sources should write JSONL first, then use this.
  */
 export async function createKnowledgeBaseFromJsonl(
   userId: string,

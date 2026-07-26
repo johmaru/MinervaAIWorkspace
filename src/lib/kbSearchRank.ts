@@ -1,12 +1,10 @@
 /**
  * Hybrid re-ranking helpers for knowledge-base RAG.
  *
- * Pure vector search over character dialogue often ranks the wrong speaker:
- * a query like「愛が過去にはまってる…」embeds as "someone was into X", so
- * 白石沙季's「ハマッています」beats 小美山愛's hobby lines that never say はま.
- *
- * These helpers extract subject/name hints and keyword tokens from the query
- * and boost hits whose document title (speaker) or text matches them.
+ * Pure vector search often underweights named entities in the query
+ * (person, product, project). These helpers extract subject/name hints and
+ * keyword tokens, then boost hits whose document title (prefix before "|")
+ * or text matches them.
  */
 
 export type RankableKbHit = {
@@ -18,7 +16,7 @@ export type RankableKbHit = {
   title: string;
 };
 
-/** Speaker name from title convention: "小美山愛 | メッセージ | …" → 小美山愛 */
+/** Leading label from title convention: "Alice | Notes | intro" → Alice */
 export function titleSpeaker(title: string): string {
   const head = title.split("|")[0]?.trim() ?? title.trim();
   return head;

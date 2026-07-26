@@ -35,7 +35,6 @@ import {
   searchKnowledgeBases,
 } from "@/lib/kbStore";
 import { buildJsonlFilterFromToolArgs } from "@/lib/jsonlFilter";
-import { buildAndIngestCharacterDialogueRag } from "@/lib/characterDialogueRag";
 import { generateMemories } from "@/lib/memory";
 import { generateSkillFromConversation } from "@/lib/skillGenerator";
 import { extractSkillCandidates } from "@/lib/skillCandidate";
@@ -1236,11 +1235,12 @@ function buildFinalMessages({
           "Reserve `sandbox_run` for executing code, not for file exploration.\n" +
           "11. Multi-step agent work: after tools finish, you MUST produce a user-visible answer in message content. " +
           "Thinking is not the answer. Server hooks will force a final report if content is missing — still write it yourself.\n" +
-          "12. Subset / themed knowledge bases (GENERIC): use `kb_from_jsonl` ONCE — path to any workspace JSONL + " +
-          "filter_equals / filter_contains / filter_any_fields+filter_any_value (any top-level fields: name, title, kind, tag, project, …). " +
-          "Do NOT read multi-MB JSONL with read_file. Do NOT hand-filter in sandbox. " +
-          "Character+Message+HomeTalk game data only: `rag_build_character_dialogue` (optional character_ids/names). " +
-          "Other bulk: kb_ingest_jsonl (same filters). Sandbox: read /workspace, write /out only + outputFiles.",
+          "12. Knowledge bases from bulk data: prefer `kb_from_jsonl` (create + ingest, optional field filters) or " +
+          "`kb_ingest_jsonl` into an existing KB. JSONL = one JSON object per line with content/text (+ title/name). " +
+          "Filters: filter_equals / filter_contains / filter_any_fields+filter_any_value on any top-level fields. " +
+          "Do NOT read multi-MB JSONL with read_file; do not hand-filter in sandbox. " +
+          "To transform proprietary source formats into JSONL, use sandbox_run or write_file, then kb_from_jsonl. " +
+          "Sandbox: read /workspace, write /out only + outputFiles.",
       }
     : null;
   return [
@@ -2078,7 +2078,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       name: "kb_delete",
       description:
         "CRITICAL: Permanently delete a knowledge base and all its documents/chunks. " +
-        "Use when cleaning duplicate KBs (e.g. keep only the latest ipr-character-dialogue). " +
+        "Use when cleaning duplicate or obsolete KBs (call kb_list first for ids). " +
         "Call kb_list first to get ids. Returns whether deletion succeeded.",
       parameters: {
         type: "object",
@@ -2162,7 +2162,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
           filter_equals: {
             type: "string",
-            description: "Optional exact field matches as k=v pairs, e.g. 'kind=message,character_id=char-ai'",
+            description: "Optional exact field matches as k=v pairs, e.g. 'kind=note,project=alpha'",
           },
           filter_contains: {
             type: "string",
@@ -2190,16 +2190,16 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "kb_from_jsonl",
       description:
-        "GENERIC one-shot: create a knowledge base from a workspace JSONL (optionally filtered by any top-level fields), " +
-        "then bulk-ingest. Use for themed/subset KBs: by name, title, kind, tag, project, author, character_id, etc. " +
-        "Replaces same-name KBs by default. Do NOT read multi-MB JSONL with read_file — filter here. " +
-        "For building dialogue JSONL from Character/Message/HomeTalk masters, use rag_build_character_dialogue first (or filter an existing JSONL with this tool).",
+        "One-shot: create a knowledge base from a workspace JSONL (optionally filtered by any top-level fields), " +
+        "then bulk-ingest. Use for full or subset KBs by name, title, kind, tag, project, author, etc. " +
+        "Replaces same-name KBs by default. Do NOT read multi-MB JSONL with read_file — apply filters here. " +
+        "If source data is not JSONL yet, transform with sandbox_run/write_file first, then call this tool.",
       parameters: {
         type: "object",
         properties: {
           name: {
             type: "string",
-            description: "New knowledge base name (e.g. 'work-docs-q3', 'ipr-dialogue-小美山愛')",
+            description: "New knowledge base name (e.g. 'work-docs-q3', 'project-notes')",
           },
           path: {
             type: "string",
@@ -2211,11 +2211,11 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
           filter_equals: {
             type: "string",
-            description: "Exact field matches: 'kind=message,character_id=char-ai'",
+            description: "Exact field matches: 'kind=article,project=alpha'",
           },
           filter_contains: {
             type: "string",
-            description: "Substring field matches: 'name=愛' or 'title=契約書'",
+            description: "Substring field matches: 'title=契約' or 'name=Alice'",
           },
           filter_any_fields: {
             type: "string",
@@ -2239,63 +2239,6 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
         },
         required: ["name", "path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "rag_build_character_dialogue",
-      description:
-        "DOMAIN convenience (idol/game Character+Message+HomeTalk only): build dialogue JSONL then create+ingest a KB. " +
-        "For generic subset KBs from any JSONL, use kb_from_jsonl instead. " +
-        "Optional character_ids/character_names filter speakers. Optional source_jsonl_path to filter existing JSONL. " +
-        "Do NOT read multi-MB JSONL with read_file. Returns kb_id, doc counts, verify hits.",
-      parameters: {
-        type: "object",
-        properties: {
-          character_path: {
-            type: "string",
-            description: "Workspace path to Character.json (default: ipr-master-diff/Character.json)",
-          },
-          message_path: {
-            type: "string",
-            description: "Workspace path to Message.json (default: ipr-master-diff/Message.json)",
-          },
-          home_talk_path: {
-            type: "string",
-            description: "Workspace path to HomeTalk.json (default: ipr-master-diff/HomeTalk.json)",
-          },
-          output_path: {
-            type: "string",
-            description:
-              "Where to write JSONL (default: rag/character_dialogue.jsonl, or rag/character_dialogue_<filter>.jsonl when filtered)",
-          },
-          kb_name: {
-            type: "string",
-            description:
-              "Knowledge base name (default: ipr-character-dialogue, or ipr-dialogue-<filter> when filtered)",
-          },
-          character_ids: {
-            type: "string",
-            description:
-              "Optional filter: comma-separated character ids (e.g. 'char-ai'). Only those speakers are ingested.",
-          },
-          character_names: {
-            type: "string",
-            description:
-              "Optional filter: comma-separated names (e.g. '小美山愛' or '愛'). Substring match on Character name.",
-          },
-          source_jsonl_path: {
-            type: "string",
-            description:
-              "Optional: filter an existing workspace JSONL (e.g. 'rag/character_dialogue.jsonl') instead of re-parsing master JSON. Requires character_ids and/or character_names.",
-          },
-          verify_query: {
-            type: "string",
-            description: "Optional search query after ingest (e.g. はまってる) to return sample hits",
-          },
-        },
       },
     },
   },
@@ -2587,9 +2530,6 @@ async function streamCompletion({
           pattern?: string; glob?: string; depth?: number; max_results?: number;
           max_matches?: number; case_insensitive?: boolean; fixed_string?: boolean;
           max_lines?: number;
-          character_path?: string; message_path?: string; home_talk_path?: string;
-          output_path?: string; kb_name?: string; verify_query?: string;
-          character_ids?: string; character_names?: string; source_jsonl_path?: string;
           filter_equals?: string; filter_contains?: string;
           filter_any_fields?: string; filter_any_value?: string; filter_json?: string;
           replace_existing?: boolean;
@@ -3086,75 +3026,6 @@ async function streamCompletion({
             toolContent = `Failed kb_from_jsonl: ${err instanceof Error ? err.message : String(err)}`;
           }
           logger.info("search-timing", "tool", { tool: "kb_from_jsonl", round: rounds, duration: Date.now() - tTool });
-        } else if (tc.name === "rag_build_character_dialogue") {
-          send?.("status", { label: t(locale, "chat.statusToolRagBuildCharacterDialogue") });
-          const tTool = Date.now();
-          try {
-            const result = await buildAndIngestCharacterDialogueRag(userId, {
-              characterPath: parsedArgs.character_path,
-              messagePath: parsedArgs.message_path,
-              homeTalkPath: parsedArgs.home_talk_path,
-              outputPath: parsedArgs.output_path,
-              kbName: parsedArgs.kb_name,
-              verifyQuery: parsedArgs.verify_query,
-              characterIds: parsedArgs.character_ids,
-              characterNames: parsedArgs.character_names,
-              sourceJsonlPath: parsedArgs.source_jsonl_path,
-              onProgress: (done, total, phase) => {
-                if (phase === "embed") {
-                  send?.("status", {
-                    label: t(locale, "chat.statusToolKbEmbedProgress", {
-                      done: String(done),
-                      total: String(total),
-                    }),
-                  });
-                } else if (phase === "write" && (done % 100 === 0 || done === total)) {
-                  send?.("status", {
-                    label: t(locale, "chat.statusToolKbWriteProgress", {
-                      done: String(done),
-                      total: String(total),
-                    }),
-                  });
-                }
-              },
-            });
-            toolContent =
-              `Character dialogue RAG ready.\n` +
-              `kb_id=${result.kbId}\n` +
-              `kb_name=${result.kbName}\n` +
-              (result.filter
-                ? `filter: ids=[${result.filter.characterIds.join(",")}] names=[${result.filter.characterNames.join(",")}]` +
-                  (result.filter.sourceJsonlPath
-                    ? ` source=${result.filter.sourceJsonlPath}`
-                    : "") +
-                  `\n`
-                : "") +
-              `jsonl=${result.build.outputPath} lines=${result.build.lineCount} bytes=${result.build.totalBytes}\n` +
-              `docs: profile=${result.build.profileDocs} message=${result.build.messageDocs} home_talk=${result.build.homeTalkDocs}\n` +
-              `with_dialogue_chars=${result.build.charactersWithDialogue} profile_only_chars=${result.build.charactersProfileOnly}\n` +
-              `ingest: ingested=${result.ingest.ingested} cached=${result.ingest.cached} skipped=${result.ingest.skipped} errors=${result.ingest.errors.length}\n` +
-              `deleted_same_name_kbs=${result.deletedSameNameKbIds.length}` +
-              (result.deletedSameNameKbIds.length
-                ? ` (${result.deletedSameNameKbIds.join(", ")})`
-                : "") +
-              `\nsample_names=${result.build.sampleNames.join(", ")}`;
-            if (result.verify) {
-              toolContent += `\nverify_query=${JSON.stringify(result.verify.query)} hits=${result.verify.results.length}`;
-              for (const hit of result.verify.results.slice(0, 3)) {
-                toolContent += `\n- [${hit.similarity}] ${hit.title}: ${hit.text.slice(0, 160).replace(/\n/g, " ")}`;
-              }
-            }
-            if (result.ingest.errors.length > 0) {
-              toolContent += `\nIngest errors:\n${result.ingest.errors.slice(0, 5).join("\n")}`;
-            }
-          } catch (err) {
-            toolContent = `Failed rag_build_character_dialogue: ${err instanceof Error ? err.message : String(err)}`;
-          }
-          logger.info("search-timing", "tool", {
-            tool: "rag_build_character_dialogue",
-            round: rounds,
-            duration: Date.now() - tTool,
-          });
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
           // MCP tool: function name format "{serverName}__{toolName}"
           const parsed = parseMcpToolFunctionName(tc.name);
