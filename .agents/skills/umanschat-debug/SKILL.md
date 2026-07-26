@@ -536,6 +536,20 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
+### 29. Agent cannot create single-character KB (read_file on multi-MB JSONL)
+
+**Symptom**: User asks for「愛だけのKB」. Agent lists KBs, tries `read_file` on `character_dialogue.jsonl` (~2–3MB), hits size limit, then auto-reports with no KB created.
+
+**Cause**: No first-class filter on `rag_build_character_dialogue`; agent invents a filter-by-read pipeline that fails.
+
+**Fix**: `rag_build_character_dialogue` accepts `character_ids` / `character_names` (and optional `source_jsonl_path` to filter existing JSONL). One tool call builds + creates + ingests filtered KB. Tool guard: do not `read_file` multi-MB JSONL.
+
+**Example**: `character_names="小美山愛"` or `character_ids="char-ai"` → KB `ipr-dialogue-小美山愛` (~Ai docs only).
+
+**Files**: `characterDialogueRag.ts`, STREAM_TOOLS `rag_build_character_dialogue`.
+
+---
+
 ### 28. KB RAG wrong speaker (vector-only precision)
 
 **Symptom**: Question about 小美山愛's hobby; answer cites 白石沙季「ハマッています」. Search "works" but precision is bad.

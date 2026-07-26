@@ -92,6 +92,63 @@ function detailSortKey(id: string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Parse tool args that may be a comma-separated string or string[]. */
+export function parseFilterList(value: unknown): string[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => String(v).trim())
+      .filter((s) => s.length > 0);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/[,、\n]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
+
+/**
+ * Match a character against id/name filters.
+ * Name needles match full name, substring (愛 → 小美山愛), or case-insensitive en.
+ */
+export function characterMatchesFilter(
+  c: { id?: string; name?: string },
+  characterIds: string[],
+  characterNames: string[],
+): boolean {
+  if (characterIds.length === 0 && characterNames.length === 0) return true;
+  if (c.id) {
+    const id = c.id.trim();
+    if (characterIds.some((x) => x === id || x.toLowerCase() === id.toLowerCase())) {
+      return true;
+    }
+  }
+  if (c.name && characterNames.length > 0) {
+    const name = c.name.trim();
+    const nameLower = name.toLowerCase();
+    for (const needle of characterNames) {
+      const n = needle.trim();
+      if (!n) continue;
+      const nl = n.toLowerCase();
+      if (name === n || nameLower === nl) return true;
+      if (name.includes(n) || n.includes(name)) return true;
+      if (nameLower.includes(nl)) return true;
+    }
+  }
+  return false;
+}
+
+function safeLabelFromFilter(ids: string[], names: string[]): string {
+  const raw = [...names, ...ids].join("-") || "filtered";
+  return raw
+    .replace(/[^\w一-龯ぁ-んァ-ヶー-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48) || "filtered";
+}
+
 function buildProfileBlock(c: CharRow): string {
   const lines: string[] = [];
   if (c.name) lines.push(`名前: ${c.name}`);
@@ -134,6 +191,9 @@ type JsonlDoc = {
 /**
  * Build JSONL: profile doc + one doc per message thread + one per home talk.
  * Paths are workspace-relative.
+ *
+ * Optional characterIds / characterNames limit output to matching speakers only
+ * (e.g. Ai-only KB: characterNames=["小美山愛"] or characterIds=["char-ai"]).
  */
 export async function buildCharacterDialogueJsonl(
   userId: string,
@@ -142,6 +202,8 @@ export async function buildCharacterDialogueJsonl(
     messagePath: string;
     homeTalkPath: string;
     outputPath: string;
+    characterIds?: string[];
+    characterNames?: string[];
   },
 ): Promise<BuildCharacterDialogueJsonlResult> {
   const charAbs = resolveWorkspacePath(args.characterPath, userId);
@@ -149,14 +211,30 @@ export async function buildCharacterDialogueJsonl(
   const homeAbs = resolveWorkspacePath(args.homeTalkPath, userId);
   const outAbs = resolveWorkspacePath(args.outputPath, userId);
 
-  const characters = readJsonArray(charAbs, "Character.json") as CharRow[];
+  const allCharacters = readJsonArray(charAbs, "Character.json") as CharRow[];
   const messages = readJsonArray(msgAbs, "Message.json") as MessageRow[];
   const homeTalks = readJsonArray(homeAbs, "HomeTalk.json") as HomeTalkRow[];
 
+  const characterIds = args.characterIds ?? [];
+  const characterNames = args.characterNames ?? [];
+  const hasFilter = characterIds.length > 0 || characterNames.length > 0;
+  const characters = hasFilter
+    ? allCharacters.filter((c) => characterMatchesFilter(c, characterIds, characterNames))
+    : allCharacters;
+  if (hasFilter && characters.length === 0) {
+    throw new Error(
+      `No characters matched filter ids=[${characterIds.join(",")}] names=[${characterNames.join(",")}]. ` +
+        `Use Character.json ids (e.g. char-ai) or names (e.g. 小美山愛 / 愛).`,
+    );
+  }
+
   const charName = new Map<string, string>();
-  for (const c of characters) {
+  for (const c of allCharacters) {
     if (c.id) charName.set(c.id, c.name?.trim() || c.id);
   }
+  const allowedIds = hasFilter
+    ? new Set(characters.map((c) => c.id).filter((id): id is string => Boolean(id)))
+    : null;
 
   // Speakers in messages: group by detail.characterId (not only message owner)
   // so lines spoken in another character's thread still attach to the speaker.
@@ -190,6 +268,7 @@ export async function buildCharacterDialogueJsonl(
 
     for (const [speaker, lines] of bySpeaker) {
       if (lines.length === 0) continue;
+      if (allowedIds && !allowedIds.has(speaker)) continue;
       const bucket: MsgBucket = {
         messageId: mid,
         messageName: mname,
@@ -206,6 +285,7 @@ export async function buildCharacterDialogueJsonl(
   for (const ht of homeTalks) {
     const cid = ht.characterId;
     if (!cid) continue;
+    if (allowedIds && !allowedIds.has(cid)) continue;
     const list = homeByChar.get(cid) ?? [];
     list.push(ht);
     homeByChar.set(cid, list);
@@ -313,12 +393,116 @@ export type BuildAndIngestCharacterDialogueResult = {
   kbName: string;
   ingest: JsonlIngestResult;
   deletedSameNameKbIds: string[];
+  filter?: { characterIds: string[]; characterNames: string[]; sourceJsonlPath?: string };
   verify?: { query: string; results: KbSearchResult[] };
 };
 
 /**
+ * Filter an existing character-dialogue JSONL by character id/name.
+ * Streaming-friendly (line by line) — use instead of read_file on multi-MB JSONL.
+ */
+export async function filterCharacterDialogueJsonl(
+  userId: string,
+  args: {
+    sourcePath: string;
+    outputPath: string;
+    characterIds?: string[];
+    characterNames?: string[];
+  },
+): Promise<BuildCharacterDialogueJsonlResult> {
+  const characterIds = args.characterIds ?? [];
+  const characterNames = args.characterNames ?? [];
+  if (characterIds.length === 0 && characterNames.length === 0) {
+    throw new Error("filterCharacterDialogueJsonl requires characterIds and/or characterNames");
+  }
+
+  const abs = resolveWorkspacePath(args.sourcePath, userId);
+  let raw: string;
+  try {
+    raw = readFileSync(abs, "utf8");
+  } catch {
+    throw new Error(`JSONL not found: ${args.sourcePath}`);
+  }
+
+  const kept: JsonlDoc[] = [];
+  let profileDocs = 0;
+  let messageDocs = 0;
+  let homeTalkDocs = 0;
+  const sampleNames: string[] = [];
+  const seenNames = new Set<string>();
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const cid = typeof obj.character_id === "string" ? obj.character_id : "";
+    const name = typeof obj.name === "string" ? obj.name : "";
+    if (!characterMatchesFilter({ id: cid, name }, characterIds, characterNames)) continue;
+
+    const content =
+      (typeof obj.content === "string" && obj.content) ||
+      (typeof obj.text === "string" && obj.text) ||
+      "";
+    if (!content.trim()) continue;
+    const title =
+      (typeof obj.title === "string" && obj.title) ||
+      `${name || cid || "doc"}`;
+    const kindRaw = typeof obj.kind === "string" ? obj.kind : "message";
+    const kind: JsonlDoc["kind"] =
+      kindRaw === "profile" || kindRaw === "home_talk" || kindRaw === "message"
+        ? kindRaw
+        : "message";
+
+    kept.push({
+      character_id: cid || "unknown",
+      name: name || cid || "unknown",
+      title,
+      content,
+      kind,
+    });
+    if (kind === "profile") profileDocs++;
+    else if (kind === "home_talk") homeTalkDocs++;
+    else messageDocs++;
+    if (name && !seenNames.has(name) && sampleNames.length < 8) {
+      seenNames.add(name);
+      sampleNames.push(name);
+    }
+  }
+
+  if (kept.length === 0) {
+    throw new Error(
+      `No JSONL lines matched filter ids=[${characterIds.join(",")}] names=[${characterNames.join(",")}] ` +
+        `in ${args.sourcePath}`,
+    );
+  }
+
+  const body = kept.map((d) => JSON.stringify(d)).join("\n") + "\n";
+  await writeWorkspaceFile(args.outputPath, body, userId);
+
+  return {
+    outputPath: args.outputPath,
+    lineCount: kept.length,
+    charactersWithDialogue: sampleNames.length,
+    charactersProfileOnly: 0,
+    messageDocs,
+    homeTalkDocs,
+    profileDocs,
+    totalBytes: Buffer.byteLength(body, "utf8"),
+    sampleNames,
+  };
+}
+
+/**
  * One-shot: JSONL build + create KB + bulk ingest + optional verify search.
  * Deletes existing KBs with the same name for this user (keeps a single latest).
+ *
+ * Single-character (or few-character) KBs:
+ * - characterIds: ["char-ai"] and/or characterNames: ["小美山愛","愛"]
+ * - optional sourceJsonlPath: filter existing full JSONL (skip re-parsing master JSON)
  */
 export async function buildAndIngestCharacterDialogueRag(
   userId: string,
@@ -331,22 +515,56 @@ export async function buildAndIngestCharacterDialogueRag(
     verifyQuery?: string;
     /** When true (default), remove prior KBs with the same name before create. */
     replaceExisting?: boolean;
+    characterIds?: string[] | string;
+    characterNames?: string[] | string;
+    /**
+     * If set, filter this workspace JSONL instead of rebuilding from Character/Message/HomeTalk.
+     * Faster when full `rag/character_dialogue.jsonl` already exists.
+     */
+    sourceJsonlPath?: string;
     onProgress?: (done: number, total: number, phase: "parse" | "embed" | "write") => void;
   },
 ): Promise<BuildAndIngestCharacterDialogueResult> {
+  const characterIds = parseFilterList(args.characterIds);
+  const characterNames = parseFilterList(args.characterNames);
+  const hasFilter = characterIds.length > 0 || characterNames.length > 0;
+  const label = hasFilter ? safeLabelFromFilter(characterIds, characterNames) : "";
+
   const characterPath = args.characterPath?.trim() || "ipr-master-diff/Character.json";
   const messagePath = args.messagePath?.trim() || "ipr-master-diff/Message.json";
   const homeTalkPath = args.homeTalkPath?.trim() || "ipr-master-diff/HomeTalk.json";
-  const outputPath = args.outputPath?.trim() || "rag/character_dialogue.jsonl";
-  const kbName = args.kbName?.trim() || "ipr-character-dialogue";
+  const outputPath =
+    args.outputPath?.trim() ||
+    (hasFilter ? `rag/character_dialogue_${label}.jsonl` : "rag/character_dialogue.jsonl");
+  const kbName =
+    args.kbName?.trim() ||
+    (hasFilter ? `ipr-dialogue-${label}` : "ipr-character-dialogue");
   const replaceExisting = args.replaceExisting !== false;
+  const sourceJsonlPath = args.sourceJsonlPath?.trim();
 
-  const build = await buildCharacterDialogueJsonl(userId, {
-    characterPath,
-    messagePath,
-    homeTalkPath,
-    outputPath,
-  });
+  let build: BuildCharacterDialogueJsonlResult;
+  if (sourceJsonlPath) {
+    if (!hasFilter) {
+      throw new Error(
+        "source_jsonl_path requires character_ids and/or character_names to filter",
+      );
+    }
+    build = await filterCharacterDialogueJsonl(userId, {
+      sourcePath: sourceJsonlPath,
+      outputPath,
+      characterIds,
+      characterNames,
+    });
+  } else {
+    build = await buildCharacterDialogueJsonl(userId, {
+      characterPath,
+      messagePath,
+      homeTalkPath,
+      outputPath,
+      characterIds: hasFilter ? characterIds : undefined,
+      characterNames: hasFilter ? characterNames : undefined,
+    });
+  }
 
   const deletedSameNameKbIds: string[] = [];
   if (replaceExisting) {
@@ -359,11 +577,11 @@ export async function buildAndIngestCharacterDialogueRag(
     }
   }
 
-  const kb = await createKnowledgeBase(
-    userId,
-    kbName,
-    "Character dialogue RAG (profile + message + home talk units from Message/HomeTalk)",
-  );
+  const desc = hasFilter
+    ? `Character dialogue RAG filtered to: ${[...characterNames, ...characterIds].join(", ")}`
+    : "Character dialogue RAG (profile + message + home talk units from Message/HomeTalk)";
+
+  const kb = await createKnowledgeBase(userId, kbName, desc);
 
   const ingest = await ingestJsonlFile(kb.id, outputPath, userId, {
     maxLines: 20_000,
@@ -376,11 +594,21 @@ export async function buildAndIngestCharacterDialogueRag(
       args.verifyQuery.trim(),
       [kb.id],
       userId,
-      5,
-      0.25,
+      8,
+      0.22,
     );
     verify = { query: args.verifyQuery.trim(), results };
   }
 
-  return { build, kbId: kb.id, kbName, ingest, deletedSameNameKbIds, verify };
+  return {
+    build,
+    kbId: kb.id,
+    kbName,
+    ingest,
+    deletedSameNameKbIds,
+    filter: hasFilter
+      ? { characterIds, characterNames, sourceJsonlPath: sourceJsonlPath || undefined }
+      : undefined,
+    verify,
+  };
 }

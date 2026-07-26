@@ -1235,8 +1235,10 @@ function buildFinalMessages({
           "11. Multi-step agent work: after tools finish, you MUST produce a user-visible answer in message content. " +
           "Thinking is not the answer. Server hooks will force a final report if content is missing — still write it yourself.\n" +
           "12. Bulk character dialogue RAG from Character/Message/HomeTalk: prefer `rag_build_character_dialogue` ONCE. " +
-          "Do not invent long Python in thinking for that task. Other bulk RAG: JSONL + kb_ingest_jsonl. " +
-          "Sandbox: read /workspace, write /out only + outputFiles.",
+          "Single-character KB (e.g. 愛 only): call it ONCE with character_names=\"小美山愛\" or character_ids=\"char-ai\" " +
+          "(optional source_jsonl_path=rag/character_dialogue.jsonl to filter an existing full JSONL). " +
+          "Do NOT read multi-MB JSONL with read_file (will fail size limit). Do not invent long Python for that task. " +
+          "Other bulk RAG: JSONL + kb_ingest_jsonl. Sandbox: read /workspace, write /out only + outputFiles.",
       }
     : null;
   return [
@@ -2154,7 +2156,7 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
           max_lines: {
             type: "number",
-            description: "Safety cap on lines to ingest (default 200, max 500)",
+            description: "Safety cap on lines to ingest (default 10000, max 20000)",
           },
         },
         required: ["knowledge_base_id", "path"],
@@ -2166,10 +2168,12 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "rag_build_character_dialogue",
       description:
-        "ONE-SHOT agent tool: build character dialogue RAG from Character.json + Message.json + HomeTalk.json. " +
-        "Writes JSONL with one document per profile / message thread / home talk (not one giant blob per character), " +
+        "ONE-SHOT agent tool: build character dialogue RAG from Character.json + Message.json + HomeTalk.json " +
+        "(or filter an existing JSONL). Writes JSONL (profile + message + home talk units), " +
         "deletes prior KBs with the same name, creates a new KB, bulk-ingests, optional verify search. " +
-        "PREFERRED over sandbox_run Python. Default paths under ipr-master-diff/. Returns kb_id, doc counts, verify hits.",
+        "For a single character (e.g. 小美山愛 only) set character_names or character_ids — do NOT try to " +
+        "read multi-MB JSONL with read_file or hand-filter in sandbox. " +
+        "PREFERRED over sandbox_run Python. Returns kb_id, doc counts, verify hits.",
       parameters: {
         type: "object",
         properties: {
@@ -2187,11 +2191,28 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
           output_path: {
             type: "string",
-            description: "Where to write JSONL (default: rag/character_dialogue.jsonl)",
+            description:
+              "Where to write JSONL (default: rag/character_dialogue.jsonl, or rag/character_dialogue_<filter>.jsonl when filtered)",
           },
           kb_name: {
             type: "string",
-            description: "Knowledge base name (default: ipr-character-dialogue)",
+            description:
+              "Knowledge base name (default: ipr-character-dialogue, or ipr-dialogue-<filter> when filtered)",
+          },
+          character_ids: {
+            type: "string",
+            description:
+              "Optional filter: comma-separated character ids (e.g. 'char-ai'). Only those speakers are ingested.",
+          },
+          character_names: {
+            type: "string",
+            description:
+              "Optional filter: comma-separated names (e.g. '小美山愛' or '愛'). Substring match on Character name.",
+          },
+          source_jsonl_path: {
+            type: "string",
+            description:
+              "Optional: filter an existing workspace JSONL (e.g. 'rag/character_dialogue.jsonl') instead of re-parsing master JSON. Requires character_ids and/or character_names.",
           },
           verify_query: {
             type: "string",
@@ -2491,6 +2512,7 @@ async function streamCompletion({
           max_lines?: number;
           character_path?: string; message_path?: string; home_talk_path?: string;
           output_path?: string; kb_name?: string; verify_query?: string;
+          character_ids?: string; character_names?: string; source_jsonl_path?: string;
         };
         try {
           parsedArgs = JSON.parse(tc.arguments) as typeof parsedArgs;
@@ -2939,6 +2961,9 @@ async function streamCompletion({
               outputPath: parsedArgs.output_path,
               kbName: parsedArgs.kb_name,
               verifyQuery: parsedArgs.verify_query,
+              characterIds: parsedArgs.character_ids,
+              characterNames: parsedArgs.character_names,
+              sourceJsonlPath: parsedArgs.source_jsonl_path,
               onProgress: (done, total, phase) => {
                 if (phase === "embed") {
                   send?.("status", {
@@ -2961,6 +2986,13 @@ async function streamCompletion({
               `Character dialogue RAG ready.\n` +
               `kb_id=${result.kbId}\n` +
               `kb_name=${result.kbName}\n` +
+              (result.filter
+                ? `filter: ids=[${result.filter.characterIds.join(",")}] names=[${result.filter.characterNames.join(",")}]` +
+                  (result.filter.sourceJsonlPath
+                    ? ` source=${result.filter.sourceJsonlPath}`
+                    : "") +
+                  `\n`
+                : "") +
               `jsonl=${result.build.outputPath} lines=${result.build.lineCount} bytes=${result.build.totalBytes}\n` +
               `docs: profile=${result.build.profileDocs} message=${result.build.messageDocs} home_talk=${result.build.homeTalkDocs}\n` +
               `with_dialogue_chars=${result.build.charactersWithDialogue} profile_only_chars=${result.build.charactersProfileOnly}\n` +

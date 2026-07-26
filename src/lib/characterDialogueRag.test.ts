@@ -151,4 +151,58 @@ describe("characterDialogueRag", () => {
       .where(eq(kbDocuments.knowledgeBaseId, second.kbId));
     expect(docs.length).toBe(5);
   });
+
+  it("filters to a single character by name or id", async () => {
+    const byName = await buildCharacterDialogueJsonl(USER, {
+      characterPath: "ipr-master-diff/Character.json",
+      messagePath: "ipr-master-diff/Message.json",
+      homeTalkPath: "ipr-master-diff/HomeTalk.json",
+      outputPath: "rag/ai_only.jsonl",
+      characterNames: ["愛"],
+    });
+    expect(byName.profileDocs).toBe(1);
+    expect(byName.sampleNames).toEqual(["小美山愛"]);
+    // ai message + home; aoi lines excluded
+    expect(byName.messageDocs).toBe(1);
+    expect(byName.homeTalkDocs).toBe(1);
+    expect(byName.lineCount).toBe(3);
+
+    const raw = readFileSync(join(wsRoot, "rag", "ai_only.jsonl"), "utf8");
+    for (const line of raw.trim().split("\n")) {
+      const o = JSON.parse(line) as { character_id: string; name: string };
+      expect(o.character_id).toBe("char-ai");
+      expect(o.name).toBe("小美山愛");
+    }
+
+    const byId = await buildAndIngestCharacterDialogueRag(USER, {
+      characterIds: "char-ai",
+      kbName: "test-ai-only",
+      outputPath: "rag/ai_only_ingest.jsonl",
+      verifyQuery: "サンバ",
+    });
+    createdKbIds.push(byId.kbId);
+    expect(byId.filter?.characterIds).toEqual(["char-ai"]);
+    expect(byId.ingest.ingested).toBe(3);
+    expect(byId.build.sampleNames).toEqual(["小美山愛"]);
+    expect(byId.verify?.results.some((r) => r.title.includes("小美山愛"))).toBe(true);
+
+    // Filter existing full JSONL without re-parse of master
+    const full = await buildCharacterDialogueJsonl(USER, {
+      characterPath: "ipr-master-diff/Character.json",
+      messagePath: "ipr-master-diff/Message.json",
+      homeTalkPath: "ipr-master-diff/HomeTalk.json",
+      outputPath: "rag/full_for_filter.jsonl",
+    });
+    expect(full.lineCount).toBe(5);
+
+    const filtered = await buildAndIngestCharacterDialogueRag(USER, {
+      sourceJsonlPath: "rag/full_for_filter.jsonl",
+      characterNames: ["小美山愛"],
+      kbName: "test-ai-from-jsonl",
+      outputPath: "rag/ai_from_full.jsonl",
+    });
+    createdKbIds.push(filtered.kbId);
+    expect(filtered.ingest.ingested).toBe(3);
+    expect(filtered.filter?.sourceJsonlPath).toBe("rag/full_for_filter.jsonl");
+  });
 });
