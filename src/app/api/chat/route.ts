@@ -79,6 +79,11 @@ import {
   formatAutoUserReport,
   type ToolTranscriptEntry,
 } from "@/lib/agentHooks";
+import {
+  agentContinueRetriesFromEnv,
+  buildContinueAgentPrompt,
+  shouldContinueToolLoop,
+} from "@/lib/agentContinuePolicy";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
 import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
@@ -2323,6 +2328,10 @@ async function streamCompletion({
   const seenToolCalls: Record<string, number> = {};
   const MAX_DUPLICATE_CALLS = 2; // allow 2 identical calls, block on the 3rd
   let useToolsThisRoundOverride = true;
+  // OMP-style: if the model stops mid-task with no tool_calls (thinking-only
+  // or tiny body), re-enter the loop with tools still on instead of exiting.
+  const maxContinueRetries = agentContinueRetriesFromEnv();
+  let continueRetriesUsed = 0;
   while (true) {
     const useToolsThisRound = useTools && !fallbackRetried && rounds < MAX_TOOL_ROUNDS && useToolsThisRoundOverride;
     // Re-enable tools after a loop-break round (override was set false
@@ -2447,7 +2456,51 @@ async function streamCompletion({
       }
 
       if (!hadToolCalls || !useToolsThisRound) {
-        // No tool calls, or max rounds exceeded → done
+        // OMP-style continue: model produced no tool_calls this round but the
+        // user task is not finished (thinking-only / empty body / tiny report
+        // after tools). Re-prompt with tools still available instead of exiting.
+        if (
+          shouldContinueToolLoop({
+            hadToolCalls,
+            toolsWereOffered: useToolsThisRound,
+            emittedContentChars,
+            toolRounds: rounds,
+            toolResultCount: toolTranscript.length,
+            continueRetriesUsed,
+            maxContinueRetries,
+            maxToolRounds: MAX_TOOL_ROUNDS,
+          })
+        ) {
+          continueRetriesUsed++;
+          logger.warn("chat", "agent-continue-loop", {
+            model: modelToUse,
+            continueRetriesUsed,
+            maxContinueRetries,
+            toolRounds: rounds,
+            toolResults: toolTranscript.length,
+            emittedContentChars,
+          });
+          send?.("status", {
+            label: t(locale, "chat.statusAgentContinue", {
+              n: String(continueRetriesUsed),
+              max: String(maxContinueRetries),
+            }),
+          });
+          currentMessages = [
+            ...currentMessages,
+            {
+              role: "system" as const,
+              content: buildContinueAgentPrompt({
+                toolTranscript,
+                continueRetriesUsed,
+                maxContinueRetries,
+              }),
+            },
+          ];
+          // Keep tools on; do not increment toolRounds (no tool executed yet).
+          continue;
+        }
+        // No tool calls, or max rounds exceeded, or continue budget exhausted → done
         break;
       }
 

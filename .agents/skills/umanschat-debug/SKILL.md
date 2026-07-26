@@ -581,6 +581,25 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
+### 31. Agent feels dumber than OMP — loop exits on first no-tool completion
+
+**Symptom**: Multi-step work (filter JSONL → kb_from_jsonl) ends mid-plan with thinking-only or a tiny body; tools never finish. Same model in OMP keeps going until done.
+
+**Cause (architecture, not “model IQ”)**:
+1. `streamCompletion` **broke the tool loop** when a round had `hadToolCalls=false`, even if content was empty (thinking-only stop).
+2. Tool-round prose is buffered/discarded (correct for false narration) → no intermediate “comments” like OMP.
+3. Post-hooks only force a **final report** (tools **off**), not another work round with tools **on**.
+4. Hard `MAX_TOOL_ROUNDS` (12) and duplicate-call breaker exist, but the main gap was **premature exit**, not the cap.
+
+**Fix**: `agentContinuePolicy` — if tools were offered, no tool_calls, and no real user-visible answer (or tiny body after tools), re-inject CONTINUE system prompt and **keep tools on** up to `AGENT_CONTINUE_RETRIES` (default 3). Status: `statusAgentContinue`.
+
+**Not the same as OMP yet**: still single HTTP turn, no durable multi-session agent, intermediate content still discarded during tool rounds.
+
+**Files**: `src/lib/agentContinuePolicy.ts`, `streamCompletion` in `route.ts`.
+
+---
+
+
 
 ### 24. Agent hooks: always report in message body (OMP-style)
 

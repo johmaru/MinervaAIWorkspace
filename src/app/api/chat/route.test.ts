@@ -743,8 +743,9 @@ describe("POST /api/chat — tool-round content buffering", () => {
                   };
                 })();
               }
-              if (callCount === 2) {
-                // Post-tool round: thinking only, no content (the hang pattern).
+              // Post-tool / agent-continue rounds keep tools on while the model
+              // only thinks. After continue budget is exhausted, recovery has tools off.
+              if (params.tools) {
                 return (async function* () {
                   yield {
                     choices: [
@@ -783,7 +784,9 @@ describe("POST /api/chat — tool-round content buffering", () => {
       .map((e) => String(e.data.label ?? ""));
 
     expect(allDeltas).toContain(recovered);
-    expect(statuses.some((s) => /回答|final|visible/i.test(s))).toBe(true);
+    // OMP-style continue may run before final-answer recovery
+    expect(statuses.some((s) => /続行|continue|回答|final|visible/i.test(s))).toBe(true);
+    // tool round + ≥1 continue + forced recovery
     expect(callCount).toBeGreaterThanOrEqual(3);
   }, 30_000);
 
