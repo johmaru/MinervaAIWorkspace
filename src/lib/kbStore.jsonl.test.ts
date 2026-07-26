@@ -100,13 +100,18 @@ describe("ingestJsonlFile", () => {
     const hitsMulti = await searchKnowledgeBases("はまってる", [kbId, "nonexistent-kb-id"], USER, 5, 0.1);
     expect(hitsMulti.length).toBeGreaterThan(0);
 
+    // Speaker re-rank: question about 愛 should prefer 小美山愛 title over others when present
+    const byAi = await searchKnowledgeBases("愛がはまってるって言ってた物は何？", [kbId], USER, 5, 0.1);
+    expect(byAi.length).toBeGreaterThan(0);
+    expect(byAi[0]!.title).toMatch(/小美山愛/);
+
     // Ownership: other user sees nothing
     const none = await searchKnowledgeBases("はまってる", [kbId], "other-user", 5, 0.1);
     expect(none).toEqual([]);
 
-    const ctx = await buildKnowledgeContextMessage("はまってる", [kbId], USER);
+    const ctx = await buildKnowledgeContextMessage("愛がはまってる", [kbId], USER);
     expect(ctx).not.toBeNull();
     expect(ctx!.role).toBe("system");
-    expect(ctx!.content).toMatch(/knowledge bases|はまって|サンバ|小美山/i);
+    expect(ctx!.content).toMatch(/speaker|小美山|はまって|サンバ/i);
   });
 });

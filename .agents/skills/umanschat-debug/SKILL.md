@@ -536,6 +536,25 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ---
 
+### 28. KB RAG wrong speaker (vector-only precision)
+
+**Symptom**: Question about 小美山愛's hobby; answer cites 白石沙季「ハマッています」. Search "works" but precision is bad.
+
+**Cause**: Pure cosine on「愛が過去にはまってる」embeds as generic "someone was into X". Docs with explicit ハマ rank above the named character's hobby lines that never say はま. Model then attributes the top hit's lines without strict speaker filter.
+
+**Fix** (hybrid):
+1. Vector recall (wider limit/threshold) + keyword LIKE (subject/hobby tokens, はま/ハマ variants).
+2. Re-rank with speaker boost from title (`小美山愛 | …`) via `kbSearchRank.ts`.
+3. Auto-inject prompt: only attribute to title speaker; prefer matching person.
+4. Stamp multi-chunk docs with title/speaker when missing (`prefixChunkWithTitle`).
+
+**After deploy**: re-run `rag_build_character_dialogue` so new chunks get title stamps (re-rank works without re-ingest).
+
+**Files**: `src/lib/kbSearchRank.ts`, `src/lib/kbStore.ts`, chat `kb_search` tool payload.
+
+---
+
+
 
 ### 25. KB documentCount always 0 / sparse character RAG
 

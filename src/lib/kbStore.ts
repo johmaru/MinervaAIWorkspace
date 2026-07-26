@@ -9,6 +9,21 @@ import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join, relative, sep, extname, basename } from "node:path";
 import { getWorkspaceRoot, resolveWorkspacePath } from "@/lib/workspace";
 import { extractFileTextFromPath } from "@/lib/fileExtract";
+import {
+  expandTokenVariants,
+  extractKeywordTokens,
+  mergeAndRerankKbHits,
+  prefixChunkWithTitle,
+  type RankableKbHit,
+} from "@/lib/kbSearchRank";
+
+/** Chunk content and stamp each piece with the document title/speaker when missing. */
+function chunkDocument(title: string, content: string): { text: string; ordinal: number }[] {
+  return chunkText(content).map((c) => ({
+    ordinal: c.ordinal,
+    text: prefixChunkWithTitle(title, c.text),
+  }));
+}
 
 /**
  * Knowledge Base store — CRUD for knowledge_bases, document ingestion with
@@ -131,8 +146,8 @@ export async function ingestDocument(
     return { id: existing.id, chunkCount: 0, cached: true };
   }
 
-  // Chunk the text
-  const chunks = chunkText(source.content);
+  // Chunk the text (title stamped on each chunk so multi-chunk docs keep speaker)
+  const chunks = chunkDocument(source.title, source.content);
   if (chunks.length === 0) {
     throw new Error("Document content is empty after normalization");
   }
@@ -421,7 +436,7 @@ export async function ingestJsonlFile(
       continue;
     }
 
-    const chunks = chunkText(content);
+    const chunks = chunkDocument(title, content);
     if (chunks.length === 0) {
       skipped++;
       continue;
@@ -572,9 +587,33 @@ export type KbSearchResult = {
   title: string;
 };
 
+type KbSqlRow = {
+  chunk_id: string;
+  document_id: string;
+  knowledge_base_id: string;
+  text: string;
+  ordinal: number;
+  document_title: string;
+  distance: number;
+};
+
+function rowToHit(r: KbSqlRow): RankableKbHit {
+  return {
+    chunkId: r.chunk_id,
+    documentId: r.document_id,
+    kbId: r.knowledge_base_id,
+    text: r.text,
+    similarity: Number(distanceToSimilarity(r.distance).toFixed(3)),
+    title: r.document_title,
+  };
+}
+
 /**
  * Searches across the given KB ids for chunks matching the query.
- * Uses sqlite-vec vec_distance_cosine for in-DB similarity computation.
+ *
+ * Hybrid: sqlite-vec cosine recall + keyword LIKE recall, then re-rank with
+ * speaker/subject boosts (see kbSearchRank.ts). Pure vector alone mis-attributes
+ * character dialogue when the query verb (はまってる) matches a different speaker.
  *
  * Security: joins knowledge_bases to verify userId ownership of each KB,
  * preventing IDOR via client-settable thread.activeKbIds.
@@ -582,61 +621,100 @@ export type KbSearchResult = {
  * @param query User's input text
  * @param kbIds Knowledge base ids to search within
  * @param userId Owner's user id — only KBs owned by this user are searched
- * @param limit Max results (default 5)
- * @param threshold Similarity threshold 0-1 (default 0.3 → distance < 0.7)
+ * @param limit Max results (default 8)
+ * @param threshold Similarity threshold 0-1 (default 0.22 → wider recall for re-rank)
  */
 export async function searchKnowledgeBases(
   query: string,
   kbIds: string[],
   userId: string,
-  limit = 5,
-  threshold = 0.3,
+  limit = 8,
+  threshold = 0.22,
 ): Promise<KbSearchResult[]> {
   if (kbIds.length === 0) return [];
-
-  const queryVector = await embedText(query, "query");
-  if (queryVector.length === 0) return [];
-  const queryBuf = toVecBuffer(queryVector);
-  const maxDistance = 1 - threshold;
+  const q = query.trim();
+  if (!q) return [];
 
   // IN (...) needs parentheses. Without them SQLite throws: near "?": syntax error
-  // (broken both auto-RAG via activeKbIds and the kb_search tool).
   const kbIdList = sql.join(
     kbIds.map((id) => sql`${id}`),
     sql`, `,
   );
 
-  const rows = await db.all(sql`
-    SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
-           kc.text, kc.ordinal,
-           d.title AS document_title,
-           vec_distance_cosine(kc.embedding, ${queryBuf}) AS distance
-    FROM kb_chunks kc
-    INNER JOIN kb_documents d ON kc.document_id = d.id
-    INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
-    WHERE kb.user_id = ${userId}
-      AND kc.knowledge_base_id IN (${kbIdList})
-      AND vec_distance_cosine(kc.embedding, ${queryBuf}) < ${maxDistance}
-    ORDER BY distance
-    LIMIT ${limit}
-  `) as {
-    chunk_id: string;
-    document_id: string;
-    knowledge_base_id: string;
-    text: string;
-    ordinal: number;
-    document_title: string;
-    distance: number;
-  }[];
+  const vectorHits: RankableKbHit[] = [];
+  const queryVector = await embedText(q, "query");
+  if (queryVector.length > 0) {
+    const queryBuf = toVecBuffer(queryVector);
+    // Wider recall for re-ranking (subject boost needs the right speaker in the pool)
+    const recallLimit = Math.min(40, Math.max(limit * 5, 20));
+    const maxDistance = 1 - threshold;
+    const rows = (await db.all(sql`
+      SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
+             kc.text, kc.ordinal,
+             d.title AS document_title,
+             vec_distance_cosine(kc.embedding, ${queryBuf}) AS distance
+      FROM kb_chunks kc
+      INNER JOIN kb_documents d ON kc.document_id = d.id
+      INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
+      WHERE kb.user_id = ${userId}
+        AND kc.knowledge_base_id IN (${kbIdList})
+        AND vec_distance_cosine(kc.embedding, ${queryBuf}) < ${maxDistance}
+      ORDER BY distance
+      LIMIT ${recallLimit}
+    `)) as KbSqlRow[];
+    for (const r of rows) vectorHits.push(rowToHit(r));
+  }
 
-  return rows.map((r) => ({
-    chunkId: r.chunk_id,
-    documentId: r.document_id,
-    kbId: r.knowledge_base_id,
-    text: r.text,
-    similarity: Number(distanceToSimilarity(r.distance).toFixed(3)),
-    title: r.document_title,
-  }));
+  // Keyword path: pull speaker/hobby matches vector search may rank poorly
+  const keywordHits: RankableKbHit[] = [];
+  const tokens = extractKeywordTokens(q);
+  const likePatterns = new Set<string>();
+  for (const t of tokens) {
+    for (const v of expandTokenVariants(t)) {
+      if (v.length >= 1) likePatterns.add(`%${v}%`);
+    }
+  }
+  const patterns = [...likePatterns].slice(0, 12);
+  if (patterns.length > 0) {
+    const likeClause = sql.join(
+      patterns.map((p) => sql`(d.title LIKE ${p} OR kc.text LIKE ${p})`),
+      sql` OR `,
+    );
+    const kwRows = (await db.all(sql`
+      SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
+             kc.text, kc.ordinal,
+             d.title AS document_title,
+             0.5 AS distance
+      FROM kb_chunks kc
+      INNER JOIN kb_documents d ON kc.document_id = d.id
+      INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
+      WHERE kb.user_id = ${userId}
+        AND kc.knowledge_base_id IN (${kbIdList})
+        AND (${likeClause})
+      LIMIT 30
+    `)) as KbSqlRow[];
+    for (const r of kwRows) {
+      keywordHits.push({
+        ...rowToHit(r),
+        // Keyword-only base similarity (re-rank adds subject boosts)
+        similarity: 0.5,
+      });
+    }
+  }
+
+  const merged = mergeAndRerankKbHits(vectorHits, keywordHits, q, limit);
+  if (merged.length === 0 && vectorHits.length === 0 && keywordHits.length === 0) {
+    return [];
+  }
+
+  logger.info("kbStore", "kb-search", {
+    queryPreview: q.slice(0, 40),
+    vector: vectorHits.length,
+    keyword: keywordHits.length,
+    returned: merged.length,
+  });
+
+  return merged;
 }
 
 /**
@@ -655,16 +733,24 @@ export async function buildKnowledgeContextMessage(
 ): Promise<{ role: "system"; content: string } | null> {
   if (kbIds.length === 0) return null;
 
-  const results = await searchKnowledgeBases(query, kbIds, userId, 5, 0.3);
+  const results = await searchKnowledgeBases(query, kbIds, userId, 8, 0.22);
   if (results.length === 0) return null;
 
   const chunkLines = results.map(
     (r, i) =>
-      `### ${i + 1}. ${r.title} (similarity: ${r.similarity})\n${r.text}`,
+      `### ${i + 1}. ${r.title} (score: ${r.similarity})\n${r.text}`,
   );
 
   return {
     role: "system",
-    content: `The following are relevant excerpts from the user's knowledge bases. Use this information to answer the user's question. If the excerpts don't contain the answer, say so explicitly.\n\n${chunkLines.join("\n\n")}`,
+    content:
+      "The following are relevant excerpts from the user's knowledge bases. " +
+      "Use them to answer the user's question. " +
+      "CRITICAL: Each excerpt title starts with the speaker/character name (before \"|\"). " +
+      "Only attribute dialogue to that speaker. If the question names a person, prefer " +
+      "excerpts whose title speaker matches that person; do not answer from a different " +
+      "character's lines. If none of the matching-speaker excerpts answer the question, " +
+      "say so explicitly instead of substituting another character.\n\n" +
+      chunkLines.join("\n\n"),
   };
 }

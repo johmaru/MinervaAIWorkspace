@@ -2847,10 +2847,25 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             // userId ownership verified in searchKnowledgeBases via JOIN on knowledge_bases.user_id
-            const results = await searchKnowledgeBases(parsedArgs.query, [parsedArgs.knowledge_base_id], userId, 5, 0.3);
-            toolContent = results.length === 0
-              ? "No results found."
-              : JSON.stringify(results.map((r) => ({ title: r.title, similarity: r.similarity, text: r.text.slice(0, 200) })));
+            // Hybrid search (vector + keyword + speaker re-rank); return more text for accuracy.
+            const results = await searchKnowledgeBases(
+              parsedArgs.query,
+              [parsedArgs.knowledge_base_id],
+              userId,
+              8,
+              0.22,
+            );
+            toolContent =
+              results.length === 0
+                ? "No results found."
+                : JSON.stringify(
+                    results.map((r) => ({
+                      title: r.title,
+                      speaker: r.title.split("|")[0]?.trim() ?? r.title,
+                      similarity: r.similarity,
+                      text: r.text.slice(0, 400),
+                    })),
+                  );
           } catch (err) {
             toolContent = `Failed to search knowledge base: ${err instanceof Error ? err.message : String(err)}`;
           }
