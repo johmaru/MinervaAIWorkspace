@@ -21,7 +21,7 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 - **File attachments** — images (vision), PDF (text extraction), text/code files (max 10MB each)
 - **Send-mode toggle** — default `Ctrl+Enter` / `Cmd+Enter` to send; click `⌃↵` for Enter-to-send (`Shift+Enter` newline)
 - **Reasoning display** — thinking tokens and inline `<thinking>` tags in a collapsible block
-- **Rich Markdown** — KaTeX (`$...$` / `$$...$$`), syntax-highlighted code with copy, GFM tables/strikethrough/task lists
+- **Rich Markdown** — KaTeX (`$...$` / `$$...$$`), syntax-highlighted code with copy, GFM tables/strikethrough/task lists, and LLM-authored rich blocks (callouts, inline styling, rich lists) via remark-directive
 - **Model + elapsed time** on each assistant message
 - **Auto title generation** from the first user message
 - **Date/time + execution environment** injected into prompts (timezone-aware OS/arch)
