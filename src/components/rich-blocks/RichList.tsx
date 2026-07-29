@@ -23,6 +23,11 @@ function enrichNode(node: ReactNode, Icon: typeof Check, color: string): ReactNo
 
   // react-markdown wraps native ul/ol/li in small function components defined in Markdown.tsx.
   // Render them once so we can inspect the underlying tag and prefix the real <li> items.
+  // NOTE: This direct el.type invocation assumes the Markdown.tsx ul/ol/li wrappers
+  // are stateless function components (no hooks, not memo/forwardRef-wrapped). If
+  // hooks are added to those wrappers, this will violate React's Rules of Hooks and
+  // crash. In that case, switch to a CSS-based marker approach (list-style + unicode
+  // symbols) instead of re-rendering component children by hand.
   if (typeof el.type === "function") {
     const rendered = (el.type as (props: unknown) => ReactNode)(el.props);
     if (isValidElement(rendered)) {
