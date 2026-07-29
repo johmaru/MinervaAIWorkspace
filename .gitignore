@@ -65,3 +65,6 @@ sim_test.sql
 package-lock.json
 data/
 localtodo.md
+
+# Superpowers SDD scratch (progress ledger, briefs, review packages)
+.superpowers/
