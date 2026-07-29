@@ -204,3 +204,19 @@ describe("Markdown — rich blocks: callout", () => {
     expect(screen.getByText("ヒント")).not.toBeNull();
   });
 });
+
+describe("Markdown — rich blocks: richlist", () => {
+  it("prefixes each li with the check icon", () => {
+    const { container } = render(<Markdown content={':::richlist{marker="check"}\n- one\n- two\n:::'} />);
+    const icons = container.querySelectorAll("svg.lucide-check");
+    expect(icons.length).toBe(2);
+    expect(container.querySelector("ul.list-disc")).toBeNull();
+    expect(container.querySelector("ul.list-none")).not.toBeNull();
+  });
+
+  it("falls back to info marker for unknown", () => {
+    const { container } = render(<Markdown content={':::richlist{marker="bogus"}\n- x\n:::'} />);
+    expect(container.querySelectorAll("svg.lucide-info").length).toBe(1);
+    expect(container.querySelector("ul.list-disc")).toBeNull();
+  });
+});
