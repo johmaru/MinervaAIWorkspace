@@ -220,3 +220,17 @@ describe("Markdown — rich blocks: richlist", () => {
     expect(container.querySelector("ul.list-disc")).toBeNull();
   });
 });
+
+describe("Markdown — rich blocks: streaming safety", () => {
+  it("does not crash on unclosed callout", () => {
+    expect(() => render(<Markdown content={':::callout{type="warning"}\nbody so far'} />)).not.toThrow();
+  });
+
+  it("does not crash on unclosed richlist", () => {
+    expect(() => render(<Markdown content={':::richlist{marker="check"}\n- one'} />)).not.toThrow();
+  });
+
+  it("does not crash on unclosed mark", () => {
+    expect(() => render(<Markdown content=":mark[unfinished" />)).not.toThrow();
+  });
+});
