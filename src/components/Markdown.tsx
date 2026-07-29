@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState, useCallback, type ComponentPropsWithoutRef } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkDirective from "remark-directive";
 import rehypeHighlight from "rehype-highlight";
@@ -135,7 +135,7 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
           h3: ({ children }) => <h3 className="my-1.5 text-sm font-bold">{children}</h3>,
           h4: ({ children }) => <h4 className="my-1 text-sm font-bold">{children}</h4>,
           hr: () => <hr className="my-3 border-border" />,
-        }}
+        } as Components}
       >
         {sanitized}
       </ReactMarkdown>
