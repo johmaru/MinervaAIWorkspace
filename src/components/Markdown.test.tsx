@@ -159,6 +159,32 @@ describe("Markdown — tool-call markup sanitization", () => {
   });
 });
 
+describe("Markdown — rich blocks: inline styling", () => {
+  it("applies big class to wrapped text", () => {
+    const { container } = render(<Markdown content="これは:mark[重要]{.big}です" />);
+    const span = container.querySelector("span.text-\\[1\\.25em\\]");
+    expect(span?.textContent).toBe("重要");
+  });
+
+  it("falls back to plain text for unknown class", () => {
+    const { container } = render(<Markdown content=":mark[x]{.bogus}" />);
+    expect(container.textContent).toContain("x");
+    expect(container.querySelector("span.text-\\[")).toBeNull();
+  });
+
+  it("handles array className from hastscript", () => {
+    const { container } = render(<Markdown content=":mark[small]{.small}" />);
+    const span = container.querySelector("span.text-\\[0\\.8em\\]");
+    expect(span?.textContent).toBe("small");
+  });
+
+  it("applies highlight class", () => {
+    const { container } = render(<Markdown content=":mark[hl]{.hl}" />);
+    const span = container.querySelector("span.rounded");
+    expect(span?.textContent).toBe("hl");
+  });
+});
+
 describe("Markdown — rich blocks: callout", () => {
   it("renders a callout with type=warning", () => {
     render(<Markdown content={':::callout{type="warning"}\n注意書き\n:::'} />);
