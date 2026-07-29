@@ -158,3 +158,23 @@ describe("Markdown — tool-call markup sanitization", () => {
     expect(container.textContent?.trim()).toBe("");
   });
 });
+
+describe("Markdown — rich blocks: callout", () => {
+  it("renders a callout with type=warning", () => {
+    render(<Markdown content={':::callout{type="warning"}\n注意書き\n:::'} />);
+    const box = document.querySelector("div.border-l-yellow-500");
+    expect(box).not.toBeNull();
+    expect(box?.textContent).toContain("注意書き");
+  });
+
+  it("falls back to note for unknown type", () => {
+    render(<Markdown content={':::callout{type="bogus"}\n本文\n:::'} />);
+    const box = document.querySelector("div.border-l-blue-500");
+    expect(box).not.toBeNull();
+  });
+
+  it("renders title header when provided", () => {
+    render(<Markdown content={':::callout{type="tip" title="ヒント"}\n本文\n:::'} />);
+    expect(screen.getByText("ヒント")).not.toBeNull();
+  });
+});

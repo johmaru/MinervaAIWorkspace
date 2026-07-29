@@ -36,10 +36,10 @@ describe("remarkRichBlocks", () => {
     expect(node.data.hProperties.marker).toBe("check");
   });
 
-  it("maps mark textDirective to hName=span with class", async () => {
+  it("maps mark textDirective to hName=mark with class", async () => {
     const tree = await run(":mark[hi]{.big}") as any;
     const node = findDirective(tree);
-    expect(node.data.hName).toBe("span");
+    expect(node.data.hName).toBe("mark");
     expect(node.data.hProperties.className).toEqual(["big"]);
   });
 

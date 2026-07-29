@@ -3,10 +3,13 @@
 import { memo, useState, useCallback, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkDirective from "remark-directive";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 
 import { sanitizeToolCallMarkup } from "@/lib/toolCallSanitizer";
+import { remarkRichBlocks } from "@/lib/remarkRichBlocks";
+import { Callout, InlineMark, RichList } from "./rich-blocks";
 
 /**
  * Markdown rendering for LLM responses.
@@ -76,7 +79,7 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
   return (
     <div className="markdown-body text-sm leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkDirective, remarkRichBlocks]}
         rehypePlugins={[rehypeHighlight, [rehypeKatex, { throwOnError: false }]]}
         components={{
           // Code blocks: highlight.js generates <pre><code class="language-xxx">
@@ -123,6 +126,10 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
               {children}
             </blockquote>
           ),
+          // Rich directive blocks (Task 2+)
+          callout: Callout,
+          richlist: RichList,
+          mark: InlineMark,
           h1: ({ children }) => <h1 className="my-2 text-base font-bold">{children}</h1>,
           h2: ({ children }) => <h2 className="my-2 text-base font-bold">{children}</h2>,
           h3: ({ children }) => <h3 className="my-1.5 text-sm font-bold">{children}</h3>,

@@ -23,8 +23,8 @@ export const remarkRichBlocks: Plugin<[], Root> = () => {
 
       if (node.type === "textDirective") {
         if (!TEXT_NAMES.has(name)) return;
-        const hast = h("span", attributes);
-        data.hName = "span";
+        const hast = h("mark", attributes);
+        data.hName = "mark";
         data.hProperties = hast.properties;
       } else if (CONTAINER_NAMES.has(name)) {
         const hast = h(name, attributes);
