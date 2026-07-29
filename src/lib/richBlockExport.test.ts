@@ -32,4 +32,18 @@ describe("convertRichBlocksForExport", () => {
     const out = convertRichBlocksForExport("# Title\n\nplain **bold**");
     expect(out).toBe("# Title\n\nplain **bold**");
   });
+
+  it("recursively converts nested callouts", () => {
+    const out = convertRichBlocksForExport(
+      ':::callout{type="warning"}\nouter\n:::callout{type="tip"}\ninner\n:::\n:::'
+    );
+    expect(out.trim()).toBe(
+      ["> [!warning]", "> outer", "> [!tip]", "> inner"].join("\n")
+    );
+  });
+
+  it("converts empty-body callout", () => {
+    const out = convertRichBlocksForExport(':::callout{type="warning"}\n:::');
+    expect(out.trim()).toBe("> [!warning]");
+  });
 });
