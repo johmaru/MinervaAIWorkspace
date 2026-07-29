@@ -70,7 +70,10 @@ export function buildForcedReportPrompt(tools: ToolTranscriptEntry[]): string {
     "You MUST write the full user-facing answer in message CONTENT now.\n" +
     "Thinking is NOT visible as the answer. Do NOT call tools.\n" +
     "Report: progress, file paths written, KB ids, ingest counts, search hits, errors, next steps.\n" +
-    "Only use facts present in the tool results below (or earlier tool messages). Do not invent fields.";
+    "Only use facts present in the tool results below (or earlier tool messages). Do not invent fields.\n" +
+    "CRITICAL: If any tool result shows status=error, status=empty, or status=blocked, " +
+    "report that failure honestly. Do NOT claim success when a tool returned an error or empty result. " +
+    "Quote the actual tool output to support your claims.";
 
   if (tools.length === 0) {
     return (
@@ -123,8 +126,10 @@ export function formatAutoUserReport(args: {
         ];
 
   for (const t of tools.slice(-12)) {
+    const statusMatch = t.content.match(/status=(\w+)/);
+    const statusTag = statusMatch ? ` [${statusMatch[1]}]` : "";
     const snippet = t.content.replace(/\s+/g, " ").trim().slice(0, 500);
-    lines.push(`- **${t.name}** (r${t.round}): ${snippet}`);
+    lines.push(`- **${t.name}** (r${t.round})${statusTag}: ${snippet}`);
   }
 
   lines.push("");

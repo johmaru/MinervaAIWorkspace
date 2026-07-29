@@ -68,6 +68,8 @@ import {
   searchWorkspaceFiles,
   grepWorkspaceContent,
 } from "@/lib/workspace";
+import { editFileInWorkspace } from "@/lib/editFile";
+import { createLoopGuardState, precheckToolCalls, recordToolOutcome } from "@/lib/toolLoopGuard";
 import {
   resolveBufferedToolRoundContent,
   TOOL_GROUNDING_REMINDER,
@@ -80,13 +82,22 @@ import {
   type ToolTranscriptEntry,
 } from "@/lib/agentHooks";
 import {
+  formatToolOutcomeForModel,
+  outcomeOk,
+  outcomeEmpty,
+  outcomeError,
+  outcomeBlocked,
+  type ToolOutcome,
+} from "@/lib/toolOutcome";
+import {
   agentContinueRetriesFromEnv,
+  agentContinueMinCharsFromEnv,
   buildContinueAgentPrompt,
-  shouldContinueToolLoop,
+  decideContinueToolLoop,
 } from "@/lib/agentContinuePolicy";
+import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
 import { logger } from "@/lib/logger";
 import { readProcessLogs } from "@/lib/logReader";
-import { runSandbox, getSandboxToolsForRequest } from "@/lib/sandbox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1245,7 +1256,11 @@ function buildFinalMessages({
           "Filters: filter_equals / filter_contains / filter_any_fields+filter_any_value on any top-level fields. " +
           "Do NOT read multi-MB JSONL with read_file; do not hand-filter in sandbox. " +
           "To transform proprietary source formats into JSONL, use sandbox_run or write_file, then kb_from_jsonl. " +
-          "Sandbox: read /workspace, write /out only + outputFiles.",
+          "Sandbox: read /workspace, write /out only + outputFiles.\n" +
+          "13. Editing existing files: prefer `edit_file` (str_replace) over `write_file` for partial edits. " +
+          "Use `write_file` only for new files or full rewrites. Copy the exact snippet from read_file as old_string.\n" +
+          "14. Tool outcome hints: when a tool result includes `next:` guidance, follow it. " +
+          "Do NOT repeat the same arguments after an error or empty result.",
       }
     : null;
   const richBlockMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
@@ -1811,6 +1826,26 @@ const STREAM_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "edit_file",
+      description:
+        "Edit an existing file by replacing an exact string (str_replace). PREFERRED over write_file for partial edits. " +
+        "old_string must match exactly (copy from read_file). If old_string matches multiple locations, set replace_all=true or add more context. " +
+        "Returns an error (not a silent overwrite) if old_string is not found. Use write_file only for new files or full rewrites.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Path relative to workspace root" },
+          old_string: { type: "string", description: "The exact text to find (must match the file content exactly)" },
+          new_string: { type: "string", description: "The replacement text" },
+          replace_all: { type: "boolean", description: "Replace all occurrences (default false). Required if old_string is not unique." },
+        },
+        required: ["path", "old_string", "new_string"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "list_directory",
       description:
         "List files and directories at a path. depth=1 (default) is a single level; raise depth (max 6) for a shallow tree. " +
@@ -2334,8 +2369,7 @@ async function streamCompletion({
   // Loop detection: track tool call signatures to detect repeated identical
   // calls (a common GLM-5.2 hallucination pattern where it keeps calling the
   // same tool with the same args, never making progress).
-  const seenToolCalls: Record<string, number> = {};
-  const MAX_DUPLICATE_CALLS = 2; // allow 2 identical calls, block on the 3rd
+  const loopGuardState = createLoopGuardState();
   let useToolsThisRoundOverride = true;
   // OMP-style: if the model stops mid-task with no tool_calls (thinking-only
   // or tiny body), re-enter the loop with tools still on instead of exiting.
@@ -2468,18 +2502,22 @@ async function streamCompletion({
         // OMP-style continue: model produced no tool_calls this round but the
         // user task is not finished (thinking-only / empty body / tiny report
         // after tools). Re-prompt with tools still available instead of exiting.
-        if (
-          shouldContinueToolLoop({
-            hadToolCalls,
-            toolsWereOffered: useToolsThisRound,
-            emittedContentChars,
-            toolRounds: rounds,
-            toolResultCount: toolTranscript.length,
-            continueRetriesUsed,
-            maxContinueRetries,
-            maxToolRounds: MAX_TOOL_ROUNDS,
-          })
-        ) {
+        const continueDecision = decideContinueToolLoop({
+          hadToolCalls,
+          toolsWereOffered: useToolsThisRound,
+          emittedContentChars,
+          toolRounds: rounds,
+          toolResultCount: toolTranscript.length,
+          continueRetriesUsed,
+          maxContinueRetries,
+          maxToolRounds: MAX_TOOL_ROUNDS,
+          minChars: agentContinueMinCharsFromEnv(),
+          lastAssistantText: contentBuffer || undefined,
+          unfinishedToolWork: toolTranscript.slice(-6).some(
+            (te) => te.content.includes("status=error") || te.content.includes("status=empty") || te.content.includes("status=blocked"),
+          ),
+        });
+        if (continueDecision.shouldContinue) {
           continueRetriesUsed++;
           logger.warn("chat", "agent-continue-loop", {
             model: modelToUse,
@@ -2488,6 +2526,7 @@ async function streamCompletion({
             toolRounds: rounds,
             toolResults: toolTranscript.length,
             emittedContentChars,
+            reason: continueDecision.reason,
           });
           send?.("status", {
             label: t(locale, "chat.statusAgentContinue", {
@@ -2519,25 +2558,16 @@ async function streamCompletion({
       const toolCalls = Object.values(toolCallAccumulator).filter((tc) => tc.name);
 
       // Loop detection: check if any tool call is a duplicate of a previous call.
-      // If the same tool+args combo has been called MAX_DUPLICATE_CALLS times,
-      // inject a "loop detected" result instead of executing, and force the
-      // next round to proceed without tools.
-      let loopDetected = false;
-      for (const tc of toolCalls) {
-        const sig = `${tc.name}:${tc.arguments}`;
-        seenToolCalls[sig] = (seenToolCalls[sig] ?? 0) + 1;
-        if (seenToolCalls[sig] > MAX_DUPLICATE_CALLS) {
-          loopDetected = true;
-          logger.warn("chat", "tool-loop-detected", {
-            tool: tc.name,
-            round: rounds,
-            count: seenToolCalls[sig],
-          });
-        }
-      }
-      if (loopDetected) {
-        // Inject loop-detected results for ALL tool calls in this round,
-        // then force the next round to answer without tools.
+      // Anti-loop guard: G1 (duplicate signature), G2 (empty exploration streak),
+      // G3 (same-path list_directory spam). Replaces inline seenToolCalls logic.
+      const guardResult = precheckToolCalls(loopGuardState, toolCalls);
+      if (guardResult.blocked && guardResult.results) {
+        logger.warn("chat", "tool-loop-detected", {
+          round: rounds,
+          tools: toolCalls.map((tc) => tc.name),
+        });
+        // Inject blocked results for ALL tool calls in this round,
+        // then force the next round to proceed without tools.
         currentMessages = [
           ...currentMessages,
           {
@@ -2549,11 +2579,10 @@ async function streamCompletion({
               function: { name: tc.name, arguments: tc.arguments },
             })),
           } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam,
-          ...toolCalls.map((tc): OpenAI.Chat.Completions.ChatCompletionToolMessageParam => ({
+          ...toolCalls.map((tc, i): OpenAI.Chat.Completions.ChatCompletionToolMessageParam => ({
             role: "tool" as const,
             tool_call_id: tc.id,
-            content: "LOOP DETECTED: You have already called this tool with the same arguments. " +
-              "Do not repeat the same call. Summarize what you found so far and answer the user.",
+            content: formatToolOutcomeForModel(guardResult.results![i]!),
           })),
           { role: "system" as const, content: TOOL_GROUNDING_REMINDER },
         ];
@@ -2563,7 +2592,6 @@ async function streamCompletion({
         useToolsThisRoundOverride = false;
         continue;
       }
-
       // Add assistant message (including tool_calls) to history
       currentMessages = [
         ...currentMessages,
@@ -2582,6 +2610,7 @@ async function streamCompletion({
       // Execute each tool call and append the result as a tool role message
       for (const tc of toolCalls) {
         let toolContent: string = "";
+        let toolOutcome: ToolOutcome | null = null;
         let parsedArgs: {
           url?: string; query?: string; path?: string; content?: string; command?: string;
           tailLines?: number; minLevel?: string; title?: string; description?: string;
@@ -2595,6 +2624,7 @@ async function streamCompletion({
           filter_equals?: string; filter_contains?: string;
           filter_any_fields?: string; filter_any_value?: string; filter_json?: string;
           replace_existing?: boolean;
+          old_string?: string; new_string?: string; replace_all?: boolean;
         };
         try {
           parsedArgs = JSON.parse(tc.arguments) as typeof parsedArgs;
@@ -2608,17 +2638,17 @@ async function streamCompletion({
           try {
           const result = await scrapeUrl(parsedArgs.url);
           if (result === null) {
-            toolContent = `Failed to scrape ${parsedArgs.url}`;
+            toolOutcome = outcomeError("scrape_webpage", `Failed to scrape ${parsedArgs.url}`, "Verify the URL is reachable. If it requires JS, use search_web instead.");
           } else {
             sources.push({
               url: result.url,
               title: result.title,
               snippet: result.content.slice(0, 200),
             });
-            toolContent = `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`;
+            toolOutcome = outcomeOk("scrape_webpage", `<${result.url}>\n${result.title}\n${result.content.slice(0, SEARCH_RESULT_CONTENT_SLICE)}`);
           }
           } catch {
-            toolContent = `Failed to scrape ${parsedArgs.url}`;
+            toolOutcome = outcomeError("scrape_webpage", `Failed to scrape ${parsedArgs.url}`, "Verify the URL is reachable. If it requires JS, use search_web instead.");
           }
           logger.info("search-timing", "tool", { tool: "scrape_webpage", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "search_web" && parsedArgs.query) {
@@ -2652,14 +2682,14 @@ async function streamCompletion({
               })
               .join("\n\n");
             if (!rawContent) {
-              toolContent = "No results found.";
+              toolOutcome = outcomeEmpty("search_web", "No results found.", "Reformulate the query with different keywords, add a site: filter, or broaden the time range.");
             } else {
               // Summarize search results with the search model (thinking=none for speed).
               // On summarization failure, fall back to raw search results.
               try {
                 const sModel = defaultSearchModel();
                 const sEffort = searchThinkingEffort();
-                toolContent = await completeText(
+                toolOutcome = outcomeOk("search_web", await completeText(
                   llm,
                   sModel,
                   [
@@ -2673,13 +2703,13 @@ async function streamCompletion({
                     },
                   ],
                   { reasoningEffort: sEffort as OpenAI.ReasoningEffort | null },
-                );
+                ));
               } catch {
-                toolContent = rawContent;
+                toolOutcome = outcomeOk("search_web", rawContent);
               }
             }
           } catch {
-            toolContent = `Search failed for: ${searchQuery}`;
+            toolOutcome = outcomeError("search_web", `Search failed for: ${searchQuery}`, "The search service may be down. Try a simpler query or use search_wikipedia for factual topics.");
           }
           logger.info("search-timing", "tool", { tool: "search_web", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "search_wikipedia" && parsedArgs.query) {
@@ -2689,12 +2719,12 @@ async function streamCompletion({
             const result = await searchWikipedia(parsedArgs.query);
             if (result) {
               sources.push({ url: result.url, title: result.title, snippet: result.description });
-              toolContent = `<${result.url}>\n${result.title}\n${result.description}\n${result.extract}`;
+              toolOutcome = outcomeOk("search_wikipedia", `<${result.url}>\n${result.title}\n${result.description}\n${result.extract}`);
             } else {
-              toolContent = "No Wikipedia article found.";
+              toolOutcome = outcomeEmpty("search_wikipedia", "No Wikipedia article found.", "Try a different entity name, or use search_web for broader coverage.");
             }
           } catch {
-            toolContent = `Wikipedia lookup failed for: ${parsedArgs.query}`;
+            toolOutcome = outcomeError("search_wikipedia", `Wikipedia lookup failed for: ${parsedArgs.query}`, "The Wikipedia API may be temporarily unavailable. Retry or use search_web instead.");
           }
           logger.info("search-timing", "tool", { tool: "search_wikipedia", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "read_file" && parsedArgs.path) {
@@ -2702,9 +2732,11 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             const result = await readWorkspaceFile(parsedArgs.path, userId);
-            toolContent = result;
+            toolOutcome = result.startsWith("File is too large")
+              ? { tool: "read_file", status: "partial", summary: "File too large, truncated", body: result, nextHint: "Use grep_content to search within the file instead of reading it fully." }
+              : outcomeOk("read_file", result);
           } catch (err) {
-            toolContent = `Failed to read file: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("read_file", `Failed to read file: ${err instanceof Error ? err.message : String(err)}`, "Verify the path. Use search_files with a glob pattern to locate the file if unsure.");
           }
           logger.info("search-timing", "tool", { tool: "read_file", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "write_file" && parsedArgs.path && parsedArgs.content !== undefined) {
@@ -2712,11 +2744,22 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             const result = await writeWorkspaceFile(parsedArgs.path, parsedArgs.content, userId);
-            toolContent = result;
+            toolOutcome = outcomeOk("write_file", result);
           } catch (err) {
-            toolContent = `Failed to write file: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("write_file", `Failed to write file: ${err instanceof Error ? err.message : String(err)}`, "Check the path is within the workspace and the disk has space.");
           }
           logger.info("search-timing", "tool", { tool: "write_file", round: rounds, duration: Date.now() - tTool });
+        } else if (tc.name === "edit_file" && parsedArgs.path && parsedArgs.old_string !== undefined && parsedArgs.new_string !== undefined) {
+          send?.("status", { label: t(locale, "chat.statusToolEditFile") });
+          const tTool = Date.now();
+          toolOutcome = await editFileInWorkspace({
+            path: parsedArgs.path,
+            oldString: parsedArgs.old_string,
+            newString: parsedArgs.new_string,
+            replaceAll: parsedArgs.replace_all === true,
+            userId,
+          });
+          logger.info("search-timing", "tool", { tool: "edit_file", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "list_directory" && parsedArgs.path) {
           send?.("status", { label: t(locale, "chat.statusToolListDir") });
           const tTool = Date.now();
@@ -2724,9 +2767,11 @@ async function streamCompletion({
             const result = await listWorkspaceDirectory(parsedArgs.path, userId, {
               depth: typeof parsedArgs.depth === "number" ? parsedArgs.depth : undefined,
             });
-            toolContent = result;
+            toolOutcome = result.startsWith("[LIST empty]")
+              ? outcomeEmpty("list_directory", result, "The directory is empty. Try listing a parent or different path, or use search_files with a glob pattern.")
+              : outcomeOk("list_directory", result);
           } catch (err) {
-            toolContent = `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("list_directory", `Failed to list directory: ${err instanceof Error ? err.message : String(err)}`, "Verify the path exists. Use search_files to find files by pattern instead of listing.");
           }
           logger.info("search-timing", "tool", { tool: "list_directory", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "search_files" && parsedArgs.pattern) {
@@ -2737,9 +2782,11 @@ async function streamCompletion({
               path: parsedArgs.path,
               maxResults: typeof parsedArgs.max_results === "number" ? parsedArgs.max_results : undefined,
             });
-            toolContent = result;
+            toolOutcome = result.startsWith("[SEARCH empty]")
+              ? outcomeEmpty("search_files", result, "Broaden the glob pattern (e.g. '**/*.ts' instead of '*.ts'), or search a different subdirectory.")
+              : outcomeOk("search_files", result);
           } catch (err) {
-            toolContent = `Failed to search files: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("search_files", `Failed to search files: ${err instanceof Error ? err.message : String(err)}`, "Check the glob syntax. Use grep_content to search file contents instead.");
           }
           logger.info("search-timing", "tool", { tool: "search_files", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "grep_content" && parsedArgs.pattern) {
@@ -2753,9 +2800,11 @@ async function streamCompletion({
               fixedString: parsedArgs.fixed_string === true,
               maxMatches: typeof parsedArgs.max_matches === "number" ? parsedArgs.max_matches : undefined,
             });
-            toolContent = result;
+            toolOutcome = result.startsWith("[GREP empty]")
+              ? outcomeEmpty("grep_content", result, "Broaden the regex or try a different path/glob. Use fixed_string=true for exact text.")
+              : outcomeOk("grep_content", result);
           } catch (err) {
-            toolContent = `Failed to grep content: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("grep_content", `Failed to grep content: ${err instanceof Error ? err.message : String(err)}`, "Check the regex syntax. Use fixed_string=true to treat the pattern as literal text.");
           }
           logger.info("search-timing", "tool", { tool: "grep_content", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "run_command" && parsedArgs.command) {
@@ -2763,9 +2812,11 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             const result = await runWorkspaceCommand(parsedArgs.command, userId);
-            toolContent = result;
+            toolOutcome = result.startsWith("Blocked:")
+              ? outcomeError("run_command", result, "Only whitelisted read-only commands are allowed (git status/log/diff, ls, cat, grep, find, wc, etc.).")
+              : outcomeOk("run_command", result);
           } catch (err) {
-            toolContent = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("run_command", `Command failed: ${err instanceof Error ? err.message : String(err)}`, "Check the command syntax. Only whitelisted read-only commands are allowed.");
           }
           logger.info("search-timing", "tool", { tool: "run_command", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "sandbox_run") {
@@ -2777,9 +2828,9 @@ async function streamCompletion({
             const result = await runSandbox(parsedArgs, userId);
             // Mark the output as untrusted so the model treats stdout/stderr
             // as data, not instructions (Tier 1 light sanitize, spec §7.1).
-            toolContent = "[sandbox untrusted output]\n" + JSON.stringify(result);
+            toolOutcome = outcomeOk("sandbox_run", "[sandbox untrusted output]\n" + JSON.stringify(result));
           } catch (err) {
-            toolContent = `Sandbox failed: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("sandbox_run", `Sandbox failed: ${err instanceof Error ? err.message : String(err)}`, "Check that Docker is available and the code is valid. Use write_file to persist output files.");
           }
           logger.info("search-timing", "tool", { tool: "sandbox_run", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "read_logs") {
@@ -2789,9 +2840,9 @@ async function streamCompletion({
             const tailLines = typeof parsedArgs.tailLines === "number" ? parsedArgs.tailLines : 200;
             const minLevel = (parsedArgs.minLevel === "debug" || parsedArgs.minLevel === "info" || parsedArgs.minLevel === "warn" || parsedArgs.minLevel === "error") ? parsedArgs.minLevel : "info";
             const result = await readProcessLogs(tailLines, minLevel);
-            toolContent = `[source: ${result.source}${result.containerId ? `, container: ${result.containerId}` : ""}${result.truncated ? ", truncated" : ""}]\n${result.lines}`;
+            toolOutcome = outcomeOk("read_logs", `[source: ${result.source}${result.containerId ? `, container: ${result.containerId}` : ""}${result.truncated ? ", truncated" : ""}]\n${result.lines}`);
           } catch (err) {
-            toolContent = `Failed to read logs: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("read_logs", `Failed to read logs: ${err instanceof Error ? err.message : String(err)}`, "The log source may be unavailable. Try a different tailLines or minLevel.");
           }
           logger.info("search-timing", "tool", { tool: "read_logs", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "todo_create" && parsedArgs.title) {
@@ -2803,12 +2854,14 @@ async function streamCompletion({
             dueAt: parsedArgs.due_at ? new Date(parsedArgs.due_at) : null,
             threadId: threadId ?? null,
           });
-          toolContent = JSON.stringify(created);
+          toolOutcome = outcomeOk("todo_create", JSON.stringify(created));
         } else if (tc.name === "todo_list") {
           send?.("status", { label: t(locale, "chat.statusToolTodoList") });
           const status = parsedArgs.status === "pending" || parsedArgs.status === "in_progress" || parsedArgs.status === "completed" ? parsedArgs.status : undefined;
           const list = await listTodos(userId, status);
-          toolContent = JSON.stringify(list);
+          toolOutcome = list.length === 0
+            ? outcomeEmpty("todo_list", "No todos found.", "Create a todo with todo_create first, or set status to 'all'.")
+            : outcomeOk("todo_list", JSON.stringify(list));
         } else if (tc.name === "todo_update" && parsedArgs.id) {
           send?.("status", { label: t(locale, "chat.statusToolTodoUpdate") });
           const updated = await updateTodo(userId, parsedArgs.id, {
@@ -2818,17 +2871,21 @@ async function streamCompletion({
             priority: parsedArgs.priority === "low" || parsedArgs.priority === "medium" || parsedArgs.priority === "high" ? parsedArgs.priority : undefined,
             dueAt: parsedArgs.due_at === null ? null : (parsedArgs.due_at ? new Date(parsedArgs.due_at) : undefined),
           });
-          toolContent = updated ? JSON.stringify(updated) : "Todo not found";
+          toolOutcome = updated
+            ? outcomeOk("todo_update", JSON.stringify(updated))
+            : outcomeError("todo_update", "Todo not found", "Call todo_list to see available todo ids.");
         } else if (tc.name === "todo_delete" && parsedArgs.id) {
           send?.("status", { label: t(locale, "chat.statusToolTodoDelete") });
           await deleteTodo(userId, parsedArgs.id);
-          toolContent = "Todo deleted";
+          toolOutcome = outcomeOk("todo_delete", "Todo deleted");
         } else if (tc.name === "skill_list") {
           send?.("status", { label: t(locale, "chat.statusToolSkillList") });
           const skillStatus = parsedArgs.status === "active" || parsedArgs.status === "archived" ? parsedArgs.status : undefined;
           const includeDups = parsedArgs.include_duplicates === true;
           const list = await listSkills(userId, skillStatus, includeDups);
-          toolContent = JSON.stringify(list);
+          toolOutcome = list.length === 0
+            ? outcomeEmpty("skill_list", "No skills found.", "Create a skill with skill_create, or set status to 'all'.")
+            : outcomeOk("skill_list", JSON.stringify(list));
         } else if (tc.name === "skill_create" && parsedArgs.name && parsedArgs.content) {
           send?.("status", { label: t(locale, "chat.statusToolSkillCreate") });
           try {
@@ -2842,11 +2899,11 @@ async function streamCompletion({
               trigger: parsedArgs.trigger,
               tags: Array.isArray(parsedArgs.tags) ? parsedArgs.tags : undefined,
             });
-            toolContent = "error" in created
-              ? "A skill with identical content already exists."
-              : JSON.stringify(created);
+            toolOutcome = "error" in created
+              ? outcomeError("skill_create", "A skill with identical content already exists.", "Modify the content or update the existing skill with skill_update.")
+              : outcomeOk("skill_create", JSON.stringify(created));
           } catch (err) {
-            toolContent = `Failed to create skill: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("skill_create", `Failed to create skill: ${err instanceof Error ? err.message : String(err)}`, "Check the skill name and content are valid.");
           }
         } else if (tc.name === "skill_update" && parsedArgs.id) {
           send?.("status", { label: t(locale, "chat.statusToolSkillUpdate") });
@@ -2858,26 +2915,28 @@ async function streamCompletion({
             status: parsedArgs.status === "active" || parsedArgs.status === "archived" ? parsedArgs.status : undefined,
           });
           if (!result) {
-            toolContent = "Skill not found";
+            toolOutcome = outcomeError("skill_update", "Skill not found", "Call skill_list to see available skill ids.");
           } else if ("error" in result) {
-            toolContent = result.error === "embed_failed"
-              ? "Failed to update skill: embedding service unavailable."
-              : "Skill was modified by another request. Please retry.";
+            toolOutcome = result.error === "embed_failed"
+              ? outcomeError("skill_update", "Failed to update skill: embedding service unavailable.", "Retry later when the embedding service recovers.")
+              : outcomeError("skill_update", "Skill was modified by another request. Please retry.", "Re-read the skill with skill_list and retry the update.");
           } else {
-            toolContent = JSON.stringify(result);
+            toolOutcome = outcomeOk("skill_update", JSON.stringify(result));
           }
         } else if (tc.name === "skill_delete" && parsedArgs.id) {
           send?.("status", { label: t(locale, "chat.statusToolSkillDelete") });
           const deleted = await deleteSkill(userId, parsedArgs.id);
-          toolContent = deleted ? "Skill deleted" : "Skill not found";
+          toolOutcome = deleted
+            ? outcomeOk("skill_delete", "Skill deleted")
+            : outcomeError("skill_delete", "Skill not found", "Call skill_list to see available skill ids.");
         } else if (tc.name === "kb_create" && parsedArgs.name) {
           send?.("status", { label: t(locale, "chat.statusToolKbCreate") });
           const tTool = Date.now();
           try {
             const kb = await createKnowledgeBase(userId, parsedArgs.name, parsedArgs.description);
-            toolContent = `Knowledge base created: ${kb.id} (${kb.name})`;
+            toolOutcome = outcomeOk("kb_create", `Knowledge base created: ${kb.id} (${kb.name})`, `kb_id=${kb.id}`);
           } catch (err) {
-            toolContent = `Failed to create knowledge base: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_create", `Failed to create knowledge base: ${err instanceof Error ? err.message : String(err)}`, "Check the KB name is valid and the database is writable.");
           }
           logger.info("search-timing", "tool", { tool: "kb_create", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_list") {
@@ -2885,9 +2944,9 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             const kbs = await listKnowledgeBases(userId);
-            toolContent = kbs.length === 0
-              ? "No knowledge bases found."
-              : JSON.stringify(
+            toolOutcome = kbs.length === 0
+              ? outcomeEmpty("kb_list", "No knowledge bases found.", "Create one with kb_create first.")
+              : outcomeOk("kb_list", JSON.stringify(
                   kbs.map((kb) => ({
                     id: kb.id,
                     name: kb.name,
@@ -2895,9 +2954,9 @@ async function streamCompletion({
                     documentCount: kb.documentCount,
                     createdAt: kb.createdAt,
                   })),
-                );
+                ));
           } catch (err) {
-            toolContent = `Failed to list knowledge bases: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_list", `Failed to list knowledge bases: ${err instanceof Error ? err.message : String(err)}`, "The database may be temporarily unavailable.");
           }
           logger.info("search-timing", "tool", { tool: "kb_list", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_delete" && parsedArgs.knowledge_base_id) {
@@ -2905,11 +2964,11 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             const ok = await deleteKnowledgeBase(parsedArgs.knowledge_base_id, userId);
-            toolContent = ok
-              ? `Knowledge base deleted: ${parsedArgs.knowledge_base_id}`
-              : `Knowledge base not found or not owned: ${parsedArgs.knowledge_base_id}`;
+            toolOutcome = ok
+              ? outcomeOk("kb_delete", `Knowledge base deleted: ${parsedArgs.knowledge_base_id}`)
+              : outcomeError("kb_delete", `Knowledge base not found or not owned: ${parsedArgs.knowledge_base_id}`, "Call kb_list to verify the kb_id.");
           } catch (err) {
-            toolContent = `Failed to delete knowledge base: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_delete", `Failed to delete knowledge base: ${err instanceof Error ? err.message : String(err)}`, "The database may be temporarily unavailable.");
           }
           logger.info("search-timing", "tool", { tool: "kb_delete", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_ingest" && parsedArgs.knowledge_base_id && parsedArgs.title) {
@@ -2924,13 +2983,13 @@ async function streamCompletion({
               sourceUrl = parsedArgs.source_url;
               const scraped = await scrapeUrl(sourceUrl);
               if (!scraped) {
-                toolContent = "Failed to scrape URL (scraper service unavailable)";
+                toolOutcome = outcomeError("kb_ingest", "Failed to scrape URL (scraper service unavailable)", "Provide content directly instead of a source_url, or retry later.");
               } else {
                 content = scraped.content;
               }
             }
             if (!content) {
-              if (!toolContent) toolContent = "No content to ingest (provide content or a valid source_url)";
+              if (!toolOutcome) toolOutcome = outcomeError("kb_ingest", "No content to ingest (provide content or a valid source_url)", "Pass the 'content' field or a valid 'source_url'.");
             } else {
               const result = await ingestDocument(parsedArgs.knowledge_base_id, {
                 title: parsedArgs.title,
@@ -2938,12 +2997,12 @@ async function streamCompletion({
                 sourceUrl,
                 content,
               }, userId);
-              toolContent = result.cached
-                ? `Document already exists (cached): ${result.id}`
-                : `Document ingested: ${result.id} (${result.chunkCount} chunks)`;
+              toolOutcome = result.cached
+                ? outcomeOk("kb_ingest", `Document already exists (cached): ${result.id}`)
+                : outcomeOk("kb_ingest", `Document ingested: ${result.id} (${result.chunkCount} chunks)`);
             }
           } catch (err) {
-            toolContent = `Failed to ingest document: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_ingest", `Failed to ingest document: ${err instanceof Error ? err.message : String(err)}`, "Check the kb_id with kb_list and ensure the content is valid text.");
           }
           logger.info("search-timing", "tool", { tool: "kb_ingest", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_search" && parsedArgs.knowledge_base_id && parsedArgs.query) {
@@ -2959,19 +3018,19 @@ async function streamCompletion({
               8,
               0.22,
             );
-            toolContent =
+            toolOutcome =
               results.length === 0
-                ? "No results found."
-                : JSON.stringify(
+                ? outcomeEmpty("kb_search", "No results found.", "Reformulate the query with different keywords, or verify the kb_id with kb_list.")
+                : outcomeOk("kb_search", JSON.stringify(
                     results.map((r) => ({
                       title: r.title,
                       speaker: r.title.split("|")[0]?.trim() ?? r.title,
                       similarity: r.similarity,
                       text: r.text.slice(0, 400),
                     })),
-                  );
+                  ));
           } catch (err) {
-            toolContent = `Failed to search knowledge base: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_search", `Failed to search knowledge base: ${err instanceof Error ? err.message : String(err)}`, "Check the kb_id with kb_list and ensure the embedding service is available.");
           }
           logger.info("search-timing", "tool", { tool: "kb_search", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_ingest_folder" && parsedArgs.knowledge_base_id && parsedArgs.folder_path) {
@@ -2979,12 +3038,13 @@ async function streamCompletion({
           const tTool = Date.now();
           try {
             const result = await ingestFolder(parsedArgs.knowledge_base_id, parsedArgs.folder_path, userId);
-            toolContent = `Ingested ${result.ingested} file(s), skipped ${result.skipped} empty file(s)${result.errors.length > 0 ? `, ${result.errors.length} error(s)` : ""}`;
+            let folderBody = `Ingested ${result.ingested} file(s), skipped ${result.skipped} empty file(s)${result.errors.length > 0 ? `, ${result.errors.length} error(s)` : ""}`;
             if (result.errors.length > 0) {
-              toolContent += `\nErrors:\n${result.errors.slice(0, 5).join("\n")}${result.errors.length > 5 ? `\n... and ${result.errors.length - 5} more` : ""}`;
+              folderBody += `\nErrors:\n${result.errors.slice(0, 5).join("\n")}${result.errors.length > 5 ? `\n... and ${result.errors.length - 5} more` : ""}`;
             }
+            toolOutcome = outcomeOk("kb_ingest_folder", folderBody);
           } catch (err) {
-            toolContent = `Failed to ingest folder: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_ingest_folder", `Failed to ingest folder: ${err instanceof Error ? err.message : String(err)}`, "Verify the folder_path exists in the workspace and the kb_id is valid.");
           }
           logger.info("search-timing", "tool", { tool: "kb_ingest_folder", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_ingest_jsonl" && parsedArgs.knowledge_base_id && parsedArgs.path) {
@@ -3021,18 +3081,19 @@ async function streamCompletion({
                 },
               },
             );
-            toolContent =
+            let jsonlBody =
               `JSONL ingest complete for ${parsedArgs.path}: ` +
               `ingested=${result.ingested}, cached=${result.cached}, skipped=${result.skipped}, errors=${result.errors.length}` +
               (filter ? `\nfilter applied` : "") +
               (result.titles.length > 0 ? `\nSample titles: ${result.titles.join(", ")}` : "");
             if (result.errors.length > 0) {
-              toolContent +=
+              jsonlBody +=
                 `\nErrors:\n${result.errors.slice(0, 8).join("\n")}` +
                 (result.errors.length > 8 ? `\n... and ${result.errors.length - 8} more` : "");
             }
+            toolOutcome = outcomeOk("kb_ingest_jsonl", jsonlBody);
           } catch (err) {
-            toolContent = `Failed to ingest JSONL: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_ingest_jsonl", `Failed to ingest JSONL: ${err instanceof Error ? err.message : String(err)}`, "Verify the JSONL path and kb_id. Check that the file has one JSON object per line with content/text.");
           }
           logger.info("search-timing", "tool", { tool: "kb_ingest_jsonl", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name === "kb_from_jsonl" && parsedArgs.name && parsedArgs.path) {
@@ -3066,7 +3127,7 @@ async function streamCompletion({
                 }
               },
             });
-            toolContent =
+            let fromJsonlBody =
               `KB created from JSONL.\n` +
               `kb_id=${result.kbId}\n` +
               `kb_name=${result.kbName}\n` +
@@ -3078,14 +3139,15 @@ async function streamCompletion({
                 ? `\nSample titles: ${result.ingest.titles.join(", ")}`
                 : "");
             if (result.ingest.errors.length > 0) {
-              toolContent +=
+              fromJsonlBody +=
                 `\nErrors:\n${result.ingest.errors.slice(0, 8).join("\n")}` +
                 (result.ingest.errors.length > 8
                   ? `\n... and ${result.ingest.errors.length - 8} more`
                   : "");
             }
+            toolOutcome = outcomeOk("kb_from_jsonl", fromJsonlBody, `kb_id=${result.kbId}`);
           } catch (err) {
-            toolContent = `Failed kb_from_jsonl: ${err instanceof Error ? err.message : String(err)}`;
+            toolOutcome = outcomeError("kb_from_jsonl", `Failed kb_from_jsonl: ${err instanceof Error ? err.message : String(err)}`, "Verify the JSONL path exists and has valid JSON lines with content/text.");
           }
           logger.info("search-timing", "tool", { tool: "kb_from_jsonl", round: rounds, duration: Date.now() - tTool });
         } else if (tc.name.includes("__") && mcpConnections && mcpConnections.length > 0) {
@@ -3102,26 +3164,26 @@ async function streamCompletion({
                 } catch {
                   mcpArgs = {};
                 }
-                toolContent = await callMcpTool(conn, parsed.toolName, mcpArgs);
+                toolOutcome = outcomeOk(tc.name, await callMcpTool(conn, parsed.toolName, mcpArgs));
               } catch {
-                toolContent = `MCP tool ${tc.name} failed`;
+                toolOutcome = outcomeError(tc.name, `MCP tool ${tc.name} failed`, "The MCP server may be disconnected. Check the connection status and retry.");
               }
             } else {
-              toolContent = `MCP server "${parsed.serverName}" not connected`;
+              toolOutcome = outcomeError(tc.name, `MCP server "${parsed.serverName}" not connected`, "Reconnect the MCP server or verify it is enabled for this thread.");
             }
           } else {
-            toolContent = `Unknown tool: ${tc.name}`;
+            toolOutcome = outcomeError(tc.name, `Unknown tool: ${tc.name}`, "The tool name format is invalid.");
           }
         } else if (connectionRows && connectionRows.length > 0) {
           // Connection tool: resolve provider by tool-name prefix (notion_, gmail_, etc.)
           // and find the matching enabled connection for that provider.
           const provider = resolveProviderFromToolName(tc.name);
           if (!provider) {
-            toolContent = `Unknown tool: ${tc.name}`;
+            toolOutcome = outcomeError(tc.name, `Unknown tool: ${tc.name}`, "The tool name does not match any known provider.");
           } else {
             const conn = connectionRows.find((c) => c.provider === provider);
             if (!conn) {
-              toolContent = `No active connection for provider: ${provider}`;
+              toolOutcome = outcomeError(tc.name, `No active connection for provider: ${provider}`, "Authorize the connection in the Connections menu first.");
             } else {
               send?.("status", { label: t(locale, "chat.statusToolConnection", { tool: tc.name }) });
               try {
@@ -3132,7 +3194,7 @@ async function streamCompletion({
                   connArgs = {};
                 }
                 const result = await dispatchConnectionTool(conn, tc.name, connArgs);
-                toolContent = result.content;
+                toolOutcome = outcomeOk(tc.name, result.content);
                 // Persist refreshed token: access-only allowed; refresh + expiry when present.
                 if (result.newAccessToken) {
                   try {
@@ -3150,19 +3212,25 @@ async function streamCompletion({
                   }
                 }
               } catch {
-                toolContent = `Connection tool ${tc.name} failed`;
+                toolOutcome = outcomeError(tc.name, `Connection tool ${tc.name} failed`, "The connection may need re-authorization. Check the Connections menu.");
               }
             }
           }
         } else {
-          toolContent = `Unknown tool: ${tc.name}`;
+          toolOutcome = outcomeError(tc.name, `Unknown tool: ${tc.name}`, "This tool is not available in the current configuration.");
         }
+
+        // Convert the structured outcome into the string the model sees.
+        toolContent = toolOutcome
+          ? formatToolOutcomeForModel(toolOutcome)
+          : `Unknown tool: ${tc.name}`;
 
         recordToolResult(toolTranscript, {
           name: tc.name,
           content: toolContent,
           round: rounds,
         });
+        if (toolOutcome) recordToolOutcome(loopGuardState, tc, toolOutcome);
 
         currentMessages = [
           ...currentMessages,

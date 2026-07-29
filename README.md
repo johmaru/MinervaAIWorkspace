@@ -45,7 +45,7 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 
 ### Tools & integrations
 
-- **Workspace tools** — model can read/write files, list dirs, run shell commands, and read app logs during streaming
+- **Workspace tools** — model can read/write/edit files, search by glob/regex, list dirs, run shell commands, and read app logs during streaming. Tool results include structured status + next-action hints; an anti-loop guard prevents repeated failed exploration. The agent continue policy re-prompts when the model stops mid-task without a real answer.
 - **Sandbox code execution (experimental, v0.4)** — isolated `sandbox_run` tool (Python/JS) via Docker; auto-off when Docker/image missing. See [Sandbox](#sandbox-code-execution-optional)
 - **MCP server integration** — Streamable HTTP / legacy SSE / stdio; optional request headers; connection test; SSRF-guarded URLs (`MCP_ALLOW_PRIVATE_URLS` for self-host)
 - **Connections (OAuth)** — Notion, GitHub, Gmail, Google Drive, Google Calendar, Outlook Mail, Outlook Calendar; per-thread enable via ＋ menu

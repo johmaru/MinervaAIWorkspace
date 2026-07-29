@@ -140,13 +140,23 @@ When `probeToolSupport` returns `{ supported: true }`, the search system message
 
 ### Built-in tools
 
-**`STREAM_TOOLS`** (route.ts:1050–1095) defines three built-in tools:
+**`STREAM_TOOLS`** (route.ts) defines the built-in tools. In addition to the
+original web tools, workspace file tools (`read_file`, `write_file`,
+`edit_file`, `list_directory`, `search_files`, `grep_content`, `run_command`),
+`read_logs`, todo/skill/kb management tools are included.
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `scrape_webpage` | `url: string` (required) | Fetch and read the content of a web page. Used when the user shares a URL or the model needs to read a specific page. |
 | `search_web` | `query: string` (required) | Search the web for current information or unfamiliar terms. Uses SearXNG + Scrapling scraper. |
 | `search_wikipedia` | `query: string` (required) | Look up a Wikipedia article for factual information about named entities. Faster than `search_web`. |
+| `read_file` | `path: string` | Read a workspace file (max 1MB). |
+| `write_file` | `path, content: string` | Create or fully overwrite a workspace file. |
+| `edit_file` | `path, old_string, new_string, replace_all?` | Partial edit via exact str_replace. **Preferred over write_file** for existing files. Errors on no-match/ambiguous instead of silent overwrite. |
+| `list_directory` | `path, depth?` | List files/dirs (depth 1–6). Prefer `search_files`/`grep_content` over repeated listing. |
+| `search_files` | `pattern, path?, max_results?` | Find files by glob pattern. Preferred for locating files. |
+| `grep_content` | `pattern, path?, glob?, ...` | Search file contents with regex or fixed string. |
+| `run_command` | `command: string` | Execute a whitelisted read-only shell command. |
 
 These tool names **never** contain `__` (the MCP separator), which is how built-in tools are distinguished from MCP tools during dispatch.
 
@@ -199,7 +209,7 @@ design and setup.
 **File:** route.ts:1099–1367
 
 ```
-MAX_TOOL_ROUNDS = 3
+MAX_TOOL_ROUNDS = 12
 ```
 
 The function runs a `while (true)` loop (line 1143):
@@ -243,6 +253,55 @@ The function runs a `while (true)` loop (line 1143):
 ### Reasoning suppression during tool rounds
 
 When tools are active (`useToolsThisRound` is true), `disableReasoningParams` is used instead of `reasoning_effort` (route.ts:1150–1157). This suppresses thinking tokens during tool rounds to reduce latency. For the final answer stream, `disableReasoningParams` is also used when `reasoningEffort === "none"` — this ensures GLM-5.2 actually disables thinking (it ignores `reasoning_effort: "none"`, but `enable_thinking: false` works). For `high`/`max`, `reasoning_effort` is sent as before.
+
+### Tool outcome envelope
+
+**Files:** `src/lib/toolOutcome.ts`, `src/lib/toolLoopGuard.ts`, `src/lib/agentContinuePolicy.ts`
+
+All built-in tool results are structured into a `ToolOutcome` envelope before
+being serialized to a string for the model. The format is:
+
+```
+[tool=<name> status=<status> code=<code?>]
+summary: <one-line summary>
+next: <next-action hint when status ≠ ok>
+---
+<body>
+```
+
+Status values: `ok`, `empty`, `error`, `blocked`, `partial`. When the status is
+not `ok`, a `next:` hint guides the model to try a different approach instead of
+repeating the same failed call.
+
+### Continue-until-done policy
+
+**File:** `src/lib/agentContinuePolicy.ts`
+
+When the model stops without `tool_calls` but the task is unfinished, the loop
+re-enters with tools still available (OMP-style "keep going"). Reasons:
+
+| Code | Condition |
+|------|-----------|
+| C1 | No visible content (thinking-only) |
+| C2 | Tools ran + content shorter than `AGENT_CONTINUE_MIN_CHARS` (default 80) |
+| C3 | Tools ran + content is only a preliminary "I'll check" announcement (ja + en) |
+| C4 | Unfinished tool work (error/empty outcomes) + content shorter than 400 chars |
+
+Budget: `AGENT_CONTINUE_RETRIES` (default 3, max 8).
+
+### Anti-loop guard
+
+**File:** `src/lib/toolLoopGuard.ts`
+
+Replaces inline `seenToolCalls` duplicate detection with a structured state machine:
+
+| Guard | Condition | Action |
+|-------|-----------|--------|
+| G1 | Same tool+args signature called > 2 times | Block round + 1 tools-off round |
+| G2 | N consecutive empty exploration results (default 3, `AGENT_EMPTY_EXPLORATION_LIMIT`) | Block + hint to change strategy |
+| G3 | Same `list_directory` path called 3+ times (any depth) | Block + hint to use search_files |
+
+Exploration tools counted for G2: `list_directory`, `search_files`, `grep_content`, `search_web`, `search_wikipedia`.
 
 ---
 

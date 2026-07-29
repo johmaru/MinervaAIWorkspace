@@ -16,6 +16,12 @@ import { hasUserVisibleContent } from "@/lib/agentHooks";
 /** Default: how many times we may re-enter the loop after a premature stop. */
 export const DEFAULT_AGENT_CONTINUE_RETRIES = 3;
 
+/** Default C2 threshold: minimum chars to consider content a real answer after tools. */
+export const DEFAULT_AGENT_CONTINUE_MIN_CHARS = 80;
+
+/** C4 threshold: if unfinished tool work and content is shorter than this, continue. */
+const C4_MAX_CHARS = 400;
+
 export function agentContinueRetriesFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
@@ -24,11 +30,52 @@ export function agentContinueRetriesFromEnv(
   return Math.min(8, Math.floor(raw));
 }
 
+export function agentContinueMinCharsFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = Number(env.AGENT_CONTINUE_MIN_CHARS);
+  if (!Number.isFinite(raw) || raw < 0) return DEFAULT_AGENT_CONTINUE_MIN_CHARS;
+  return Math.floor(raw);
+}
+
 /**
- * True when this completion stopped without tool_calls but the agent should
- * still keep tools and try another round (instead of breaking the loop).
+ * ja + en "promise-only" patterns: content that announces intent without
+ * doing the work. Conservative — only matches clearly preliminary phrasing.
  */
-export function shouldContinueToolLoop(args: {
+const PROMISE_ONLY_PATTERNS: RegExp[] = [
+  /(?:^|[\s。])I[''']ll (?:check|look|verify|do|try|search|read|write|create|update|run)\b/i,
+  /(?:^|[\s。])Let me (?:check|look|verify|search|read|find|try|see)\b/i,
+  /(?:^|[\s。])I will (?:check|look|verify|do|search|read|write|create|run)\b/i,
+  /次に.*(?:調べ|確認|行|実行|見)ます/,
+  /(?:を|が|で|に|は|の|も)?確認します/,
+  /やってみます/,
+  /探してみます/,
+  /見てみます/,
+  /実行します/,
+];
+
+/** True if the text is only a preliminary announcement without substance. */
+function isPromiseOnlyText(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+  // Must be short (a real report is usually longer than a one-liner promise).
+  if (trimmed.length > 200) return false;
+  return PROMISE_ONLY_PATTERNS.some((re) => re.test(trimmed));
+}
+
+export type ContinueReason = "C1" | "C2" | "C3" | "C4";
+
+export type ContinueDecision = { shouldContinue: boolean; reason?: ContinueReason };
+
+/**
+ * Decide whether to re-enter the tool loop after a premature stop.
+ * Returns a decision with a reason code:
+ * - C1: pure thinking / silence (no visible content)
+ * - C2: tools ran + content shorter than min-chars threshold
+ * - C3: tools ran + content is only a preliminary "I'll do it" announcement
+ * - C4: unfinished tool work (error/empty outcomes) + content shorter than C4 threshold
+ */
+export function decideContinueToolLoop(args: {
   hadToolCalls: boolean;
   toolsWereOffered: boolean;
   emittedContentChars: number;
@@ -38,24 +85,62 @@ export function shouldContinueToolLoop(args: {
   maxContinueRetries: number;
   /** Hard tool-round budget (MAX_TOOL_ROUNDS). */
   maxToolRounds: number;
-}): boolean {
-  if (args.hadToolCalls) return false;
-  if (!args.toolsWereOffered) return false;
-  if (args.continueRetriesUsed >= args.maxContinueRetries) return false;
-  if (args.toolRounds >= args.maxToolRounds) return false;
+  /** C2 threshold from env (default 80). */
+  minChars?: number;
+  /** Last assistant content buffer this round (for C3 promise detection). */
+  lastAssistantText?: string;
+  /** Whether transcript suggests unfinished multi-step work (error/empty outcomes). */
+  unfinishedToolWork?: boolean;
+}): ContinueDecision {
+  if (args.hadToolCalls) return { shouldContinue: false };
+  if (!args.toolsWereOffered) return { shouldContinue: false };
+  if (args.continueRetriesUsed >= args.maxContinueRetries) return { shouldContinue: false };
+  if (args.toolRounds >= args.maxToolRounds) return { shouldContinue: false };
 
-  // Case A: pure thinking / silence — never finished, never answered.
+  const minChars = args.minChars ?? DEFAULT_AGENT_CONTINUE_MIN_CHARS;
+
+  // C1: pure thinking / silence — never finished, never answered.
   if (!hasUserVisibleContent(args.emittedContentChars)) {
-    return true;
+    return { shouldContinue: true, reason: "C1" };
   }
 
-  // Case B: short "ok I'll do it" style content after tools, without a real report.
+  // C2: short "ok I'll do it" style content after tools, without a real report.
   // Leave alone if no tools ran (normal short chat).
-  if (args.toolResultCount > 0 && args.emittedContentChars < 80) {
-    return true;
+  if (args.toolResultCount > 0 && args.emittedContentChars < minChars) {
+    return { shouldContinue: true, reason: "C2" };
   }
 
-  return false;
+  // C3: tools ran + content is only a preliminary announcement (ja + en).
+  if (args.toolResultCount > 0 && args.lastAssistantText && isPromiseOnlyText(args.lastAssistantText)) {
+    return { shouldContinue: true, reason: "C3" };
+  }
+
+  // C4: unfinished tool work (error/empty outcomes) + still-short content.
+  if (args.unfinishedToolWork && args.emittedContentChars < C4_MAX_CHARS) {
+    return { shouldContinue: true, reason: "C4" };
+  }
+
+  return { shouldContinue: false };
+}
+
+/**
+ * Backward-compatible wrapper: returns only the boolean.
+ * Prefer `decideContinueToolLoop` when the reason is needed.
+ */
+export function shouldContinueToolLoop(args: {
+  hadToolCalls: boolean;
+  toolsWereOffered: boolean;
+  emittedContentChars: number;
+  toolRounds: number;
+  toolResultCount: number;
+  continueRetriesUsed: number;
+  maxContinueRetries: number;
+  maxToolRounds: number;
+  minChars?: number;
+  lastAssistantText?: string;
+  unfinishedToolWork?: boolean;
+}): boolean {
+  return decideContinueToolLoop(args).shouldContinue;
 }
 
 /**
@@ -92,3 +177,4 @@ export function buildContinueAgentPrompt(args: {
 
   return `${header}\n\n## Tools already run (build on these — do not redo blindly)\n\n${body}`;
 }
+

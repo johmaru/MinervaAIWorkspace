@@ -54,6 +54,26 @@ describe("buildForcedReportPrompt", () => {
     expect(p).toContain("kb_id=abc");
     expect(p).toMatch(/Do NOT call tools/i);
   });
+
+  it("emphasizes honest reporting of error/empty/blocked status", () => {
+    const p = buildForcedReportPrompt([
+      { name: "search_files", content: "[tool=search_files status=empty] No files found.", round: 1 },
+    ]);
+    expect(p).toMatch(/status=error.*status=empty.*status=blocked/i);
+  });
+});
+
+describe("formatAutoUserReport — status tags", () => {
+  it("includes status tag when tool content has status= token", () => {
+    const r = formatAutoUserReport({
+      locale: "en",
+      toolRounds: 1,
+      tools: [
+        { name: "search_files", content: "[tool=search_files status=empty] No files matched.", round: 1 },
+      ],
+    });
+    expect(r).toContain("[empty]");
+  });
 });
 
 describe("formatAutoUserReport", () => {
