@@ -2,6 +2,7 @@ import { mkdir, appendFile, stat, readdir } from "node:fs/promises";
 import { join, resolve, isAbsolute, dirname } from "node:path";
 import { logger } from "@/lib/logger";
 import { getUserDataRoot } from "@/lib/user-data";
+import { convertRichBlocksForExport } from "./richBlockExport";
 
 /** Export mode: "daily" (default) uses date-folder structure; "thread" groups by thread title. */
 type ExportMode = "daily" | "thread";
@@ -168,7 +169,7 @@ export async function appendChatExport(params: {
     const ts = formatTimestamp(now);
     const header = fileExists ? "" : `# ${params.threadTitle}\n`;
     const turnBlock =
-      `${header}\n---\n\n## 👤 User (${ts})\n\n${params.userContent}\n\n## 🤖 Assistant (${ts})\n\n${params.assistantContent}\n`;
+      `${header}\n---\n\n## 👤 User (${ts})\n\n${params.userContent}\n\n## 🤖 Assistant (${ts})\n\n${convertRichBlocksForExport(params.assistantContent)}\n`;
 
     await appendFile(filepath, turnBlock, "utf8");
     logger.info("chat-export", "appended", {
