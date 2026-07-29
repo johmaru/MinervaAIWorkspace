@@ -192,4 +192,22 @@ describe("POST /api/chat — folder instruction integration", () => {
     // whitespace-only instruction is excluded, only systemPrompt remains
     expect(promptSystem).toBe("有効プロンプト");
   }, 30_000);
+
+  it("includes rich-block syntax rules in system messages", async () => {
+    const [thread] = await db
+      .insert(threads)
+      .values({ title: "rich block test", userId: "test-user-id", systemPrompt: null })
+      .returning();
+    createdIds.push(thread.id);
+
+    const res = await POST(chatReq(thread.id, "hello"));
+    expect(res.status).toBe(200);
+    await res.text();
+
+    const systemMessages = capturedMessages.filter((m) => m.role === "system");
+    const richMsg = systemMessages.find((m) => String(m.content).includes(":::callout"));
+    expect(richMsg).toBeDefined();
+    expect(String(richMsg?.content)).toContain(":mark[");
+    expect(String(richMsg?.content)).toContain(":::richlist");
+  }, 30_000);
 });

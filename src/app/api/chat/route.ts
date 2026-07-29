@@ -1248,11 +1248,20 @@ function buildFinalMessages({
           "Sandbox: read /workspace, write /out only + outputFiles.",
       }
     : null;
+  const richBlockMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
+    role: "system" as const,
+    content:
+      "RICH MARKDOWN BLOCKS (optional, use only when they aid clarity — never overuse):\n" +
+      "1. Callout: :::callout{type=\"note|tip|warning|danger\"}\ncontent\n::: — for important notes/suggestions/warnings. Optional title: :::callout{type=\"tip\" title=\"Hint\"}\n2. Inline styling: :mark[text]{.big|.small|.accent|.muted|.danger|.success|.hl} — on a minimal emphasized word only, never a whole sentence.\n" +
+      "3. Rich list: :::richlist{marker=\"check|cross|star|arrow|info|warning\"}\n- item\n::: — only when order/classification is meaningful.\n" +
+      "Rules: do NOT use these when plain Markdown suffices. Use the exact type/marker/class values listed. Unknown values fall back to defaults.",
+  };
   return [
     { role: "system" as const, content: getEnvContext() },
     ...(personalizationContent ? [{ role: "system" as const, content: personalizationContent }] : []),
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
     ...(toolGuardMessage ? [toolGuardMessage] : []),
+    richBlockMessage,
     ...(skillMessage ? [skillMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...(knowledgeMessage ? [knowledgeMessage] : []),
