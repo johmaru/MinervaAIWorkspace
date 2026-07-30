@@ -81,12 +81,21 @@ export { EMBED_MODEL_BASE };
 
 /**
  * Get the current embedding dimension.
- * In SQLite, embeddings are stored as JSON arrays (text columns), so the dimension
- * comes from the EMBED_DIM environment variable rather than the column type.
- * When the dimension changes, existing data must be cleared, but no column DDL
- * is needed (text columns can store JSON of any dimension).
+ * Prefers the actual dimension from stored vectors in the DB (reliable),
+ * falls back to the EMBED_DIM environment variable (for fresh installs with no data).
  */
 function getEmbedDim(): number {
+  try {
+    // Check actual vector dimension from kb_chunks (reliable source of truth).
+    // .env EMBED_DIM may have been changed before running the migration,
+    // so env-only detection misses the dimension mismatch.
+    const rows = db.all(sql`SELECT embedding FROM kb_chunks LIMIT 1`) as { embedding: Buffer }[];
+    if (rows.length > 0 && rows[0].embedding) {
+      return rows[0].embedding.byteLength / 4; // Float32 = 4 bytes per element
+    }
+  } catch {
+    // DB not ready or no kb_chunks data — fall through to env
+  }
   return Number(process.env.EMBED_DIM) || 1024;
 }
 
