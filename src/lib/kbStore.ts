@@ -6,6 +6,7 @@ import { chunkText } from "@/lib/chunker";
 import { toVecBuffer, distanceToSimilarity } from "@/lib/vectorSearch";
 import { logger } from "@/lib/logger";
 import { readdirSync, statSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join, relative, sep, extname, basename } from "node:path";
 import { getWorkspaceRoot, resolveWorkspacePath } from "@/lib/workspace";
 import { extractFileTextFromPath } from "@/lib/fileExtract";
@@ -22,6 +23,7 @@ import {
   type JsonlLineFilter,
 } from "@/lib/jsonlFilter";
 import { writeWorkspaceFile } from "@/lib/workspace";
+import { getVectorBackend, type ChunkUpsert } from "@/lib/vectorBackend";
 
 /** Chunk content and stamp each piece with the document title/speaker when missing. */
 function chunkDocument(title: string, content: string): { text: string; ordinal: number }[] {
@@ -91,6 +93,9 @@ export async function deleteKnowledgeBase(id: string, userId: string) {
     .from(knowledgeBases)
     .where(sql`${knowledgeBases.id} = ${id} AND ${knowledgeBases.userId} = ${userId}`);
   if (!owned) return false;
+  // Delete vector backend points first (Qdrant needs explicit cleanup;
+  // sqlite-vec cascades via FK but the call is harmless)
+  await getVectorBackend().deleteByKb(id);
   await db.delete(knowledgeBases).where(eq(knowledgeBases.id, id));
   return true;
 }
@@ -207,9 +212,18 @@ export async function ingestDocument(
       .where(eq(kbDocuments.id, doc.id));
     return { id: doc.id, chunkCount: 0, cached: false };
   }
-
-  // Batch insert chunks
-  await db.insert(kbChunks).values(chunkRows);
+  // Store chunks via the configured vector backend (sqlite-vec or Qdrant)
+  const chunkUpserts: ChunkUpsert[] = chunkRows.map((row) => ({
+    id: randomUUID(),
+    text: row.text,
+    embedding: row.embedding,
+    ordinal: row.ordinal,
+    contentHash: row.contentHash,
+    documentId: doc.id,
+    documentTitle: source.title,
+    sourceType: source.sourceType,
+  }));
+  await getVectorBackend().upsert(chunkUpserts, { userId, kbId });
 
   return { id: doc.id, chunkCount: chunkRows.length, cached: false };
 }
@@ -224,6 +238,9 @@ export async function deleteDocument(docId: string, kbId: string) {
       sql`${kbDocuments.id} = ${docId} AND ${kbDocuments.knowledgeBaseId} = ${kbId}`,
     );
   if (!doc) return false;
+  // Delete vector backend points first (Qdrant needs explicit cleanup;
+  // sqlite-vec cascades via FK but the call is harmless)
+  await getVectorBackend().deleteByDocument(docId);
   await db.delete(kbDocuments).where(eq(kbDocuments.id, docId));
   return true;
 }
@@ -572,11 +589,18 @@ export async function ingestJsonlFile(
         continue;
       }
 
-      // Insert chunks in slices to avoid huge multi-row statements
-      const SLICE = 50;
-      for (let s = 0; s < chunkRows.length; s += SLICE) {
-        await db.insert(kbChunks).values(chunkRows.slice(s, s + SLICE));
-      }
+      // Store chunks via the configured vector backend (sqlite-vec or Qdrant)
+      const jsonlChunkUpserts: ChunkUpsert[] = chunkRows.map((r) => ({
+        id: randomUUID(),
+        text: r.text,
+        embedding: r.embedding,
+        ordinal: r.ordinal,
+        contentHash: r.contentHash,
+        documentId: row.id,
+        documentTitle: doc.title,
+        sourceType: "file",
+      }));
+      await getVectorBackend().upsert(jsonlChunkUpserts, { userId, kbId });
       if (chunkRows.length !== doc.chunks.length) {
         await db
           .update(kbDocuments)
@@ -785,61 +809,69 @@ export async function searchKnowledgeBases(
   const vectorHits: RankableKbHit[] = [];
   const queryVector = await embedText(q, "query");
   if (queryVector.length > 0) {
-    const queryBuf = toVecBuffer(queryVector);
     // Wider recall for re-ranking (subject boost needs the right speaker in the pool)
     const recallLimit = Math.min(40, Math.max(limit * 5, 20));
-    const maxDistance = 1 - threshold;
-    const rows = (await db.all(sql`
-      SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
-             kc.text, kc.ordinal,
-             d.title AS document_title,
-             vec_distance_cosine(kc.embedding, ${queryBuf}) AS distance
-      FROM kb_chunks kc
-      INNER JOIN kb_documents d ON kc.document_id = d.id
-      INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
-      WHERE kb.user_id = ${userId}
-        AND kc.knowledge_base_id IN (${kbIdList})
-        AND vec_distance_cosine(kc.embedding, ${queryBuf}) < ${maxDistance}
-      ORDER BY distance
-      LIMIT ${recallLimit}
-    `)) as KbSqlRow[];
-    for (const r of rows) vectorHits.push(rowToHit(r));
-  }
-
-  // Keyword path: pull speaker/hobby matches vector search may rank poorly
-  const keywordHits: RankableKbHit[] = [];
-  const tokens = extractKeywordTokens(q);
-  const likePatterns = new Set<string>();
-  for (const t of tokens) {
-    for (const v of expandTokenVariants(t)) {
-      if (v.length >= 1) likePatterns.add(`%${v}%`);
+    const hits = await getVectorBackend().search(queryVector, {
+      collection: "umanschat_kb",
+      userId,
+      kbIds,
+      limit: recallLimit,
+      threshold,
+    });
+    for (const h of hits) {
+      vectorHits.push({
+        chunkId: h.id,
+        documentId: (h.metadata.document_id as string) || (h.metadata.documentId as string) || "",
+        kbId: (h.metadata.kb_id as string) || (h.metadata.kbId as string) || "",
+        text: h.text,
+        similarity: Number(h.similarity.toFixed(3)),
+        title: (h.metadata.document_title as string) || (h.metadata.documentTitle as string) || "",
+      });
     }
   }
-  const patterns = [...likePatterns].slice(0, 12);
-  if (patterns.length > 0) {
-    const likeClause = sql.join(
-      patterns.map((p) => sql`(d.title LIKE ${p} OR kc.text LIKE ${p})`),
-      sql` OR `,
-    );
-    const kwRows = (await db.all(sql`
-      SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
-             kc.text, kc.ordinal,
-             d.title AS document_title,
-             0.5 AS distance
-      FROM kb_chunks kc
-      INNER JOIN kb_documents d ON kc.document_id = d.id
-      INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
-      WHERE kb.user_id = ${userId}
-        AND kc.knowledge_base_id IN (${kbIdList})
-        AND (${likeClause})
-      LIMIT 30
-    `)) as KbSqlRow[];
-    for (const r of kwRows) {
-      keywordHits.push({
-        ...rowToHit(r),
-        // Keyword-only base similarity (re-rank adds subject boosts)
-        similarity: 0.5,
-      });
+
+  // Keyword path: pull speaker/hobby matches vector search may rank poorly.
+  // Only runs on sqlite-vec backend (Qdrant keyword search would require payload filter).
+  const keywordHits: RankableKbHit[] = [];
+  const isQdrant = process.env.VECTOR_BACKEND === "qdrant";
+  if (!isQdrant) {
+    const tokens = extractKeywordTokens(q);
+    const likePatterns = new Set<string>();
+    for (const t of tokens) {
+      for (const v of expandTokenVariants(t)) {
+        if (v.length >= 1) likePatterns.add(`%${v}%`);
+      }
+    }
+    const patterns = [...likePatterns].slice(0, 12);
+    if (patterns.length > 0) {
+      const likeClause = sql.join(
+        patterns.map((p) => sql`(d.title LIKE ${p} OR kc.text LIKE ${p})`),
+        sql` OR `,
+      );
+      const kbIdList = sql.join(
+        kbIds.map((id) => sql`${id}`),
+        sql`, `,
+      );
+      const kwRows = (await db.all(sql`
+        SELECT kc.id AS chunk_id, kc.document_id, kc.knowledge_base_id,
+               kc.text, kc.ordinal,
+               d.title AS document_title,
+               0.5 AS distance
+        FROM kb_chunks kc
+        INNER JOIN kb_documents d ON kc.document_id = d.id
+        INNER JOIN knowledge_bases kb ON kc.knowledge_base_id = kb.id
+        WHERE kb.user_id = ${userId}
+          AND kc.knowledge_base_id IN (${kbIdList})
+          AND (${likeClause})
+        LIMIT 30
+      `)) as KbSqlRow[];
+      for (const r of kwRows) {
+        keywordHits.push({
+          ...rowToHit(r),
+          // Keyword-only base similarity (re-rank adds subject boosts)
+          similarity: 0.5,
+        });
+      }
     }
   }
 

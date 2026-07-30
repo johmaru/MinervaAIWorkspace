@@ -43,8 +43,12 @@ vi.mock("@/db", () => ({
     delete: vi.fn().mockResolvedValue(undefined),
     update: dbUpdateMock,
     select: vi.fn(() => {
+      const innerJoin = vi.fn(() => ({
+        then: (resolve: unknown) => Promise.resolve([]).then(resolve as never),
+      }));
       const from = vi.fn(() => ({
         where: vi.fn().mockResolvedValue([]),
+        innerJoin,
         // select().from(table) without .where() — used by skills re-embed
         then: (resolve: unknown) => Promise.resolve([]).then(resolve as never),
       }));
@@ -56,6 +60,7 @@ vi.mock("@/db", () => ({
       };
       return chain;
     }),
+    all: vi.fn().mockResolvedValue([]),
   },
 }));
 vi.mock("@/lib/llm", () => ({
@@ -218,7 +223,9 @@ describe("POST /api/settings — cache invalidation on embedding config change",
     readFileSyncMock.mockReturnValue("EMBED_MODEL=old\n");
     writeFileSyncMock.mockImplementation(() => undefined);
 
-    const res = await postSettings({ embedModel: "Xenova/all-MiniLM-L6-v2" });
+    // Model name change triggers migration (same-dimension model swaps produce
+    // incompatible vector spaces). applyMigration is required.
+    const res = await postSettings({ embedModel: "Xenova/all-MiniLM-L6-v2", applyMigration: true });
     expect(res.status).toBe(200);
     expect(resetEmbedPipelineMock).toHaveBeenCalledTimes(1);
   });

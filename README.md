@@ -82,8 +82,8 @@ flowchart LR
     end
     subgraph Compose
         app[app<br/>Next.js 16 + Bun]
-        db[(db<br/>SQLite better-sqlite3)]
         embedder[embedder<br/>Python sentence-transformers]
+        qdrant[qdrant<br/>vector DB optional]
         scraper[scraper<br/>Scrapling FastAPI]
         searxng[searxng<br/>meta search]
         tor[tor<br/>dperson/torproxy]
@@ -105,7 +105,7 @@ flowchart LR
 | `searxng`  | `searxng/searxng`       | SearXNG meta-search                               | `8081 → 8080`    |
 | `tor`      | `dperson/torproxy`      | Tor SOCKS for anonymous scraping                  | `9050` (exposed) |
 | `sandbox`  | profile `sandbox`       | Build-only image for `sandbox_run` (not a running service) | —       |
-
+| `qdrant`   | profile `qdrant`        | Qdrant vector DB for large KB collections (`VECTOR_BACKEND=qdrant`) | `6333` |
 ## Requirements
 
 - **Bun** — primary runtime and package manager (local dev / build)
@@ -279,7 +279,7 @@ All settings live in `.env` (`.env.example` is the source of truth). Most can be
 | `WEB_SEARCH_THINKING_EFFORT` | Reasoning level for search result summarization (`none`/`low`/`medium`/`high`/`max`) | `none` |
 | `TRANSLATE_TIMEOUT` | Translation LLM timeout (seconds) | `30` |
 
-### Embeddings
+### Embeddings & vector search
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -288,8 +288,26 @@ All settings live in `.env` (`.env.example` is the source of truth). Most can be
 | `EMBED_DIM` | Dimension (must match model) | `384` |
 | `EMBEDDER_URL` | Python embedder URL when `http` | `http://localhost:8001` |
 | `EMBEDDER_GPU_COUNT` | GPU count for embedder container (0 = CPU; Compose only) | `0` |
+| `VECTOR_BACKEND` | Vector search backend: `sqlite-vec` (embedded) or `qdrant` (external) | `sqlite-vec` |
+| `QDRANT_URL` | Qdrant URL when `VECTOR_BACKEND=qdrant` | — |
+| `QDRANT_API_KEY` | Qdrant API key (optional, for Qdrant Cloud) | — |
 
 For Docker HTTP embedder, set `EMBED_PROVIDER=http`, `EMBED_MODEL=LiquidAI/LFM2.5-Embedding-350M`, `EMBED_DIM=1024`.
+
+**Qdrant backend (optional):** For large KB collections (10k+ vectors), switch to Qdrant for HNSW-indexed search (~34ms at 70k vectors vs ~9s with sqlite-vec). Start a Qdrant container and set `VECTOR_BACKEND=qdrant`:
+
+```bash
+docker compose --profile qdrant up -d qdrant
+# In .env: VECTOR_BACKEND=qdrant, QDRANT_URL=http://qdrant:6333
+```
+
+To migrate existing sqlite-vec data to Qdrant:
+
+```bash
+bun run scripts/migrate-to-qdrant.ts
+```
+
+The embedder supports model-aware prefixes: LFM2.5 uses `prompt_name` (`query:`/`document:`), ruri-v3 uses text prefixes (`検索クエリ:`/`検索文書:`). Switch models via `EMBEDDER_MODEL` env var — the embedder auto-detects the prefix scheme.
 
 ### Web search & scraping
 
@@ -405,7 +423,7 @@ List both localhost and tunnel callback URLs if you use dual access.
 
 Drizzle ORM + SQLite. Migrations run automatically on Docker start, exe launch, and `bun run dev` (`predev` → `drizzle-kit migrate`).
 
-Switching `EMBED_MODEL` / `EMBED_DIM` invalidates existing vectors. Settings GUI migration (`applyMigration`) clears `memories` and `page_embeddings` embeddings (stored as JSON text — no DDL). Re-embed content afterward.
+Switching `EMBED_MODEL` / `EMBED_DIM` invalidates existing vectors. The Settings GUI migration (`applyMigration`) re-embeds all tables (skills, todos, memories, page_embeddings, user_traits) with the new model. Triggers on both dimension changes and model-name changes (same-dimension model swaps also produce incompatible vector spaces).
 
 ## Testing
 

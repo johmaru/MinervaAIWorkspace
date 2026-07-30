@@ -279,7 +279,7 @@ Google リダイレクト URI: `https://your-tunnel.example.com/api/auth/callbac
 | `WEB_SEARCH_THINKING_EFFORT` | 検索結果要約時の推論レベル（`none`/`low`/`medium`/`high`/`max`） | `none` |
 | `TRANSLATE_TIMEOUT` | 翻訳 LLM タイムアウト（秒） | `30` |
 
-### 埋め込み
+### 埋め込み・ベクトル検索
 
 | 変数 | 説明 | デフォルト |
 |------|------|------------|
@@ -288,8 +288,26 @@ Google リダイレクト URI: `https://your-tunnel.example.com/api/auth/callbac
 | `EMBED_DIM` | 次元数（モデルに合わせる） | `384` |
 | `EMBEDDER_URL` | `http` 時の Python embedder URL | `http://localhost:8001` |
 | `EMBEDDER_GPU_COUNT` | embedder コンテナの GPU 数（0 = CPU、Compose のみ） | `0` |
+| `VECTOR_BACKEND` | ベクトル検索バックエンド: `sqlite-vec`（組み込み）または `qdrant`（外部） | `sqlite-vec` |
+| `QDRANT_URL` | `VECTOR_BACKEND=qdrant` 時の Qdrant URL | — |
+| `QDRANT_API_KEY` | Qdrant API キー（Qdrant Cloud 用、省略可） | — |
 
 Docker の HTTP embedder を使う場合: `EMBED_PROVIDER=http`、`EMBED_MODEL=LiquidAI/LFM2.5-Embedding-350M`、`EMBED_DIM=1024`。
+
+**Qdrant バックエンド（オプション）:** 大規模 KB（1万件以上）では Qdrant に切り替えると HNSW インデックス検索が使える（7万件で約34ms、sqlite-vec では約9秒）。Qdrant コンテナを起動して `VECTOR_BACKEND=qdrant` を設定:
+
+```bash
+docker compose --profile qdrant up -d qdrant
+# .env に: VECTOR_BACKEND=qdrant, QDRANT_URL=http://qdrant:6333
+```
+
+既存の sqlite-vec データを Qdrant に移行:
+
+```bash
+bun run scripts/migrate-to-qdrant.ts
+```
+
+embedder はモデル別のプレフィックスに対応: LFM2.5 は `prompt_name`（`query:`/`document:`）、ruri-v3 はテキストプレフィックス（`検索クエリ:`/`検索文書:`）を使用。`EMBEDDER_MODEL` 環境変数で切り替え可能。
 
 ### Web 検索・スクレイピング
 
@@ -405,7 +423,7 @@ Notion、GitHub、Gmail、Google Drive、Google Calendar、Outlook Mail、Outloo
 
 Drizzle ORM + SQLite。Docker 起動時・exe 起動時・`bun run dev`（`predev` → `drizzle-kit migrate`）で自動適用。
 
-`EMBED_MODEL` / `EMBED_DIM` 切替時は既存ベクトルと非互換。設定 GUI のマイグレーション（`applyMigration`）が `memories` と `page_embeddings` の埋め込みをクリア（JSON text 保存のため DDL 不要）。その後再埋め込み。
+`EMBED_MODEL` / `EMBED_DIM` 切替時は既存ベクトルと非互換。設定 GUI のマイグレーション（`applyMigration`）が全テーブル（skills / todos / memories / page_embeddings / user_traits）の埋め込みを再生成。次元変更時・モデル名変更時の両方で発火（同次元・異モデルでもベクトル空間が非互換になるため）。
 
 ## テスト
 

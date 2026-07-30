@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { db } from "@/db";
-import { eq } from "drizzle-orm";
-import { users, memories, pageEmbeddings, skills, todos } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { users, memories, pageEmbeddings, skills, todos, userTraits, pages } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
@@ -315,7 +315,11 @@ export async function POST(req: Request) {
   // (BLOB storage class persists in TEXT-affinity columns without ALTER TABLE).
   // However, different models' vector spaces are incompatible, so when the dimension changes,
   // all existing embedding data must be deleted.
-  const needsMigration = body.embedDim !== undefined && body.embedDim !== dbVectorDim;
+  const currentEmbedModel = process.env.EMBED_MODEL || "";
+  const modelChanged = body.embedModel !== undefined && body.embedModel !== currentEmbedModel;
+  // Migration is required when either the dimension changes OR the model name changes
+  // (same-dimension model swaps produce incompatible vector spaces — cosine returns garbage).
+  const needsMigration = (body.embedDim !== undefined && body.embedDim !== dbVectorDim) || modelChanged;
 
   if (needsMigration && !body.applyMigration) {
     return Response.json(
@@ -330,13 +334,10 @@ export async function POST(req: Request) {
   }
   let pipelineResetForMigration = false;
   if (needsMigration && body.applyMigration) {
-    // Embeddings are stored as Float32 BLOB. No DDL is needed. Since the dimension changes,
-    // delete all existing vector data (vectors from different model spaces are incompatible).
-    // memories and page_embeddings can be regenerated from conversations, so they are deleted.
-    // skills are user-created persistent prompts, so they are not deleted but re-embedded.
-    // embedText references the new EMBED_MODEL/EMBED_DIM, so it must be called after
-    // resetEmbedPipeline(), but here the env is not yet updated.
-    // Therefore, update process.env first, then re-embed.
+    // Embeddings are stored as Float32 BLOB. No DDL is needed for dimension changes.
+    // Different models' vector spaces are incompatible, so all embedding data must be
+    // re-embedded with the new model. This covers dimension changes AND same-dimension
+    // model swaps (both produce incompatible vectors).
     for (const [k, v] of Object.entries({
       EMBED_MODEL: body.embedModel ?? process.env.EMBED_MODEL ?? "",
       EMBED_DIM: String(body.embedDim ?? process.env.EMBED_DIM ?? "1024"),
@@ -346,16 +347,44 @@ export async function POST(req: Request) {
     }
     resetEmbedPipeline();
     pipelineResetForMigration = true;
+
+    // 1. Re-embed skills (user-created persistent prompts — keep data, update vectors)
     const allSkills = await db.select({ id: skills.id, content: skills.content }).from(skills);
     for (const skill of allSkills) {
       const vector = await embedText(skill.content, "document");
       await db.update(skills).set({ embedding: vector }).where(eq(skills.id, skill.id));
     }
+
+    // 2. Re-embed todos
     const allTodos = await db.select({ id: todos.id, title: todos.title, description: todos.description }).from(todos);
     for (const todo of allTodos) {
       const embedContent = `${todo.title}${todo.description ? "\n" + todo.description : ""}`;
       const vector = await embedText(embedContent, "document");
       await db.update(todos).set({ embedding: vector }).where(eq(todos.id, todo.id));
+    }
+
+    // 3. Re-embed memories (content is stored in the memories table)
+    const allMemories = await db.select({ id: memories.id, content: memories.content }).from(memories);
+    for (const memory of allMemories) {
+      const vector = await embedText(memory.content, "document");
+      await db.update(memories).set({ embedding: vector }).where(eq(memories.id, memory.id));
+    }
+
+    // 4. Re-embed page_embeddings (content is in the pages table, joined by page_id)
+    const allPageEmbeddings = await db
+      .select({ id: pageEmbeddings.id, content: pages.content })
+      .from(pageEmbeddings)
+      .innerJoin(pages, eq(pageEmbeddings.pageId, pages.id));
+    for (const pe of allPageEmbeddings) {
+      const vector = await embedText(pe.content, "document");
+      await db.update(pageEmbeddings).set({ embedding: vector }).where(eq(pageEmbeddings.id, pe.id));
+    }
+
+    // 5. Re-embed user_traits (content is stored in the user_traits table)
+    const allTraits = await db.select({ id: userTraits.id, content: userTraits.content }).from(userTraits);
+    for (const trait of allTraits) {
+      const vector = await embedText(trait.content, "document");
+      await db.update(userTraits).set({ embedding: vector }).where(eq(userTraits.id, trait.id));
     }
   }
 
