@@ -1,17 +1,19 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { db } from "@/db";
 import { eq, sql } from "drizzle-orm";
-import { users, memories, pageEmbeddings, skills, todos, userTraits, pages } from "@/db/schema";
+import { users, memories, pageEmbeddings, skills, todos, userTraits, pages, kbChunks } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
 import { resetToolProbeCache } from "@/lib/toolProbe";
 import { getSessionUser } from "@/lib/auth-guards";
-import { resetEmbedPipeline, embedText } from "@/lib/embed";
+import { resetEmbedPipeline, embedText, embedTexts, hashContent } from "@/lib/embed";
 import { PERSONAL_STYLES } from "@/lib/personalization";
 import { resolveEnvPath, updateEnvContent } from "@/lib/envUtils";
 import { getConfiguredAuthUrl, setConfiguredAuthUrl } from "@/lib/auth-env";
 import { getLogFilePath } from "@/lib/logger";
+import { getVectorBackend, type ChunkUpsert } from "@/lib/vectorBackend";
+import { randomUUID } from "node:crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -385,6 +387,56 @@ export async function POST(req: Request) {
     for (const trait of allTraits) {
       const vector = await embedText(trait.content, "document");
       await db.update(userTraits).set({ embedding: vector }).where(eq(userTraits.id, trait.id));
+    }
+
+    // 6. Re-embed kb_chunks (batch via embedTexts for efficiency)
+    //    Uses getVectorBackend().upsert() so both sqlite-vec and Qdrant are covered.
+    //    Reuses existing chunk IDs so Qdrant upserts overwrite old vectors (no orphans).
+    //    Fetches knowledge_base_id in the initial query (before any delete) to group by KB.
+    const allChunks = (await db.all(sql`
+      SELECT kc.id, kc.text, kc.ordinal, kc.document_id,
+             kc.knowledge_base_id,
+             d.title AS document_title, d.source_type
+      FROM kb_chunks kc
+      INNER JOIN kb_documents d ON kc.document_id = d.id
+    `)) as {
+      id: string; text: string; ordinal: number;
+      document_id: string; knowledge_base_id: string;
+      document_title: string; source_type: string;
+    }[];
+
+    // Re-embed in batches and upsert via VectorBackend (no delete — upsert overwrites by ID)
+    const CHUNK_BATCH = 64;
+    for (let i = 0; i < allChunks.length; i += CHUNK_BATCH) {
+      const batch = allChunks.slice(i, i + CHUNK_BATCH);
+      const vectors = await embedTexts(batch.map((c) => c.text), "document");
+
+      // Group by kb_id so each group can be upserted with the correct kbId
+      const byKb = new Map<string, ChunkUpsert[]>();
+      for (let j = 0; j < batch.length; j++) {
+        const c = batch[j]!;
+        const vec = vectors[j] ?? [];
+        if (vec.length === 0) continue;
+
+        const upsert: ChunkUpsert = {
+          id: c.id, // Reuse existing ID so Qdrant overwrites the old vector
+          text: c.text,
+          embedding: vec,
+          ordinal: c.ordinal,
+          contentHash: hashContent(c.text),
+          documentId: c.document_id,
+          documentTitle: c.document_title,
+          sourceType: c.source_type || "file",
+        };
+
+        const kbId = c.knowledge_base_id;
+        if (!byKb.has(kbId)) byKb.set(kbId, []);
+        byKb.get(kbId)!.push(upsert);
+      }
+
+      for (const [kbId, chunks] of byKb) {
+        await getVectorBackend().upsert(chunks, { userId: user.id, kbId });
+      }
     }
   }
 
