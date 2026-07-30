@@ -63,10 +63,23 @@ export class SqliteVecBackend implements VectorBackend {
       model: process.env.EMBED_MODEL || "Xenova/all-MiniLM-L6-v2",
     }));
 
-    // Insert in slices to avoid huge multi-row statements
+    // Upsert in slices (onConflictDoUpdate = true upsert semantics for both
+    // new inserts and migration re-embeds that reuse existing chunk IDs)
     const SLICE = 50;
     for (let i = 0; i < rows.length; i += SLICE) {
-      await db.insert(kbChunks).values(rows.slice(i, i + SLICE));
+      const slice = rows.slice(i, i + SLICE);
+      await db.insert(kbChunks)
+        .values(slice)
+        .onConflictDoUpdate({
+          target: kbChunks.id,
+          set: {
+            text: sql`excluded.text`,
+            embedding: sql`excluded.embedding`,
+            contentHash: sql`excluded.content_hash`,
+            model: sql`excluded.model`,
+            ordinal: sql`excluded.ordinal`,
+          },
+        });
     }
   }
 

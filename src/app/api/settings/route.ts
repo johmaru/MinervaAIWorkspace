@@ -60,6 +60,12 @@ const EMBED_MODEL_BASE: EmbedModelBase[] = [
     provider: "http",
     labelKey: "settings.embedLabelLFM2",
   },
+  {
+    model: "cl-nagoya/ruri-v3-310m",
+    dim: 768,
+    provider: "http",
+    labelKey: "settings.embedLabelRuriV3",
+  },
 ];
 
 /**
