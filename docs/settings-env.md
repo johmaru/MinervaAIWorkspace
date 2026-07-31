@@ -183,7 +183,7 @@ After writing to `.env` and `process.env`, the handler invalidates in-process ca
 
 | Setting changed | Cache invalidated | Effect |
 |----------------|-------------------|--------|
-| `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_MODEL`, `LLM_FALLBACK_TIMEOUT_MS` | `resetUmansModelsCache()` + `resetToolProbeCache()` | LLM client recreated on next request; tool availability re-probed |
+| `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_MODEL`, `LLM_FALLBACK_TIMEOUT_MS`, `LLM_PROVIDER`, `LLM_BASE_URL`, `CURSOR_API_KEY` | `resetUmansModelsCache()` + `resetCursorModelsCache()` + `resetToolProbeCache()` | LLM client recreated on next request; model catalogs refreshed |
 | `EMBED_MODEL`, `EMBED_DIM`, `EMBED_PROVIDER` | `resetEmbedPipeline()` | transformers.js / HTTP embedder pipeline recreated on next embed |
 | `SCRAPE_PROXY`, `SCRAPE_TIMEOUT` | POST to scraper `/config` endpoint | Scraper microservice updated at runtime (its container env is fixed at compose startup) |
 
@@ -317,14 +317,19 @@ If `.env.example` is not found (edge case), the script logs a message and skips:
 
 All variables below are defined in `.env.example`. Values shown are defaults from that file. Variables marked **required** must be set before the app can function; others are optional or have sensible defaults.
 
-### LLM (UmansAI — hardcoded provider)
+### LLM (OpenAI-compatible or Cursor SDK)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_API_KEY` | `your-api-key-here` | **Required.** API key for UmansAI. Never returned in plaintext by the API. |
-| `LLM_MODEL` | `umans-glm-5.2` | Default model used for chat completions. |
-| `THINKING_EFFORT` | `medium` | LLM reasoning strength. Accepts `none`, `low`, `medium`, `high`, `max` (support varies per model). |
+| `LLM_PROVIDER` | `openai` | `openai` = OpenAI-compatible Chat Completions; `cursor` = `@cursor/sdk` billed to Cursor account usage. |
+| `LLM_BASE_URL` | `https://api.code.umans.ai/v1` | OpenAI-compatible API base URL. Ignored when `LLM_PROVIDER=cursor`. |
+| `LLM_API_KEY` | `your-api-key-here` | API key for the openai provider. Never returned in plaintext by the API. |
+| `CURSOR_API_KEY` | *(empty)* | Cursor Dashboard API key (`https://cursor.com/dashboard/api`). Required when `LLM_PROVIDER=cursor`. |
+| `LLM_MODEL` | `umans-glm-5.2` | Default model id (use e.g. `composer-2.5` with Cursor). |
+| `THINKING_EFFORT` | `medium` | LLM reasoning strength (openai / Umans models). Accepts `none`, `low`, `medium`, `high`, `max`. |
 | `WEB_SEARCH_THINKING_EFFORT` | `none` | Reasoning strength for search result summarization. Same levels as `THINKING_EFFORT`. |
+
+> When `LLM_PROVIDER=cursor`, Minerva STREAM_TOOLS / MCP / sandbox tool loops are disabled (v1); the Cursor agent uses its own tools against the workspace cwd.
 
 ### Embeddings
 

@@ -337,6 +337,8 @@ export const threads = sqliteTable("threads", {
   connectionIds: text("connection_ids", { mode: "json" }).$type<string[]>().notNull().$defaultFn(() => []),
   globalInstructionId: text("global_instruction_id").references(() => globalInstructions.id, { onDelete: "set null" }),
   currentLeafId: text("current_leaf_id"),
+  /** Cursor SDK agent id for LLM_PROVIDER=cursor multi-turn resume. */
+  cursorAgentId: text("cursor_agent_id"),
   // Columns added in the 0002 migration (were not reflected in schema.ts).
   // Not currently referenced by code, but defined to maintain schema-DB consistency.
   temperature: real("temperature"),

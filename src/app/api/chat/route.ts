@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, defaultSearchModel, searchThinkingEffort, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, fallbackModel, fallbackTimeoutMs } from "@/lib/llm";
+import { createLLM, defaultModel, defaultSearchModel, searchThinkingEffort, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, fallbackModel, fallbackTimeoutMs, llmProvider } from "@/lib/llm";
+import { buildCursorPrompt, runCursorChat } from "@/lib/cursorLlm";
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions, folders } from "@/db/schema";
 import { getRequestLocale, t } from "@/lib/i18n";
@@ -206,6 +207,7 @@ export async function POST(req: Request) {
 
   const llm = createLLM();
   let finalModel = body.model ?? thread.model ?? defaultModel();
+  const useCursorProvider = llmProvider() === "cursor";
   // Resolve global system instruction.
   // Priority: thread override > user default. If both are null, fall back to body.systemPrompt.
   let resolvedGlobalInstruction: string | null = null;
@@ -256,12 +258,11 @@ export async function POST(req: Request) {
   );
 
   // Start the tool probe early to overlap with in-stream parallel processing.
-  // warmupToolProbe() already started the probe at module load, but we also
-  // start it here in case it hasn't completed yet (resolves immediately if cached).
-  // Not used in rapid/dual mode, but the probe itself is harmless (cached).
-  const toolSupportPromise: Promise<ToolSupport | null> = body.rapid
-    ? Promise.resolve(null)
-    : probeToolSupport(llm, finalModel).catch(() => null);
+  // Skip when Cursor provider (no OpenAI tool loop) or rapid mode.
+  const toolSupportPromise: Promise<ToolSupport | null> =
+    body.rapid || useCursorProvider
+      ? Promise.resolve(null)
+      : probeToolSupport(llm, finalModel).catch(() => null);
 
   // Promise to wait for stream completion. after() callback runs
   // generateMemories within the request context, so we pass the
@@ -297,6 +298,45 @@ export async function POST(req: Request) {
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
+
+        // ── Cursor SDK provider: skip Minerva tools / dual / hyper / council ──
+        if (useCursorProvider) {
+          const cursorPrompt = buildCursorPrompt({
+            systemContent,
+            history: prepared.history.map((m) => ({
+              role: typeof m.role === "string" ? m.role : "user",
+              content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+            })),
+            userContent: prepared.content,
+          });
+          send("status", { label: t(locale, "chat.statusThinking") });
+          const cursorResult = await runCursorChat({
+            userId: user.id,
+            model: finalModel,
+            prompt: cursorPrompt,
+            existingAgentId: thread.cursorAgentId,
+            handlers: {
+              onDelta: (delta) => {
+                assistantContent += delta;
+                send("delta", { delta });
+              },
+              onReasoning: (delta) => {
+                assistantReasoning += delta;
+                send("thinking", { delta });
+              },
+              onStatus: (label) => send("status", { label }),
+            },
+          });
+          if (cursorResult.assistantContent && !assistantContent) {
+            assistantContent = cursorResult.assistantContent;
+          }
+          if (cursorResult.agentId && cursorResult.agentId !== thread.cursorAgentId) {
+            await db
+              .update(threads)
+              .set({ cursorAgentId: cursorResult.agentId, updatedAt: new Date() })
+              .where(eq(threads.id, body.threadId));
+          }
+        } else {
         // Run pre-stream processing in parallel to reduce first-token latency.
         // Each build* is wrapped with .catch(() => null) to isolate failures.
         // rapid mode skips all (null).
@@ -588,8 +628,6 @@ export async function POST(req: Request) {
         if (hasToolCallMarkup(assistantContent)) {
           send("status", { label: t(locale, "chat.statusRegenerating") });
           assistantContent = sanitizeToolCallMarkup(assistantContent);
-          // Replace the client's displayed content with the sanitized version.
-          // Removes tool-call markup emitted during streaming from the UI.
           send("replace_content", { content: assistantContent });
           const continuationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
             ...finalMessages,
@@ -622,6 +660,8 @@ export async function POST(req: Request) {
             threadId: body.threadId,
           });
         }
+        } // end openai provider branch
+
         const elapsedMs = Date.now() - streamStartedAt;
         const [assistantMsg] = await db
           .insert(messages)
@@ -760,8 +800,8 @@ export async function POST(req: Request) {
         });
       }
     }
-    // Rapid mode: skip memory and skill generation, exit immediately.
-    if (body.rapid) return;
+    // Rapid mode / Cursor provider: skip memory and skill generation (needs OpenAI client).
+    if (body.rapid || useCursorProvider) return;
     try {
       await generateMemories(
         body.threadId,

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",
+    "@cursor/sdk": "^1.0.26",
     "@google/design.md": "^0.3.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@xenova/transformers": "^2.0.1",

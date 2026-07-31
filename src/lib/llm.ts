@@ -1,12 +1,37 @@
 import OpenAI from "openai";
 
-/** Hardcoded UmansAI API base URL. */
-const UMANS_BASE_URL = "https://api.code.umans.ai/v1";
+/** Default UmansAI API base URL (used when LLM_BASE_URL is unset). */
+export const UMANS_BASE_URL = "https://api.code.umans.ai/v1";
+
+export type LlmProvider = "openai" | "cursor";
 
 /**
- * UmansAI client. Provider is fixed to UmansAI (no longer configurable).
- * Only LLM_API_KEY needs to be set in .env.
+ * Active LLM provider from env.
+ * - openai: OpenAI-compatible Chat Completions (UmansAI or any baseURL)
+ * - cursor: @cursor/sdk billed to Cursor account usage
  */
+export function llmProvider(): LlmProvider {
+  const v = (process.env.LLM_PROVIDER || "openai").trim().toLowerCase();
+  return v === "cursor" ? "cursor" : "openai";
+}
+
+/** Resolved OpenAI-compatible base URL (never empty). */
+export function llmBaseUrl(): string {
+  const raw = process.env.LLM_BASE_URL?.trim();
+  return raw || UMANS_BASE_URL;
+}
+
+/** True when the configured base URL is the UmansAI endpoint. */
+export function isUmansBaseUrl(baseUrl: string = llmBaseUrl()): boolean {
+  try {
+    const a = new URL(baseUrl);
+    const b = new URL(UMANS_BASE_URL);
+    return a.origin === b.origin;
+  } catch {
+    return baseUrl.replace(/\/$/, "") === UMANS_BASE_URL.replace(/\/$/, "");
+  }
+}
+
 /**
  * Per-request HTTP timeout for the LLM client.
  * High-thinking models (e.g. GLM-5.2) + tool rounds often exceed 2 minutes on
@@ -19,7 +44,7 @@ export function llmTimeoutMs(): number {
 
 export function createLLM() {
   return new OpenAI({
-    baseURL: UMANS_BASE_URL,
+    baseURL: llmBaseUrl(),
     apiKey: process.env.LLM_API_KEY ?? "missing",
     timeout: llmTimeoutMs(),
     maxRetries: 1,
@@ -27,6 +52,9 @@ export function createLLM() {
 }
 
 export function defaultModel(): string {
+  if (llmProvider() === "cursor") {
+    return process.env.LLM_MODEL ?? "composer-2.5";
+  }
   return process.env.LLM_MODEL ?? "umans-glm-5.2";
 }
 
@@ -60,12 +88,16 @@ export function fallbackTimeoutMs(): number {
 }
 
 /**
- * List of available models.
- * Returns the model list fetched from `/v1/models/info`. On API failure,
- * falls back to MODEL_REASONING (hardcoded values).
+ * List of available models for the active provider.
  */
 export async function availableModels(): Promise<string[]> {
-  const models = await getUmansModels();
+  if (llmProvider() === "cursor") {
+    const { listCursorModels } = await import("./cursorLlm");
+    const models = await listCursorModels();
+    if (models.length > 0) return models.map((m) => m.id);
+    return [defaultModel()];
+  }
+  const models = await getProviderModels();
   if (models.length > 0) return models.map((m) => m.id);
   return [defaultModel()];
 }
@@ -95,7 +127,7 @@ export const MODEL_REASONING: Record<string, ReasoningConfig> = {
 };
 
 /**
- * Model information fetched from the UmansAPI /v1/models/info endpoint.
+ * Model information from the provider catalog.
  */
 export type UmansModelInfo = {
   id: string;
@@ -105,24 +137,31 @@ export type UmansModelInfo = {
   replacement?: string;
 };
 
-// Fetched once at startup and cached in-process (user choice: fetch once at startup & cache).
+// Fetched once at startup and cached in-process.
 let modelsInfoCache: UmansModelInfo[] | null = null;
 let modelsInfoFetchPromise: Promise<UmansModelInfo[]> | null = null;
 
-/** Call to discard the cache on config changes (when LLM_API_KEY / LLM_MODEL change). */
+/** Call to discard the cache on config changes (when LLM_* / CURSOR_* change). */
 export function resetUmansModelsCache(): void {
   modelsInfoCache = null;
   modelsInfoFetchPromise = null;
 }
+
+/** @deprecated Alias kept for call sites; clears the shared models cache. */
+export const resetModelsCache = resetUmansModelsCache;
+
 /**
- * Fetches and caches model information from the UmansAPI /v1/models/info endpoint.
- * Fetches only once per process; subsequent calls return the cache.
- * On API failure, falls back to values built from MODEL_REASONING (hardcoded emergency fallback).
+ * Fetches and caches model information for the openai provider.
+ * Umans base → `/models/info`; otherwise OpenAI-compatible `/models`.
  */
 export async function getUmansModels(): Promise<UmansModelInfo[]> {
+  return getProviderModels();
+}
+
+export async function getProviderModels(): Promise<UmansModelInfo[]> {
   if (modelsInfoCache) return modelsInfoCache;
   if (modelsInfoFetchPromise) return modelsInfoFetchPromise;
-  modelsInfoFetchPromise = fetchUmansModels();
+  modelsInfoFetchPromise = fetchProviderModels();
   try {
     modelsInfoCache = await modelsInfoFetchPromise;
     return modelsInfoCache;
@@ -131,9 +170,17 @@ export async function getUmansModels(): Promise<UmansModelInfo[]> {
   }
 }
 
-async function fetchUmansModels(): Promise<UmansModelInfo[]> {
+async function fetchProviderModels(): Promise<UmansModelInfo[]> {
+  const base = llmBaseUrl();
+  if (isUmansBaseUrl(base)) {
+    return fetchUmansModelsInfo(base);
+  }
+  return fetchOpenAICompatibleModels(base);
+}
+
+async function fetchUmansModelsInfo(base: string): Promise<UmansModelInfo[]> {
   try {
-    const res = await fetch(`${UMANS_BASE_URL}/models/info`, {
+    const res = await fetch(`${base.replace(/\/$/, "")}/models/info`, {
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -160,7 +207,6 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
       replacement: m.deprecation?.replacement,
     }));
   } catch {
-    // Fallback: build from the hardcoded MODEL_REASONING.
     return Object.entries(MODEL_REASONING).map(([id, cfg]) => ({
       id,
       displayName: id,
@@ -170,13 +216,44 @@ async function fetchUmansModels(): Promise<UmansModelInfo[]> {
   }
 }
 
+async function fetchOpenAICompatibleModels(base: string): Promise<UmansModelInfo[]> {
+  try {
+    const apiKey = process.env.LLM_API_KEY ?? "";
+    const res = await fetch(`${base.replace(/\/$/, "")}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { data?: Array<{ id: string }> };
+    const ids = (data.data ?? []).map((m) => m.id).filter(Boolean);
+    if (ids.length === 0) throw new Error("empty model list");
+    return ids.map((id) => ({
+      id,
+      displayName: id,
+      reasoning: MODEL_REASONING[id] ?? { levels: [], defaultLevel: null, canDisable: false },
+      deprecated: false,
+    }));
+  } catch {
+    const id = defaultModel();
+    return [
+      {
+        id,
+        displayName: id,
+        reasoning: MODEL_REASONING[id] ?? { levels: [], defaultLevel: null, canDisable: false },
+        deprecated: false,
+      },
+    ];
+  }
+}
+
 /**
  * Returns the valid reasoning effort levels for the specified model.
  * Prefers API-sourced values; falls back to MODEL_REASONING on API failure.
  * Returns an empty array if the model is unknown or levels is empty (not controllable).
  */
 export async function getReasoningLevels(model: string): Promise<string[]> {
-  const models = await getUmansModels();
+  if (llmProvider() === "cursor") return [];
+  const models = await getProviderModels();
   const found = models.find((m) => m.id === model);
   if (found) return found.reasoning.levels;
   return MODEL_REASONING[model]?.levels ?? [];
@@ -187,7 +264,8 @@ export async function getReasoningLevels(model: string): Promise<string[]> {
  * Prefers API-sourced values. Returns null for non-controllable models (empty levels / null defaultLevel).
  */
 export async function getDefaultReasoningEffort(model: string): Promise<string | null> {
-  const models = await getUmansModels();
+  if (llmProvider() === "cursor") return null;
+  const models = await getProviderModels();
   const found = models.find((m) => m.id === model);
   if (found) return found.reasoning.defaultLevel;
   return MODEL_REASONING[model]?.defaultLevel ?? null;
@@ -195,29 +273,26 @@ export async function getDefaultReasoningEffort(model: string): Promise<string |
 
 /**
  * Whether the specified model can fully disable thinking via enable_thinking: false.
- * Prefers the API-sourced can_disable flag.
+ * Prefers the API-sourced can_disable flag. Only meaningful for Umans models.
  */
 export async function canDisableThinking(model: string): Promise<boolean> {
-  const models = await getUmansModels();
+  if (llmProvider() === "cursor") return false;
+  if (!isUmansBaseUrl() && !model.startsWith("umans-")) return false;
+  const models = await getProviderModels();
   const found = models.find((m) => m.id === model);
   if (found) return found.reasoning.canDisable;
   return MODEL_REASONING[model]?.canDisable ?? false;
 }
 
 /**
- * Builds request parameters to disable reasoning.
- * Priority:
- * 1. canDisable: true → enable_thinking: false (GLM-5.2 includes "none" in levels, but
- *    reasoning_effort: "none" is ignored, so enable_thinking takes precedence)
- * 2. levels includes "none" → reasoning_effort: "none"
- * 3. Neither possible → empty object (not controllable)
- *
- * Return type is relaxed to Record<string, unknown>, cast by the caller
- * to ChatCompletionCreateParams* types (enable_thinking is not in the SDK types).
+ * Builds request parameters to disable reasoning (Umans-specific extras).
  */
 export async function buildDisableReasoningParams(
   model: string,
 ): Promise<Record<string, unknown>> {
+  if (!isUmansBaseUrl() && !model.startsWith("umans-")) {
+    return {};
+  }
   if (await canDisableThinking(model)) {
     return { enable_thinking: false };
   }
@@ -230,7 +305,14 @@ export async function buildDisableReasoningParams(
 
 /** Mapping of model id → display_name. */
 export async function getModelDisplayNames(): Promise<Record<string, string>> {
-  const models = await getUmansModels();
+  if (llmProvider() === "cursor") {
+    const { listCursorModels } = await import("./cursorLlm");
+    const models = await listCursorModels();
+    const map: Record<string, string> = {};
+    for (const m of models) map[m.id] = m.displayName;
+    return map;
+  }
+  const models = await getProviderModels();
   const map: Record<string, string> = {};
   for (const m of models) map[m.id] = m.displayName;
   return map;

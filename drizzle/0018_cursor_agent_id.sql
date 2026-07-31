@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `cursor_agent_id` text;

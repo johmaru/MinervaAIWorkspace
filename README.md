@@ -110,7 +110,7 @@ flowchart LR
 
 - **Bun** — primary runtime and package manager (local dev / build)
 - **Docker** (with Compose) — recommended self-host path. Standalone Windows exe needs no Docker on the target machine
-- **UmansAI API key** — provider is fixed to UmansAI; only `LLM_API_KEY` is required
+- **LLM API key** — OpenAI-compatible (`LLM_API_KEY` + optional `LLM_BASE_URL`) or Cursor SDK (`CURSOR_API_KEY` when `LLM_PROVIDER=cursor`)
 - **Docker** also required if you enable the experimental **sandbox** tool (image must be built locally)
 
 ## Quick Start (Docker)
@@ -214,7 +214,7 @@ docker compose up -d scraper embedder searxng tor
 
 ## LLM Provider
 
-The provider is **hardcoded to UmansAI** (`https://api.code.umans.ai/v1`). Only `LLM_API_KEY` is required.
+The default provider is **OpenAI-compatible** with base URL `https://api.code.umans.ai/v1` (UmansAI). Set `LLM_BASE_URL` to point at any OpenAI-compatible endpoint. Set `LLM_PROVIDER=cursor` and `CURSOR_API_KEY` (from [Cursor Dashboard → API Keys](https://cursor.com/dashboard/api)) to bill chat to your Cursor account usage via the SDK.
 
 - Model list and reasoning levels are auto-fetched from `/v1/models/info` (in-process cache)
 - Selectors show display names (e.g. `Umans Qwen3.6 35B A3B`)
@@ -271,7 +271,10 @@ All settings live in `.env` (`.env.example` is the source of truth). Most can be
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LLM_API_KEY` | UmansAI API key (required) | — |
+| `LLM_PROVIDER` | `openai` (OpenAI-compatible) or `cursor` (Cursor SDK) | `openai` |
+| `LLM_BASE_URL` | OpenAI-compatible API base URL | `https://api.code.umans.ai/v1` |
+| `LLM_API_KEY` | API key for openai provider | — |
+| `CURSOR_API_KEY` | Cursor Dashboard API key (when `LLM_PROVIDER=cursor`) | — |
 | `LLM_MODEL` | Default model | `umans-glm-5.2` |
 | `LLM_FALLBACK_MODEL` | TTFT fallback model id (empty = disabled) | — |
 | `LLM_FALLBACK_TIMEOUT_MS` | ms to wait for first token before fallback | `10000` |

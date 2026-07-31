@@ -110,7 +110,7 @@ flowchart LR
 
 - **Bun** — 主なランタイム兼パッケージマネージャ（ローカル開発・ビルド）
 - **Docker**（Compose 含む） — セルフホストの推奨。スタンドアロン Windows exe はターゲットに Docker 不要
-- **UmansAI の API キー** — プロバイダは UmansAI 固定。`LLM_API_KEY` のみ必須
+- **LLM API キー** — OpenAI 互換（`LLM_API_KEY` + 任意の `LLM_BASE_URL`）または Cursor SDK（`LLM_PROVIDER=cursor` 時は `CURSOR_API_KEY`）
 - **サンドボックス**を使う場合は Docker も必要（イメージはローカルビルド）
 
 ## クイックスタート（Docker）
@@ -214,7 +214,7 @@ docker compose up -d scraper embedder searxng tor
 
 ## LLM プロバイダ
 
-プロバイダは **UmansAI 固定**（`https://api.code.umans.ai/v1`）。必要なのは `LLM_API_KEY` のみ。
+デフォルトは **OpenAI 互換**（base URL `https://api.code.umans.ai/v1` = UmansAI）。`LLM_BASE_URL` で任意の OpenAI 互換エンドポイントに向けられます。`LLM_PROVIDER=cursor` と `CURSOR_API_KEY`（[Cursor Dashboard → API Keys](https://cursor.com/dashboard/api)）を設定すると、Cursor アカウントの usage 経由（SDK）で課金されます。
 
 - モデル一覧と推論レベルは `/v1/models/info` から自動取得（プロセス内キャッシュ）
 - セレクタには表示名（例: `Umans Qwen3.6 35B A3B`）
@@ -271,7 +271,11 @@ Google リダイレクト URI: `https://your-tunnel.example.com/api/auth/callbac
 
 | 変数 | 説明 | デフォルト |
 |------|------|------------|
-| `LLM_API_KEY` | UmansAI API キー（必須） | — |
+| `LLM_PROVIDER` | `openai`（OpenAI 互換）または `cursor`（Cursor SDK） | `openai` |
+| `LLM_BASE_URL` | OpenAI 互換 API の base URL | `https://api.code.umans.ai/v1` |
+| `LLM_API_KEY` | openai プロバイダ用 API キー | — |
+| `CURSOR_API_KEY` | Cursor Dashboard API キー（`LLM_PROVIDER=cursor` 時） | — |
+| `LLM_MODEL` | デフォルトモデル | `umans-glm-5.2` |
 | `LLM_MODEL` | デフォルトモデル | `umans-glm-5.2` |
 | `LLM_FALLBACK_MODEL` | TTFT フォールバック先モデル id（空 = 無効） | — |
 | `LLM_FALLBACK_TIMEOUT_MS` | 最初のトークンを待つミリ秒 | `10000` |

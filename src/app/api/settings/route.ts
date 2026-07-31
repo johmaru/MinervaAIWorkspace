@@ -5,6 +5,7 @@ import { users, memories, pageEmbeddings, skills, todos, userTraits, pages, kbCh
 import { getRequestLocale, t } from "@/lib/i18n";
 import type { Locale } from "@/lib/i18n/types";
 import { resetUmansModelsCache } from "@/lib/llm";
+import { resetCursorModelsCache } from "@/lib/cursorLlm";
 import { resetToolProbeCache } from "@/lib/toolProbe";
 import { getSessionUser } from "@/lib/auth-guards";
 import { resetEmbedPipeline, embedText, embedTexts, hashContent } from "@/lib/embed";
@@ -130,7 +131,11 @@ export async function GET(req: Request) {
     // when omitted, it sends undefined to preserve the existing value.
     llmApiKey: "",
     hasLlmApiKey: !!process.env.LLM_API_KEY,
-    llmModel: process.env.LLM_MODEL || "umans-glm-5.2",
+    llmProvider: process.env.LLM_PROVIDER === "cursor" ? "cursor" : "openai",
+    llmBaseUrl: process.env.LLM_BASE_URL || "https://api.code.umans.ai/v1",
+    cursorApiKey: "",
+    hasCursorApiKey: !!process.env.CURSOR_API_KEY,
+    llmModel: process.env.LLM_MODEL || (process.env.LLM_PROVIDER === "cursor" ? "composer-2.5" : "umans-glm-5.2"),
     llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
     llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS) || 10000,
     thinkingEffort: process.env.THINKING_EFFORT || "medium",
@@ -206,6 +211,9 @@ export async function GET(req: Request) {
 type SettingsBody = {
   // LLM
   llmApiKey?: string;
+  llmProvider?: string;
+  llmBaseUrl?: string;
+  cursorApiKey?: string;
   // Default global instruction selection (per-user, saved to DB)
   activeInstructionId?: string | null;
   // Personalization (per-user, saved to DB)
@@ -497,6 +505,23 @@ export async function POST(req: Request) {
     const updates: Record<string, string> = {};
     // LLM
     if (body.llmApiKey !== undefined) updates.LLM_API_KEY = body.llmApiKey;
+    if (body.llmProvider !== undefined) {
+      updates.LLM_PROVIDER = body.llmProvider === "cursor" ? "cursor" : "openai";
+    }
+    if (body.llmBaseUrl !== undefined) {
+      if (body.llmBaseUrl !== "") {
+        try {
+          const u = new URL(body.llmBaseUrl);
+          if (!["http:", "https:"].includes(u.protocol)) throw new Error();
+          updates.LLM_BASE_URL = body.llmBaseUrl;
+        } catch {
+          return new Response("Invalid llmBaseUrl: must be http(s) URL", { status: 400 });
+        }
+      } else {
+        updates.LLM_BASE_URL = "";
+      }
+    }
+    if (body.cursorApiKey !== undefined) updates.CURSOR_API_KEY = body.cursorApiKey;
     if (body.llmModel !== undefined) updates.LLM_MODEL = body.llmModel;
     if (body.llmFallbackModel !== undefined) updates.LLM_FALLBACK_MODEL = body.llmFallbackModel;
     if (body.llmFallbackTimeoutMs !== undefined) updates.LLM_FALLBACK_TIMEOUT_MS = String(body.llmFallbackTimeoutMs);
@@ -595,11 +620,12 @@ export async function POST(req: Request) {
       setConfiguredAuthUrl(body.authUrl);
     }
     // Invalidate in-process cache when LLM-related settings change (no restart needed)
-    const llmChanged = ["LLM_API_KEY", "LLM_MODEL", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_TIMEOUT_MS"].some(
+    const llmChanged = ["LLM_API_KEY", "LLM_MODEL", "LLM_FALLBACK_MODEL", "LLM_FALLBACK_TIMEOUT_MS", "LLM_PROVIDER", "LLM_BASE_URL", "CURSOR_API_KEY"].some(
       (k) => k in updates,
     );
     if (llmChanged) {
       resetUmansModelsCache();
+      resetCursorModelsCache();
       resetToolProbeCache();
     }
     // Invalidate transformers.js pipeline cache when embedding-related settings change

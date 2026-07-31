@@ -16,6 +16,10 @@ type SettingsResponse = {
   // LLM
   llmApiKey: string;
   hasLlmApiKey: boolean;
+  llmProvider: "openai" | "cursor";
+  llmBaseUrl: string;
+  cursorApiKey: string;
+  hasCursorApiKey: boolean;
   llmModel: string;
   llmFallbackModel: string;
   llmFallbackTimeoutMs: number;
@@ -326,6 +330,7 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
         ...form,
         // Secret fields are not sent when empty (existing values are preserved).
         llmApiKey: form.llmApiKey || undefined,
+        cursorApiKey: form.cursorApiKey || undefined,
         notionClientSecret: form.notionClientSecret || undefined,
         // databaseUrl may contain credentials; only send when user enters a new value
         databaseUrl: form.databaseUrl || undefined,
@@ -386,12 +391,13 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
       }
       // Re-sync server state and form (reflect latest values after save)
       await fetchSettings();
+      void fetchModels();
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : t("common.communicationError") });
     } finally {
       setSaving(false);
     }
-  }, [form, selectedOption, embedDirty, needsMigration, migrationConfirmed, fetchSettings, t]);
+  }, [form, selectedOption, embedDirty, needsMigration, migrationConfirmed, fetchSettings, fetchModels, t]);
   // Partial settings persistence — sends only the changed key(s) immediately
   // (security lock, GSI default selection, allowed IPs on blur).
   // Does NOT re-fetch settings (would clobber the in-progress form).
@@ -644,6 +650,43 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
           <div className="space-y-6">
         {/* LLM settings */}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmProviderLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmProviderEnv")}</span>
+              </label>
+              <select
+                value={form.llmProvider ?? "openai"}
+                onChange={(e) => {
+                  const next = e.target.value === "cursor" ? "cursor" : "openai";
+                  update("llmProvider", next);
+                }}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="openai">{t("settings.llmProviderOpenAI")}</option>
+                <option value="cursor">{t("settings.llmProviderCursor")}</option>
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {(form.llmProvider ?? "openai") === "cursor"
+                  ? t("settings.llmProviderCursorHint")
+                  : t("settings.llmProviderOpenAIHint")}
+              </p>
+            </div>
+            {(form.llmProvider ?? "openai") === "openai" && (
+              <>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.llmBaseUrlLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.llmBaseUrlEnv")}</span>
+              </label>
+              <input
+                type="url"
+                value={form.llmBaseUrl ?? ""}
+                onChange={(e) => update("llmBaseUrl", e.target.value)}
+                placeholder="https://api.code.umans.ai/v1"
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmApiKeyLabel")}</span>
@@ -657,6 +700,23 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
             </div>
+              </>
+            )}
+            {(form.llmProvider ?? "openai") === "cursor" && (
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.cursorApiKeyLabel")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("settings.cursorApiKeyEnv")}</span>
+              </label>
+              <input
+                type="password"
+                value={form.cursorApiKey ?? ""}
+                onChange={(e) => update("cursorApiKey", e.target.value)}
+                placeholder={settings?.hasCursorApiKey ? t("settings.placeholderUpdate") : ""}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              />
+            </div>
+            )}
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmModelLabel")}</span>
@@ -675,6 +735,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 )}
               </select>
             </div>
+            {(form.llmProvider ?? "openai") === "openai" && (
+              <>
             <div>
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmFallbackModelLabel")}</span>
@@ -730,6 +792,8 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   : t("settings.thinkingEffortDesc")}
               </p>
             </div>
+              </>
+            )}
             <div className="sm:col-span-2">
               <label className="flex items-center gap-2">
                 <input

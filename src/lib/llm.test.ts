@@ -19,8 +19,9 @@ describe("llm client", () => {
     }
   });
 
-  it("createLLM uses hardcoded UmansAI base URL", () => {
+  it("createLLM uses configurable base URL (defaults to UmansAI)", () => {
     process.env.LLM_API_KEY = "sk-test";
+    delete process.env.LLM_BASE_URL;
     const client = createLLM();
     expect(client.baseURL).toBe("https://api.code.umans.ai/v1");
     expect(client.apiKey).toBe("sk-test");
