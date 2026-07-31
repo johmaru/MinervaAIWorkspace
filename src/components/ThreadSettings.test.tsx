@@ -136,37 +136,43 @@ describe("ThreadSettings — system prompt", () => {
 });
 
 describe("ThreadSettings — model selector", () => {
-  it("fetches and displays the model list", async () => {
+  it("fetches models and shows the current value in a freeform input", async () => {
     renderSettings();
-        fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
-    const select = screen.getByDisplayValue("umans-glm-5.2");
-    expect(select.tagName).toBe("SELECT");
+    fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
+    const input = screen.getByRole("combobox", { name: "モデル" });
+    expect(input).toHaveValue("umans-glm-5.2");
     await waitFor(() => {
-      expect(screen.getByRole("option", { name: "gpt-4o-mini" })).toBeInTheDocument();
+      const listId = input.getAttribute("list");
+      expect(listId).toBeTruthy();
+      const options = document.querySelectorAll(`datalist#${CSS.escape(listId!)} option`);
+      expect([...options].map((o) => o.getAttribute("value"))).toEqual(
+        expect.arrayContaining(["umans-glm-5.2", "gpt-4o-mini", "gpt-4o"]),
+      );
     });
   });
 
   it("model change makes it dirty → saveable", async () => {
     const { onUpdate } = renderSettings();
-        fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
-    await waitFor(() => screen.getByRole("option", { name: "gpt-4o-mini" }));
-    fireEvent.change(screen.getByDisplayValue("umans-glm-5.2"), { target: { value: "gpt-4o-mini" } });
+    fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
+    const input = await screen.findByRole("combobox", { name: "モデル" });
+    fireEvent.change(input, { target: { value: "gpt-4.1" } });
     const saveBtn = screen.getByRole("button", { name: "保存" });
     expect(saveBtn).not.toBeDisabled();
     fireEvent.click(saveBtn);
     await waitFor(() =>
-      expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: null, model: "gpt-4o-mini" })),
+      expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: null, model: "gpt-4.1" })),
     );
   });
 
   it("saves dual model settings", async () => {
     const { onUpdate } = renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
-    await waitFor(() => screen.getByRole("option", { name: "gpt-4o-mini" }));
+    await screen.findByRole("combobox", { name: "モデル" });
 
     fireEvent.change(screen.getByDisplayValue("通常"), { target: { value: "dual" } });
     fireEvent.change(screen.getByDisplayValue("相互レビュー"), { target: { value: "debate" } });
     fireEvent.change(screen.getByDisplayValue("2"), { target: { value: "3" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "モデルB" }), { target: { value: "gpt-4o-mini" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -180,7 +186,7 @@ describe("ThreadSettings — model selector", () => {
     );
   });
 
-  it("uses display names for option labels when available", async () => {
+  it("exposes display names as datalist labels when available", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((url: string) => {
@@ -201,11 +207,15 @@ describe("ThreadSettings — model selector", () => {
       }),
     );
     renderSettings({ model: "umans-qwen3.6-35b-a3b" });
-        fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
+    fireEvent.click(screen.getByRole("button", { name: "スレッド設定を開閉" }));
+    const input = await screen.findByRole("combobox", { name: "モデル" });
+    expect(input).toHaveValue("umans-qwen3.6-35b-a3b");
     await waitFor(() => {
-      expect(screen.getByRole("option", { name: "Umans Qwen3.6 35B A3B" })).toBeInTheDocument();
+      const listId = input.getAttribute("list");
+      const options = document.querySelectorAll(`datalist#${CSS.escape(listId!)} option`);
+      const labels = [...options].map((o) => o.getAttribute("label"));
+      expect(labels).toEqual(expect.arrayContaining(["Umans GLM 5.2", "Umans Qwen3.6 35B A3B"]));
     });
-    expect(screen.getByRole("option", { name: "Umans GLM 5.2" })).toBeInTheDocument();
   });
 });
 

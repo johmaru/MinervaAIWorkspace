@@ -226,6 +226,22 @@ describe("SettingsModal — immediate partial persistence", () => {
 });
 
 describe("SettingsModal — embedDirty and Save payload", () => {
+  it("accepts a freeform llmModel id not in the provider list", async () => {
+    const { calls } = mockFetch();
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+    const llmInput = screen.getByRole("combobox", { name: "デフォルトモデル" });
+    expect(llmInput).toHaveValue("umans-glm-5.2");
+    fireEvent.change(llmInput, { target: { value: "gpt-4.1" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const posts = settingsPostCalls(calls);
+      expect(posts.length).toBeGreaterThanOrEqual(1);
+      const body = JSON.parse(posts[0].init!.body as string);
+      expect(body.llmModel).toBe("gpt-4.1");
+    });
+  });
+
   it("embedDirty is false on load when embed settings match server", async () => {
     mockFetch();
     renderModal();
@@ -253,7 +269,7 @@ describe("SettingsModal — embedDirty and Save payload", () => {
     const embedSelect = screen.getByDisplayValue(/LFM2.5/i);
     fireEvent.change(embedSelect, { target: { value: "Xenova/all-MiniLM-L6-v2" } });
     // Also change LLM model so the payload has a non-embed field to save
-    const llmInput = screen.getByDisplayValue("Umans GLM 5.2");
+    const llmInput = screen.getByRole("combobox", { name: "デフォルトモデル" });
     fireEvent.change(llmInput, { target: { value: "umans-coder" } });
     // Do NOT check the migration confirmation checkbox
     // Save should be enabled (disabled={saving} only, not gated on migration)
@@ -279,7 +295,7 @@ describe("SettingsModal — embedDirty and Save payload", () => {
     renderModal();
     await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
     // Change LLM model first (update() resets migrationConfirmed, which is fine here)
-    const llmInput = screen.getByDisplayValue("Umans GLM 5.2");
+    const llmInput = screen.getByRole("combobox", { name: "デフォルトモデル" });
     fireEvent.change(llmInput, { target: { value: "umans-coder" } });
     // Change embed model to different dim (1024 → 384)
     const embedSelect = screen.getByDisplayValue(/LFM2.5/i);

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { ModelCombobox } from "@/components/ModelCombobox";
 import { clientFetch } from "@/lib/clientFetch";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 
@@ -722,18 +723,15 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmModelLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmModelEnv")}</span>
               </label>
-              <select
+              <ModelCombobox
                 value={form.llmModel ?? ""}
-                onChange={(e) => update("llmModel", e.target.value)}
+                onChange={(v) => update("llmModel", v)}
+                models={modelList}
+                displayNames={modelDisplayNames}
+                placeholder={t("settings.modelIdPlaceholder")}
+                aria-label={t("settings.llmModelLabel")}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              >
-                {modelList.map((m) => (
-                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
-                ))}
-                {!modelList.includes(form.llmModel ?? "") && form.llmModel && (
-                  <option value={form.llmModel}>{modelDisplayNames[form.llmModel] ?? form.llmModel}</option>
-                )}
-              </select>
+              />
             </div>
             {(form.llmProvider ?? "openai") === "openai" && (
               <>
@@ -742,16 +740,17 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                 <span className="block text-xs font-medium text-foreground">{t("settings.llmFallbackModelLabel")}</span>
                 <span className="block text-[10px] text-muted-foreground">{t("settings.llmFallbackModelEnv")}</span>
               </label>
-              <select
+              <ModelCombobox
                 value={form.llmFallbackModel ?? ""}
-                onChange={(e) => update("llmFallbackModel", e.target.value || "")}
+                onChange={(v) => update("llmFallbackModel", v)}
+                models={modelList}
+                displayNames={modelDisplayNames}
+                allowEmpty
+                emptyLabel="— (disabled)"
+                placeholder={t("settings.modelIdPlaceholder")}
+                aria-label={t("settings.llmFallbackModelLabel")}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              >
-                <option value="">— (disabled)</option>
-                {modelList.map((m) => (
-                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="mb-1 block">
@@ -964,18 +963,15 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <label className="mb-1 block">
                 <span className="block text-xs font-medium text-foreground">{t("settings.webSearchModel")}</span>
               </label>
-              <select
+              <ModelCombobox
                 value={form.webSearchModel ?? "umans-qwen3.6-35b-a3b"}
-                onChange={(e) => update("webSearchModel", e.target.value)}
+                onChange={(v) => update("webSearchModel", v)}
+                models={modelList}
+                displayNames={modelDisplayNames}
+                placeholder={t("settings.modelIdPlaceholder")}
+                aria-label={t("settings.webSearchModel")}
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-              >
-                {modelList.map((m) => (
-                  <option key={m} value={m}>{modelDisplayNames[m] ?? m}</option>
-                ))}
-                {!modelList.includes(form.webSearchModel ?? "") && form.webSearchModel && (
-                  <option value={form.webSearchModel}>{modelDisplayNames[form.webSearchModel] ?? form.webSearchModel}</option>
-                )}
-              </select>
+              />
               <p className="mt-1 text-xs text-muted-foreground">{t("settings.webSearchModelDesc")}</p>
             </div>
             <div className="sm:col-span-2">

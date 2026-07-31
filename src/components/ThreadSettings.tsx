@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { ModelCombobox } from "@/components/ModelCombobox";
 import { clientFetch } from "@/lib/clientFetch";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -249,22 +250,26 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
                 <span className="text-xs font-medium text-muted-foreground">
                   {t("threadSettings.dualModelA")}
                 </span>
-                <ModelSelect
+                <ModelCombobox
                   value={dualModelA}
                   models={models}
                   displayNames={displayNames}
                   onChange={setDualModelA}
+                  placeholder={t("threadSettings.modelPlaceholder")}
+                  aria-label={t("threadSettings.dualModelA")}
                 />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted-foreground">
                   {t("threadSettings.dualModelB")}
                 </span>
-                <ModelSelect
+                <ModelCombobox
                   value={dualModelB}
                   models={models}
                   displayNames={displayNames}
                   onChange={setDualModelB}
+                  placeholder={t("threadSettings.modelPlaceholder")}
+                  aria-label={t("threadSettings.dualModelB")}
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -350,21 +355,14 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
             <span className="text-xs font-medium text-muted-foreground">
               {t("threadSettings.model")}
             </span>
-            <select
+            <ModelCombobox
               value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-            >
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {displayNames[m] ?? m}
-                </option>
-              ))}
-              {/* Show current model even if not in the list */}
-              {!models.includes(model) && (
-                <option value={model}>{displayNames[model] ?? model}</option>
-              )}
-            </select>
+              models={models}
+              displayNames={displayNames}
+              onChange={setModel}
+              placeholder={t("threadSettings.modelPlaceholder")}
+              aria-label={t("threadSettings.model")}
+            />
           </label>
           <div className="flex items-center gap-2">
             <button
@@ -387,31 +385,3 @@ export function ThreadSettings({ thread, onUpdate }: Props) {
   );
 }
 
-function ModelSelect({
-  value,
-  models,
-  displayNames,
-  onChange,
-}: {
-  value: string;
-  models: string[];
-  displayNames: Record<string, string>;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-xl bg-muted px-2 py-1.5 text-xs outline-none transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
-    >
-      {models.map((m) => (
-        <option key={m} value={m}>
-          {displayNames[m] ?? m}
-        </option>
-      ))}
-      {!models.includes(value) && (
-        <option value={value}>{displayNames[value] ?? value}</option>
-      )}
-    </select>
-  );
-}

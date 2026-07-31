@@ -56,7 +56,7 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 - **Personalization** — style presets + warmth/energy/structure/emoji sliders (0–2); Settings → Personalization; off by default
 - **Skills system** — 6 kinds with semantic RAG; auto-extracted draft candidates; Skill Manager (sidebar 🛠️)
 - **Named global system instructions** — multiple prompts per account; priority: thread systemPrompt > thread override > user default > body prompt
-- **Per-thread system prompt and model selection**
+- **Per-thread system prompt and model selection** (provider suggestions + freeform model ID)
 
 ### Account, UI & ops
 
@@ -411,7 +411,7 @@ List both localhost and tunnel callback URLs if you use dual access.
 - **Attachments** — images, PDF, text/code (10MB each).
 - **Semantic search** — all threads by cosine similarity.
 - **Web scraping / Tor** — when services are configured; Tor toggle in Settings.
-- **Settings** — LLM model, fallback, thinking effort, embeddings, search, Tor, logs, translation modes; written to `.env`.
+- **Settings** — LLM model (suggestions + freeform ID), fallback, thinking effort, embeddings, search, Tor, logs, translation modes; written to `.env`.
 - **Global instructions** — Settings → AI & Models.
 - **Memory Manager** — sidebar 🧠.
 - **Todo list** — sidebar ✓ (or ask the AI).
