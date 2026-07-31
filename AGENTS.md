@@ -169,7 +169,7 @@ See `skill://work-completion-checklist` section 5 (Git Workflow).
 
 ## GitHub Repository
 
-When the user mentions "GitHub", "the repo", "the repository", "issues", "PRs", or similar without specifying which one, assume they mean **this project's repository**: https://github.com/johmaru/UmansChat-Unofficial (private). If it is still ambiguous which repository they mean, ask for confirmation before proceeding.
+When the user mentions "GitHub", "the repo", "the repository", "issues", "PRs", or similar without specifying which one, assume they mean **this project's repository**: https://github.com/johmaru/MinervaAIWorkspace (private). If it is still ambiguous which repository they mean, ask for confirmation before proceeding.
 
 ## Project Rule Memory
 When the user says "remember this for next time," "make sure to remember this," or similar, decide whether the content is a durable project rule, workflow rule, known pitfall, or implementation convention.

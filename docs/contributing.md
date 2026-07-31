@@ -21,8 +21,8 @@ MinervaAIWorkspace is a self-hosted, open-source AI workspace built with Next.js
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/johmaru/UmansChat-Unofficial.git
-cd UmansChat-Unofficial
+git clone https://github.com/johmaru/MinervaAIWorkspace.git
+cd MinervaAIWorkspace
 
 # 2. Install dependencies
 bun install

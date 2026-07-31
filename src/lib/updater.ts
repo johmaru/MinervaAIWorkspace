@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { httpsDownload, isDockerEnv } from "@/lib/tunnel";
 import { getDataDir } from "@/lib/user-data";
 
-const GITHUB_REPO = "johmaru/UmansChat-Unofficial";
+const GITHUB_REPO = "johmaru/MinervaAIWorkspace";
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 let cachedRelease: { data: GitHubRelease; timestamp: number } | null = null;

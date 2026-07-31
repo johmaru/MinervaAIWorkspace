@@ -14,7 +14,7 @@ export type WikipediaResult = {
   lang: "ja" | "en";
 };
 
-const USER_AGENT = "MinervaAIWorkspace/1.0 (https://github.com/johmaru/UmansChat-Unofficial)";
+const USER_AGENT = "MinervaAIWorkspace/1.0 (https://github.com/johmaru/MinervaAIWorkspace)";
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
