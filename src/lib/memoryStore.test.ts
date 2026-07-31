@@ -67,7 +67,7 @@ beforeAll(async () => {
   // Create test user (for userId isolation tests)
   const [testUser] = await db.insert(users).values({
     nickname: "memoryStore-test",
-    email: "memstore-test@umanschat.test",
+    email: "memstore-test@minerva.test",
   }).returning();
   testUserId = testUser.id;
   createdUserIds.push(testUser.id);
@@ -185,7 +185,7 @@ describe("findRelevantMemories — userId isolation", () => {
     // Create another user
     const [otherUser] = await db.insert(users).values({
       nickname: "other-user",
-      email: "other-user@umanschat.test",
+      email: "other-user@minerva.test",
     }).returning();
     otherUserIds.push(otherUser.id);
 

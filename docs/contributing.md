@@ -1,10 +1,10 @@
-Contributing guide for UmansChat — how to set up, develop, test, and submit changes.
+Contributing guide for MinervaAIWorkspace — how to set up, develop, test, and submit changes.
 
 Relevant source files: `AGENTS.md`, `README.md`, `package.json`, `.env.example`, `vitest.config.mts`, `vitest.setup.ts`, `tsconfig.json`, `eslint.config.mjs`.
 
 ## Welcome
 
-UmansChat is a self-hosted, open-source AI workspace built with Next.js 16 + React 19 and backed by an embedded SQLite database. It combines streaming chat with branching threads, semantic memory, web knowledge ingestion, MCP tool integration, external connections, multi-model workflows, reusable skills, and tone personalization. This guide walks you through getting a local development environment running, understanding the project layout, following our code conventions, and submitting your first contribution. Welcome — we are glad you are here.
+MinervaAIWorkspace is a self-hosted, open-source AI workspace built with Next.js 16 + React 19 and backed by an embedded SQLite database. It combines streaming chat with branching threads, semantic memory, web knowledge ingestion, MCP tool integration, external connections, multi-model workflows, reusable skills, and tone personalization. This guide walks you through getting a local development environment running, understanding the project layout, following our code conventions, and submitting your first contribution. Welcome — we are glad you are here.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ cp .env.example .env
 # 5. Generate an AUTH_SECRET and add it to .env
 bunx auth secret
 
-# 6. Apply database migrations (creates tables in data/umanschat.db)
+# 6. Apply database migrations (creates tables in data/minerva.db)
 bunx drizzle-kit migrate
 
 # 7. Run the dev server
@@ -45,7 +45,7 @@ bun run dev
 #    http://localhost:3000
 ```
 
-On first launch, the app creates `data/umanschat.db` automatically. You will be prompted to create the first admin account (nickname + email + password).
+On first launch, the app creates `data/minerva.db` automatically. You will be prompted to create the first admin account (nickname + email + password).
 
 ### Optional: Docker services for scraping and search
 
@@ -72,7 +72,7 @@ Point `SCRAPER_URL`, `SEARXNG_URL`, and (for HTTP embeddings) `EMBEDDER_URL` in 
 ## Project Structure
 
 ```
-UmansChat/
+MinervaAIWorkspace/
 ├── src/
 │   ├── app/                    # Next.js App Router
 │   │   ├── layout.tsx         # Root layout (fonts, providers)
@@ -98,7 +98,7 @@ UmansChat/
 │   └── ...
 ├── embedder/                  # Python sentence-transformers service
 ├── scraper/                   # FastAPI scraper + SearXNG client
-├── launcher/                  # Standalone exe launcher (umanschat-launcher.cjs)
+├── launcher/                  # Standalone exe launcher (minerva-launcher.cjs)
 ├── scripts/                   # Build/pack scripts (pack-exe.ts, sync-env.ts)
 ├── drizzle/                   # Migration files
 ├── docs/                      # This documentation
@@ -352,7 +352,7 @@ Before submitting, confirm:
 
 ## Using AI Agents to Contribute
 
-UmansChat is designed for AI-assisted development. Whether you use Claude Code,
+MinervaAIWorkspace is designed for AI-assisted development. Whether you use Claude Code,
 Cursor, Copilot, Windsurf, or any other AI agent, the project has adapter files
 that point your tool to the right context.
 
@@ -393,7 +393,7 @@ that point your tool to the right context.
 
 ### Known pitfalls
 
-Before debugging SSE streaming, Docker build, transformers.js, SQLite, or Next.js 16 issues, read the UmansChat Debug Guide referenced in `AGENTS.md`. A key pitfall: `generateMemories` in `src/app/api/chat/route.ts` must run via `after()` (not bare fire-and-forget, not blocking `await`), and `after()` must be called in the POST handler body (request scope), not inside the `ReadableStream` `start()` callback.
+Before debugging SSE streaming, Docker build, transformers.js, SQLite, or Next.js 16 issues, read the MinervaAIWorkspace Debug Guide referenced in `AGENTS.md`. A key pitfall: `generateMemories` in `src/app/api/chat/route.ts` must run via `after()` (not bare fire-and-forget, not blocking `await`), and `after()` must be called in the POST handler body (request scope), not inside the `ReadableStream` `start()` callback.
 
 ## See also
 

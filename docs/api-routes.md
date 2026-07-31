@@ -1,4 +1,4 @@
-Complete reference for every API route in UmansChat — methods, paths, request/response shapes, and key behaviors.
+Complete reference for every API route in MinervaAIWorkspace — methods, paths, request/response shapes, and key behaviors.
 
 ## Relevant source files
 
@@ -29,7 +29,7 @@ All routes live under `src/app/api/`. Each route file exports `runtime` and `dyn
 
 ## Common patterns
 
-Every API route in UmansChat follows these conventions:
+Every API route in MinervaAIWorkspace follows these conventions:
 
 ### Runtime and caching
 

@@ -5,7 +5,7 @@
  * Interpolation placeholders use `{name}` format. Replaced via `t(locale, key, { name: value })`.
  *
  * Strings NOT translated (excluded from this dictionary):
- * - Brand name `UmansChat`
+ * - Brand name `MinervaAIWorkspace`
  * - Environment variable names (LLM_API_KEY, LLM_MODEL, ...) and technical values (none/low/medium/high/max, socks5://tor:9050)
  * - English API validation error strings (for developers)
  * - Default titles stored in DB: "New chat" / "New folder"
@@ -725,7 +725,7 @@ const ja = {
           step2UriNote: "※デプロイ先の URL が異なる場合は、その URL に置き換えてください（例: https://your-domain.com/api/connections/notion/callback）",
           step3: "3. Client ID と Secret を取得する",
           step3Desc: "インテグレーションページの「内部インテグレーション シークレット」と「OAuth クライアント ID」をコピーします。",
-          step4: "4. UmansChat の設定に入力する",
+          step4: "4. MinervaAIWorkspace の設定に入力する",
           step4Desc: "サイドバーの ⚙️ ボタン → コネクション を開き、NOTION_CLIENT_ID と NOTION_CLIENT_SECRET を入力して「保存」を押します。",
           step5: "5. Notion に接続する",
           step5Desc: "保存後、「Notion に接続」ボタンが表示されます。クリックして Notion の認可画面でアクセスを許可してください。",
@@ -1485,7 +1485,7 @@ const en: typeof ja = {
           step2UriNote: "If your deployment URL is different, replace it accordingly (e.g. https://your-domain.com/api/connections/notion/callback)",
           step3: "3. Get your Client ID and Secret",
           step3Desc: "Copy the \"OAuth client ID\" and \"Internal integration secret\" from the integration page.",
-          step4: "4. Enter them in UmansChat settings",
+          step4: "4. Enter them in MinervaAIWorkspace settings",
           step4Desc: "Click the ⚙️ button in the sidebar → Connections, enter NOTION_CLIENT_ID and NOTION_CLIENT_SECRET, then click \"Save\".",
           step5: "5. Connect to Notion",
           step5Desc: "After saving, a \"Connect Notion\" button appears. Click it and authorize access on the Notion consent screen.",

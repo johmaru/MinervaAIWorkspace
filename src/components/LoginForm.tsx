@@ -38,10 +38,13 @@ export function LoginForm({
   // Pre-fill email from localStorage on mount (login mode only)
   useEffect(() => {
     if (mode === "login") {
-      const stored = localStorage.getItem("umanschat:rememberEmail");
+      const stored =
+        localStorage.getItem("minerva:rememberEmail") ??
+        localStorage.getItem("umanschat:rememberEmail");
       if (stored) {
         setSavedEmail(stored);
         setRememberEmail(true);
+        localStorage.setItem("minerva:rememberEmail", stored);
       }
     }
   }, [mode]);
@@ -70,8 +73,9 @@ export function LoginForm({
           onSubmit={(e) => {
             if (mode === "login") {
               if (rememberEmail) {
-                localStorage.setItem("umanschat:rememberEmail", savedEmail);
+                localStorage.setItem("minerva:rememberEmail", savedEmail);
               } else {
+                localStorage.removeItem("minerva:rememberEmail");
                 localStorage.removeItem("umanschat:rememberEmail");
               }
             } else {

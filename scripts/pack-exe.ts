@@ -3,10 +3,10 @@
  *
  * 1. Generate .next/standalone/ via `bun run build`
  * 2. Copy public/, .next/static/, drizzle/, scripts/, .env.example, and the
- *    launcher into dist/UmansChat/
- * 3. Build umanschat.exe via `bun build --compile` (bundles the Bun runtime)
+ *    launcher into dist/Minerva/
+ * 3. Build minerva.exe via `bun build --compile` (bundles the Bun runtime)
  *
- * Before wiping dist/, stashes the prior dist/UmansChat/.env and data/ so an
+ * Before wiping dist/, stashes the prior dist/Minerva/.env and data/ so an
  * in-place rebuild preserves live user config (REGISTRATION_LOCKED, secrets)
  * and the SQLite DB — matching the in-app updater's preserve contract. See
  * scripts/pack-preserve.ts.
@@ -21,20 +21,20 @@ import { stashInstallState, restoreInstallState, applyExeEnvDefaults } from "./p
 
 const root = process.cwd();
 const distDir = join(root, "dist");
-const outDir = join(distDir, "UmansChat");
+const outDir = join(distDir, "Minerva");
 
 // Clean up dist/ and .next/ BEFORE build so output-file-tracing does not pick
-// up a stale dist/ (which causes recursive dist/UmansChat/dist/... nesting).
-// Deleting the entire dist/ (not just dist/UmansChat) ensures the trace sees
+// up a stale dist/ (which causes recursive dist/Minerva/dist/... nesting).
+// Deleting the entire dist/ (not just dist/Minerva) ensures the trace sees
 // no dist tree at all. .next is cleaned to avoid reusing stale tracing output.
-// Stash the prior dist/UmansChat/.env and data/ BEFORE wiping, so an in-place
+// Stash the prior dist/Minerva/.env and data/ BEFORE wiping, so an in-place
 // rebuild preserves live user config (REGISTRATION_LOCKED, secrets) and the
 // SQLite DB — matching the in-app updater's preserve contract. Stash is
 // created before the wipe so a copy failure aborts the pack with no data loss.
-const prevOutDir = join(distDir, "UmansChat");
+const prevOutDir = join(distDir, "Minerva");
 let stashDir: string | null = null;
 if (existsSync(prevOutDir)) {
-  stashDir = mkdtempSync(join(tmpdir(), "umanschat-pack-preserve-"));
+  stashDir = mkdtempSync(join(tmpdir(), "minerva-pack-preserve-"));
   const stashed = stashInstallState(prevOutDir, stashDir);
   const stashedKeys: string[] = [];
   if (stashed.env) stashedKeys.push(".env");
@@ -66,7 +66,7 @@ mkdirSync(outDir, { recursive: true });
 
 console.log("[pack] Copying files...");
 
-// .next/standalone/* → dist/UmansChat/
+// .next/standalone/* → dist/Minerva/
 const standaloneDir = join(root, ".next", "standalone");
 if (!existsSync(standaloneDir)) {
   console.error("[pack] .next/standalone not found. Did the build succeed?");
@@ -142,38 +142,38 @@ if (existsSync(transformersSharpDir)) {
   console.log("[pack] Stubbed sharp in @xenova/transformers (native binary not needed for text embedding).");
 }
 
-// public/ → dist/UmansChat/public/
+// public/ → dist/Minerva/public/
 const publicSrc = join(root, "public");
 if (existsSync(publicSrc)) {
   cpSync(publicSrc, join(outDir, "public"), { recursive: true });
 }
 
-// .next/static/ → dist/UmansChat/.next/static/
+// .next/static/ → dist/Minerva/.next/static/
 const staticSrc = join(root, ".next", "static");
 if (existsSync(staticSrc)) {
   cpSync(staticSrc, join(outDir, ".next", "static"), { recursive: true });
 }
 
-// drizzle/ → dist/UmansChat/drizzle/ (for migrations)
+// drizzle/ → dist/Minerva/drizzle/ (for migrations)
 const drizzleSrc = join(root, "drizzle");
 if (existsSync(drizzleSrc)) {
   cpSync(drizzleSrc, join(outDir, "drizzle"), { recursive: true });
 }
 
-// drizzle.config.ts → dist/UmansChat/
+// drizzle.config.ts → dist/Minerva/
 cpSync(
   join(root, "drizzle.config.ts"),
   join(outDir, "drizzle.config.ts"),
 );
 
-// scripts/sync-env.ts → dist/UmansChat/scripts/
+// scripts/sync-env.ts → dist/Minerva/scripts/
 mkdirSync(join(outDir, "scripts"), { recursive: true });
 cpSync(
   join(root, "scripts", "sync-env.ts"),
   join(outDir, "scripts", "sync-env.ts"),
 );
 
-// .env.example → dist/UmansChat/.env.example
+// .env.example → dist/Minerva/.env.example
 cpSync(
   join(root, ".env.example"),
   join(outDir, ".env.example"),
@@ -205,19 +205,19 @@ try {
   }
 }
 
-// launcher → dist/UmansChat/umanschat.cjs
+// launcher → dist/Minerva/minerva.cjs
 cpSync(
-  join(root, "launcher", "umanschat-launcher.cjs"),
-  join(outDir, "umanschat.cjs"),
+  join(root, "launcher", "minerva-launcher.cjs"),
+  join(outDir, "minerva.cjs"),
 );
 
-// launcher/user-data.cjs → dist/UmansChat/user-data.cjs (required by launcher)
+// launcher/user-data.cjs → dist/Minerva/user-data.cjs (required by launcher)
 cpSync(
   join(root, "launcher", "user-data.cjs"),
   join(outDir, "user-data.cjs"),
 );
 
-// package.json → dist/UmansChat/ (required by bun build --compile)
+// package.json → dist/Minerva/ (required by bun build --compile)
 cpSync(
   join(root, "package.json"),
   join(outDir, "package.json"),
@@ -231,8 +231,8 @@ distPkg.version = process.env.APP_VERSION || distPkg.version || "0.0.0";
 writeFileSync(distPkgPath, JSON.stringify(distPkg, null, 2));
 console.log(`[pack] Version set to ${distPkg.version}`);
 
-// node.exe → dist/UmansChat/node.exe (required to spawn server.js at runtime).
-// The compiled umanschat.exe bundles the launcher (run via Bun), but the app
+// node.exe → dist/Minerva/node.exe (required to spawn server.js at runtime).
+// The compiled minerva.exe bundles the launcher (run via Bun), but the app
 // uses better-sqlite3 which Bun does not support. Docker runs `node server.js`,
 // so the exe distribution must do the same. Resolve node from PATH so CI and
 // local builds use whichever Node is installed.
@@ -259,23 +259,23 @@ function pruneTests(dir: string): void {
 pruneTests(outDir);
 
 
-console.log("[pack] Compiling launcher to umanschat.exe...");
+console.log("[pack] Compiling launcher to minerva.exe...");
 try {
   execSync(
-    `bun build --compile "${join(outDir, "umanschat.cjs")}" --outfile "${join(outDir, "umanschat.exe")}"`,
+    `bun build --compile "${join(outDir, "minerva.cjs")}" --outfile "${join(outDir, "minerva.exe")}"`,
     { cwd: root, stdio: "inherit" },
   );
-  console.log("[pack] umanschat.exe created.");
+  console.log("[pack] minerva.exe created.");
 } catch (err) {
   console.error("[pack] bun build --compile failed:", err);
   console.error("[pack] Falling back to .bat launcher (requires Bun on PATH).");
-  // .bat fallback: requires bun; directly runs umanschat.cjs
+  // .bat fallback: requires bun; directly runs minerva.cjs
   writeFileSync(
-    join(outDir, "umanschat.bat"),
-    "@echo off\r\nbun umanschat.cjs\r\n",
+    join(outDir, "minerva.bat"),
+    "@echo off\r\nbun minerva.cjs\r\n",
   );
-  console.log("[pack] umanschat.bat created (requires Bun on PATH).");
+  console.log("[pack] minerva.bat created (requires Bun on PATH).");
 }
 
 console.log(`[pack] Done. Distribution at: ${outDir}`);
-console.log("[pack] Double-click umanschat.exe to start UmansChat.");
+console.log("[pack] Double-click minerva.exe to start MinervaAIWorkspace.");

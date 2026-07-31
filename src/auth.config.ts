@@ -24,7 +24,8 @@ export const authConfig = {
       if (isLoginPage && auth) {
         const origin = resolvePublicOrigin(
           request.headers,
-          process.env.UMANS_CONFIGURED_AUTH_URL ??
+          process.env.MINERVA_CONFIGURED_AUTH_URL ??
+            process.env.UMANS_CONFIGURED_AUTH_URL ??
             process.env.AUTH_URL ??
             "http://localhost:3001",
         );
@@ -43,7 +44,8 @@ export const authConfig = {
       // origin so it follows the incoming host (public or local).
       const origin = resolvePublicOrigin(
         request.headers,
-        process.env.UMANS_CONFIGURED_AUTH_URL ??
+        process.env.MINERVA_CONFIGURED_AUTH_URL ??
+          process.env.UMANS_CONFIGURED_AUTH_URL ??
           process.env.AUTH_URL ??
           "http://localhost:3001",
       );

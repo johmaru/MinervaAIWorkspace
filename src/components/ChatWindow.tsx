@@ -13,7 +13,8 @@ import { PROVIDER_LABEL } from "@/lib/connections/provider-map";
 import { MotionButton, Accordion } from "@/components/ui/motion";
 import { AnimatePresence, motion } from "motion/react";
 
-const SEND_MODE_STORAGE_KEY = "umanschat-send-mode";
+const SEND_MODE_STORAGE_KEY = "minerva-send-mode";
+const LEGACY_SEND_MODE_STORAGE_KEY = "umanschat-send-mode";
 type SendMode = "enter" | "ctrl-enter";
 
 
@@ -51,9 +52,12 @@ export const ChatWindow = memo(function ChatWindow({
   // Restore send mode from localStorage after mount (hydration-safe, same pattern as I18nProvider)
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(SEND_MODE_STORAGE_KEY);
+      const stored =
+        localStorage.getItem(SEND_MODE_STORAGE_KEY) ??
+        localStorage.getItem(LEGACY_SEND_MODE_STORAGE_KEY);
       if (stored === "enter" || stored === "ctrl-enter") {
         setSendMode(stored);
+        localStorage.setItem(SEND_MODE_STORAGE_KEY, stored);
       }
     } catch { /* localStorage unavailable */ }
   }, []);
@@ -572,7 +576,7 @@ function EmptyState() {
   const { t } = useI18n();
   return (
     <div className="mt-24 flex flex-col items-center gap-3 text-center text-muted-foreground" role="status">
-      <p className="text-lg font-semibold tracking-tight text-foreground">UmansChat</p>
+      <p className="text-lg font-semibold tracking-tight text-foreground">MinervaAIWorkspace</p>
       <p className="text-sm">{t("chat.emptyThread")}</p>
     </div>
   );
@@ -582,7 +586,7 @@ function NoThreadState() {
   const { t } = useI18n();
   return (
     <div className="mt-24 flex flex-col items-center gap-3 text-center text-muted-foreground" role="status">
-      <p className="text-lg font-semibold tracking-tight text-foreground">UmansChat</p>
+      <p className="text-lg font-semibold tracking-tight text-foreground">MinervaAIWorkspace</p>
       <p className="text-sm">{t("chat.emptyNoThread")}</p>
     </div>
   );

@@ -39,7 +39,7 @@ describe("t() — translation retrieval", () => {
 });
 
 describe("getRequestLocale() — cookie detection", () => {
-  it("detects en from cookie umanschat-locale=en", () => {
+  it("detects en from cookie minerva-locale=en", () => {
     const req = new Request("http://localhost/api/test", {
       headers: { cookie: `${LOCALE_COOKIE_NAME}=en` },
     });
@@ -51,7 +51,7 @@ describe("getRequestLocale() — cookie detection", () => {
     expect(getRequestLocale(req)).toBe(DEFAULT_LOCALE);
   });
 
-  it("falls back to DEFAULT_LOCALE for invalid value umanschat-locale=fr", () => {
+  it("falls back to DEFAULT_LOCALE for invalid value minerva-locale=fr", () => {
     const req = new Request("http://localhost/api/test", {
       headers: { cookie: `${LOCALE_COOKIE_NAME}=fr` },
     });
@@ -63,6 +63,13 @@ describe("getRequestLocale() — cookie detection", () => {
       headers: { cookie: `theme=dark; ${LOCALE_COOKIE_NAME}=en; foo=bar` },
     });
     expect(getRequestLocale(req)).toBe("en");
+  });
+
+  it("falls back to legacy umanschat-locale cookie when new cookie absent", () => {
+    const req = new Request("http://localhost/api/test", {
+      headers: { cookie: "umanschat-locale=ja" },
+    });
+    expect(getRequestLocale(req)).toBe("ja");
   });
 });
 

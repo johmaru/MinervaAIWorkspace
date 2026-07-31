@@ -1,16 +1,16 @@
 ---
-name: umanschat-debug
+name: minerva-debug
 description: >
-  Debugging techniques and troubleshooting guide specific to the UmansChat project.
+  Debugging techniques and troubleshooting guide specific to the MinervaAIWorkspace project.
   Includes known pitfalls and solutions for SSE streaming, Docker builds,
   transformers.js, SQLite (better-sqlite3), and Next.js 16. Refer to this when making code
-  changes or debugging UmansChat.
+  changes or debugging MinervaAIWorkspace.
 origin: session-debug-log
 ---
 
-# Skill: UmansChat Debug Guide
+# Skill: MinervaAIWorkspace Debug Guide
 
-Bugs actually encountered during UmansChat development and their solutions. Reduces diagnosis time on recurrence.
+Bugs actually encountered during MinervaAIWorkspace development and their solutions. Reduces diagnosis time on recurrence.
 
 ## Architecture Overview
 
@@ -23,10 +23,10 @@ Next.js 16 (App Router, Turbopack) + Bun
 ├── src/db/              # Drizzle ORM + better-sqlite3 (SQLite)
 └── Docker               | Bun → Next.js build → runner stage
 ```
-> **DB Migration Notice (2026-07):** UmansChat migrated from PostgreSQL + pgvector
+> **DB Migration Notice (2026-07):** MinervaAIWorkspace migrated from PostgreSQL + pgvector
 > to SQLite (better-sqlite3). The `docker compose exec db psql` commands in
 > sections 8–10 are from the old PostgreSQL era. Use `sqlite3` instead:
-> `sqlite3 data/umanschat.db "SELECT id, title, model FROM threads;"`
+> `sqlite3 data/minerva.db "SELECT id, title, model FROM threads;"`
 > Section 10 (pgvector cosine distance) no longer applies — embeddings are stored
 > as JSON text and queried via application-level cosine similarity.
 
@@ -101,7 +101,7 @@ explicitly states "Gzip and Brotli compression can buffer chunks internally befo
 model: body.model ?? defaultModel(),
 ```
 
-**Verify**: `docker compose exec db psql -U umans -d umanschat -c "SELECT model FROM threads;"`
+**Verify**: `docker compose exec db psql -U umans -d MinervaAIWorkspace -c "SELECT model FROM threads;"`
 
 ---
 
@@ -192,15 +192,15 @@ finally verify without the patch using `waitForResponse` and `response.text()`.
 
 ```bash
 # Check messages and reasoning
-docker compose exec -T db psql -U umans -d umanschat -c \
+docker compose exec -T db psql -U umans -d MinervaAIWorkspace -c \
   "SELECT id, role, LEFT(content, 40), LEFT(reasoning, 40), length(reasoning) FROM messages ORDER BY created_at DESC LIMIT 10;"
 
 # Check embeddings
-docker compose exec -T db psql -U umans -d umanschat -c \
+docker compose exec -T db psql -U umans -d MinervaAIWorkspace -c \
   "SELECT COUNT(*) FROM embeddings;"
 
 # Check thread models
-docker compose exec -T db psql -U umans -d umanschat -c \
+docker compose exec -T db psql -U umans -d MinervaAIWorkspace -c \
   "SELECT id, title, model, current_leaf_id FROM threads;"
 ```
 
@@ -231,7 +231,7 @@ for await (const chunk of completion) {
 
 ### 10. [LEGACY — PostgreSQL era] pgvector cosine distance query
 
-> **Stale:** UmansChat now uses SQLite + better-sqlite3. Embeddings are stored as
+> **Stale:** MinervaAIWorkspace now uses SQLite + better-sqlite3. Embeddings are stored as
 > JSON text, not pgvector. Cosine similarity is computed at the application level.
 > This section is kept for historical reference only.
 
@@ -305,7 +305,7 @@ saving to complete.
 1. Include `VITEST_WORKER_ID` in `DATABASE_URL` to create a unique DB file per worker.
 2. Set `DATABASE_URL` at the top of the file (before static import hoisting).
 3. Load `@/db` and `migrate` via dynamic `await import()` (to avoid hoisting).
-4. Use a `globalThis.__umanschatTestDbReady` guard to prevent re-migration within the same worker.
+4. Use a `globalThis.__MinervaAIWorkspaceTestDbReady` guard to prevent re-migration within the same worker.
 5. Create the shared test user (`test-user-id`) after migration (for FK constraints).
 
 ```ts
@@ -315,18 +315,18 @@ import { join, resolve } from "node:path";
 
 if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("/app/data/")) {
   const workerId = process.env.VITEST_WORKER_ID ?? "0";
-  process.env.DATABASE_URL = join(tmpdir(), `umanschat-test-${process.pid}-${workerId}.db`);
+  process.env.DATABASE_URL = join(tmpdir(), `MinervaAIWorkspace-test-${process.pid}-${workerId}.db`);
   try { unlinkSync(process.env.DATABASE_URL); } catch { /* first run */ }
 }
 // ... load .env ...
-const globalForTestSetup = globalThis as unknown as { __umanschatTestDbReady?: boolean };
-if (!globalForTestSetup.__umanschatTestDbReady) {
+const globalForTestSetup = globalThis as unknown as { __MinervaAIWorkspaceTestDbReady?: boolean };
+if (!globalForTestSetup.__MinervaAIWorkspaceTestDbReady) {
   const { db } = await import("@/db");
   const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
   migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
   const { users } = await import("@/db/schema");
   await db.insert(users).values({ id: "test-user-id", nickname: "tester", email: "t@example.com" }).onConflictDoNothing();
-  globalForTestSetup.__umanschatTestDbReady = true;
+  globalForTestSetup.__MinervaAIWorkspaceTestDbReady = true;
 }
 ```
 
@@ -378,7 +378,7 @@ vi.mock("@/lib/i18n/types", async (importOriginal) => {
 
 **Note**:
 - `vi.mock` is hoisted, so it is evaluated before component imports.
-- Also add `localStorage.setItem("umanschat-locale", "ja")` in `beforeEach` (for useEffect restore consistency).
+- Also add `localStorage.setItem("MinervaAIWorkspace-locale", "ja")` in `beforeEach` (for useEffect restore consistency).
 - Hook tests (`.ts` files) need an `I18nProvider` wrapper. Since JSX is unavailable, use `createElement`:
 ```ts
 import { createElement, type ReactNode } from "react";
@@ -417,7 +417,7 @@ await waitFor(() => {
 
 **Fix**: Add a locale cookie to the test's Request helper:
 ```ts
-headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
+headers: { "Content-Type": "application/json", cookie: "MinervaAIWorkspace-locale=ja" },
 ```
 
 ---
@@ -577,7 +577,7 @@ headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
 
 ### 30. Do not ship personal domain tools in public core
 
-**Rule**: UmansChat is public. Agent tools and `src/lib` product APIs must stay **schema-agnostic** (JSONL fields, workspace files, sandbox). Do not add STREAM_TOOLS or core libs that encode one user's game/data format (e.g. Character/Message/HomeTalk one-shot builders). Domain transforms live in the user's workspace (scripts + JSONL) or optional external plugins — not in the shared app.
+**Rule**: MinervaAIWorkspace is public. Agent tools and `src/lib` product APIs must stay **schema-agnostic** (JSONL fields, workspace files, sandbox). Do not add STREAM_TOOLS or core libs that encode one user's game/data format (e.g. Character/Message/HomeTalk one-shot builders). Domain transforms live in the user's workspace (scripts + JSONL) or optional external plugins — not in the shared app.
 
 ---
 
@@ -646,7 +646,7 @@ Logs: `hook-force-final-answer`, `hook-auto-user-report`.
 ## Environment Variables
 
 ```
-DATABASE_URL=umanschat.db
+DATABASE_URL=minerva.db
 LLM_API_KEY=sk-...
 LLM_MODEL=umans-glm-5.2
 ```

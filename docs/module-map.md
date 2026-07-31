@@ -121,7 +121,7 @@ Build and packaging scripts.
 
 ### `launcher/`
 
-Standalone exe launcher (`umanschat-launcher.cjs`).
+Standalone exe launcher (`minerva-launcher.cjs`).
 
 ---
 
@@ -144,7 +144,7 @@ The single most complex file in the project. Handles:
 - **Docs:** [Chat & Streaming](./chat-streaming.md)
 - **Critical pitfall:** `generateMemories` must run via `after()` in the POST handler
   body, NOT inside the `ReadableStream` `start()` callback. See `AGENTS.md` and
-  `skill://umanschat-debug` for the full explanation.
+  `skill://minerva-debug` for the full explanation.
 - **Testing:** Mock the LLM. Test branching logic, mode switching, and SSE event
   ordering. Do NOT test with a real LLM unless using the `itReal()` pattern.
 

@@ -1,6 +1,6 @@
-# UmansChat Documentation
+# MinervaAIWorkspace Documentation
 
-Contributor documentation for UmansChat — a self-hosted, open-source AI workspace
+Contributor documentation for MinervaAIWorkspace — a self-hosted, open-source AI workspace
 built with Next.js 16 + React 19 + SQLite.
 
 ## Getting Started

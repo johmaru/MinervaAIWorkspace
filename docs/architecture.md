@@ -1,6 +1,6 @@
 # Architecture Overview
 
-High-level system architecture for UmansChat — a self-hosted, open-source AI workspace
+High-level system architecture for MinervaAIWorkspace — a self-hosted, open-source AI workspace
 built with Next.js 16 + React 19 + SQLite.
 
 ## Relevant source files
@@ -22,13 +22,13 @@ built with Next.js 16 + React 19 + SQLite.
 
 ## System Overview
 
-UmansChat is a single-process Next.js application that runs as a standalone server
+MinervaAIWorkspace is a single-process Next.js application that runs as a standalone server
 (`output: "standalone"`). It bundles the chat UI, the REST/Server-Sent-Events API,
 the SQLite database driver, and the LLM orchestration logic into one Node/Bun process.
 
 The core premise: **one process, one database file, one OpenAI-compatible LLM endpoint.**
 The app talks to an external LLM provider via the OpenAI SDK, reads/writes a local
-SQLite file (`data/umanschat.db`) through `better-sqlite3`, and optionally delegates
+SQLite file (`data/minerva.db`) through `better-sqlite3`, and optionally delegates
 web scraping, meta-search, and embedding to companion Docker services.
 
 Three optional companion services extend the app at runtime:
@@ -60,7 +60,7 @@ pipeline (`transformers.js`) and disables web scraping.
 
 ## Service Topology
 
-When deployed via Docker Compose, UmansChat runs as a set of cooperating services:
+When deployed via Docker Compose, MinervaAIWorkspace runs as a set of cooperating services:
 
 ```mermaid
 flowchart LR
@@ -161,7 +161,7 @@ see [Tool Calling](./tool-calling.md).
 
 ## Data Flow
 
-UmansChat's data model centers on five first-class entities, linked by foreign keys and
+MinervaAIWorkspace's data model centers on five first-class entities, linked by foreign keys and
 scattered across SQLite tables. The diagram below shows how a single conversation turn
 touches each of them:
 
@@ -316,9 +316,9 @@ as `*.test.ts` / `*.test.tsx` next to their source files.
 
 ### 1. SQLite over PostgreSQL
 
-UmansChat uses SQLite via `better-sqlite3` rather than PostgreSQL.
+MinervaAIWorkspace uses SQLite via `better-sqlite3` rather than PostgreSQL.
 
-- **Rationale**: UmansChat targets self-hosting on a single machine (Docker or standalone exe).
+- **Rationale**: MinervaAIWorkspace targets self-hosting on a single machine (Docker or standalone exe).
   SQLite eliminates a separate database process, simplifies deployment to a single binary +
   one `.db` file, and makes backups trivial (copy the file).
 - **Trade-off**: no concurrent multi-writer scaling. This is acceptable — the workload is

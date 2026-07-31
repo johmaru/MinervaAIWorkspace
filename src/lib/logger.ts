@@ -5,8 +5,8 @@
  *   - Four levels: debug, info, warn, error (numeric 10/20/30/40)
  *   - Config read at call time from process.env (no stale-config trap)
  *   - Console output always (stdout for info/debug, stderr for warn/error)
- *   - Optional file output to data/logs/umanschat.log (append mode, lazy stream)
- *   - Size-based rotation (one backup: umanschat.log.1)
+ *   - Optional file output to data/logs/minerva.log (append mode, lazy stream)
+ *   - Size-based rotation (one backup: minerva.log.1)
  *   - Structured single-line format: [ISO] [LEVEL] [category] message {key=val}
  *
  * Env vars (all optional, read at call time):
@@ -58,6 +58,8 @@ function getAppDataDir(): string {
   // Test override: allows tests to redirect file output to a temp dir
   if (testLogDir) return testLogDir;
   const isCompiled =
+    process.execPath.endsWith("minerva.exe") ||
+    process.execPath.endsWith("minerva") ||
     process.execPath.endsWith("umanschat.exe") ||
     process.execPath.endsWith("umanschat");
   const appRoot = isCompiled ? dirname(process.execPath) : process.cwd();
@@ -66,7 +68,7 @@ function getAppDataDir(): string {
 
 /** Resolves the full path to the log file. */
 export function getLogFilePath(): string {
-  return join(getAppDataDir(), "logs", "umanschat.log");
+  return join(getAppDataDir(), "logs", "minerva.log");
 }
 
 // ── Config (read at call time — no stale-config trap) ──────────────────
@@ -81,7 +83,7 @@ function isFileEnabled(): boolean {
   // Tests run with NODE_ENV="test" but some test files (e.g. contextCompaction.test.ts,
   // db/index.test.ts) don't call _setLogDirForTest or set LOG_FILE_ENABLED=false.
   // Without this gate, their logger.error/warn calls contaminate the production log file
-  // (data/logs/umanschat.log), producing false-positive corruption/compaction errors
+  // (data/logs/minerva.log), producing false-positive corruption/compaction errors
   // that confuse AI self-analysis tools reading the log file later.
   if (process.env.NODE_ENV === "test" && process.env.LOG_FILE_ENABLED !== "true") return false;
   const env = process.env.LOG_FILE_ENABLED;

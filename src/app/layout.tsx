@@ -28,7 +28,7 @@ export const viewport: Viewport = {
   ],
 };
 export const metadata: Metadata = {
-  title: "UmansChat",
+  title: "MinervaAIWorkspace",
   description: "ChatGPT-style chat window for UmansAI / OpenAI-compatible LLMs",
 };
 

@@ -1,4 +1,4 @@
-Testing guide for contributors — framework, configuration, conventions, and patterns for writing tests in UmansChat.
+Testing guide for contributors — framework, configuration, conventions, and patterns for writing tests in MinervaAIWorkspace.
 
 ## Relevant source files
 
@@ -142,7 +142,7 @@ jsdom does not implement `HTMLElement.prototype.scrollTo`. Auto-scroll-follow lo
 ```ts
 if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("/app/data/")) {
   const workerId = process.env.VITEST_WORKER_ID ?? "0";
-  process.env.DATABASE_URL = join(tmpdir(), `umanschat-test-${process.pid}-${workerId}.db`);
+  process.env.DATABASE_URL = join(tmpdir(), `minerva-test-${process.pid}-${workerId}.db`);
   try { unlinkSync(process.env.DATABASE_URL); } catch { /* does not exist on first run */ }
 }
 ```
@@ -180,28 +180,28 @@ When running tests from the host, Docker-internal service names (`embedder:`, `s
 ### 6. DB migration + test user
 
 ```ts
-const globalForTestSetup = globalThis as unknown as { __umanschatTestDbReady?: boolean };
-if (!globalForTestSetup.__umanschatTestDbReady) {
+const globalForTestSetup = globalThis as unknown as { __MinervaAIWorkspaceTestDbReady?: boolean };
+if (!globalForTestSetup.__MinervaAIWorkspaceTestDbReady) {
   const { db } = await import("@/db");
   const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
   migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
 
   const { users } = await import("@/db/schema");
   await db.insert(users).values({ id: "test-user-id", nickname: "tester", email: "t@example.com" }).onConflictDoNothing();
-  globalForTestSetup.__umanschatTestDbReady = true;
+  globalForTestSetup.__MinervaAIWorkspaceTestDbReady = true;
 }
 ```
 
 - Static imports are hoisted, so `@/db` would be evaluated **before** `DATABASE_URL` is set. A **dynamic import** loads it after configuration.
 - `db` is cached on `globalThis`, so all test files in a worker share the same migrated DB.
-- Migration and test-user creation run **once per process** (the `__umanschatTestDbReady` guard).
+- Migration and test-user creation run **once per process** (the `__MinervaAIWorkspaceTestDbReady` guard).
 - The test user `test-user-id` is pre-created to satisfy FK constraints for tests that mock auth guards. It is **shared across all tests** and never deleted (the temp DB is disposable).
 
 ---
 
 ## Mocking Conventions
 
-UmansChat uses **inline Vitest primitives** — there is **no central mocks directory**. All mocking is declared at the top of the test file that needs it.
+MinervaAIWorkspace uses **inline Vitest primitives** — there is **no central mocks directory**. All mocking is declared at the top of the test file that needs it.
 
 ### Available primitives
 

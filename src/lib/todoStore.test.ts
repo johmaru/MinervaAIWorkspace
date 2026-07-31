@@ -31,14 +31,14 @@ let otherUserId: string;
 beforeAll(async () => {
   const [u1] = await db.insert(users).values({
     nickname: "todoStore-test-user1",
-    email: "todostore-test@umanschat.test",
+    email: "todostore-test@minerva.test",
   }).returning();
   testUserId = u1.id;
   createdUserIds.push(u1.id);
 
   const [u2] = await db.insert(users).values({
     nickname: "todoStore-test-user2",
-    email: "todostore-test-other@umanschat.test",
+    email: "todostore-test-other@minerva.test",
   }).returning();
   otherUserId = u2.id;
   createdUserIds.push(u2.id);

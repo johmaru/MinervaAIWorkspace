@@ -1,4 +1,4 @@
-# UmansChat
+# MinervaAIWorkspace
 
 A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT-like conversations with branching threads, semantic memory, web knowledge ingestion, MCP tools, external connections, multi-model workflows, reusable skills, isolated code execution, and tone personalization.
 
@@ -6,7 +6,7 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 
 ## Project Status
 
-**UmansChat is pre-release software.** Breaking changes may occur between versions — database schemas, configuration variables, and APIs can change without notice. Back up your `data/` directory and `.env` before updating.
+**MinervaAIWorkspace is pre-release software.** Breaking changes may occur between versions — database schemas, configuration variables, and APIs can change without notice. Back up your `data/` directory and `.env` before updating.
 
 **Docker is the recommended deployment method.** Docker Compose orchestrates all services (app, embedder, scraper, SearXNG, Tor) and updates are straightforward with `docker compose pull && docker compose up -d`. A standalone Windows exe is also available for no-Docker deployments.
 
@@ -69,11 +69,11 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 - **Chat export** — optional Markdown export per turn (`CHAT_EXPORT_PATH` / Docker `CHAT_EXPORT_HOST_PATH`)
 - **Embedding model switching** — local ONNX (transformers.js) or HTTP Python embedder
 - **Tor proxy** for anonymous scraping
-- **Exe rebuild / auto-update data preservation** — `.env` and `data/` under `%USERPROFILE%\.umans_chat_unofficial\`
+- **Exe rebuild / auto-update data preservation** — `.env` and `data/` under `%USERPROFILE%\.minerva_ai_workspace\`
 
 ## Architecture
 
-UmansChat is a Next.js 16 + React 19 app backed by SQLite (better-sqlite3) — file-based, no separate DB server. Docker Compose runs the app with optional services:
+MinervaAIWorkspace is a Next.js 16 + React 19 app backed by SQLite (better-sqlite3) — file-based, no separate DB server. Docker Compose runs the app with optional services:
 
 ```mermaid
 flowchart LR
@@ -153,13 +153,13 @@ No Docker/Node/Bun on the target machine. Build machine needs Windows + [Bun](ht
 ```bash
 bun install
 cp .env.example .env   # set LLM_API_KEY; bunx auth secret
-bun run pack:exe       # → dist/UmansChat/
-# Double-click umanschat.exe  (or: node dist/UmansChat/umanschat.cjs)
+bun run pack:exe       # → dist/Minerva/
+# Double-click minerva.exe  (or: node dist/Minerva/minerva.cjs)
 ```
 
-> **In-place rebuild:** re-running `pack:exe` into an existing `dist/UmansChat/` preserves `.env` and `data/`.
+> **In-place rebuild:** re-running `pack:exe` into an existing `dist/Minerva/` preserves `.env` and `data/`.
 >
-> **Data location:** `%USERPROFILE%\.umans_chat_unofficial\` (not the exe folder). Upgrades auto-migrate legacy data.
+> **Data location:** `%USERPROFILE%\.minerva_ai_workspace\` (not the exe folder). Upgrades auto-migrate legacy data.
 
 On first launch the launcher creates the DB, applies migrations, listens on `:3001`, and opens the browser.
 
@@ -178,10 +178,10 @@ Settings → System → **Download and install** when a newer GitHub Release exi
 Manual only (`workflow_dispatch`). Each release publishes **both**:
 
 - **Docker (GHCR)** — `app`, `scraper`, `embedder` tagged `:<version>` and `:latest`
-  - `ghcr.io/johmaru/umanschat-unofficial-app:<version>`
-  - `ghcr.io/johmaru/umanschat-unofficial-scraper:<version>`
-  - `ghcr.io/johmaru/umanschat-unofficial-embedder:<version>`
-- **Windows exe** — `UmansChat-<version>-windows-x64.zip` on the GitHub Release
+  - `ghcr.io/johmaru/minerva-ai-workspace-app:<version>`
+  - `ghcr.io/johmaru/minerva-ai-workspace-scraper:<version>`
+  - `ghcr.io/johmaru/minerva-ai-workspace-embedder:<version>`
+- **Windows exe** — `MinervaAIWorkspace-<version>-windows-x64.zip` on the GitHub Release
 
 ```
 Actions → Release → Run workflow → version (e.g. 1.2.3)
@@ -233,12 +233,12 @@ docker compose --profile sandbox build
 docker compose up -d --build
 
 # Native / exe / bun run dev
-docker build -t umanschat-sandbox-python:v0.4 sandbox/python
+docker build -t minerva-sandbox-python:v0.4 sandbox/python
 ```
 
 In chat: ask the model to run code in the Python sandbox (e.g. `print(2+2)`). Without the image, the tool is simply not offered — no error, no half-state.
 
-Full setup notes: [`.agents/skills/umanschat-install/SKILL.md`](./.agents/skills/umanschat-install/SKILL.md).
+Full setup notes: [`.agents/skills/minerva-install/SKILL.md`](./.agents/skills/minerva-install/SKILL.md).
 
 ## Public Access via Cloudflare Tunnel (Optional)
 
@@ -334,11 +334,11 @@ The embedder supports model-aware prefixes: LFM2.5 uses `prompt_name` (`query:`/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | SQLite file path | `data/umanschat.db` |
+| `DATABASE_URL` | SQLite file path | `data/minerva.db` |
 | `HOST_OS` | OS name in prompts (`Windows`/`macOS`/`Linux`; empty = auto) | — |
 | `TZ` | Timezone for prompt date/time (empty = `Asia/Tokyo`) | — |
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` |
-| `LOG_FILE_ENABLED` | Write `data/logs/umanschat.log` (auto: exe→true, Docker→false) | auto |
+| `LOG_FILE_ENABLED` | Write `data/logs/minerva.log` (auto: exe→true, Docker→false) | auto |
 | `LOG_FILE_MAX_SIZE` | Rotation size bytes (keeps one `.log.1`) | `5242880` |
 | `CHAT_EXPORT_PATH` | Markdown export dir (empty = off) | — |
 | `CHAT_EXPORT_MODE` | `daily`: `<YYYY>/<MM>/<DD>/<title>.md` / `thread`: `<title>/<YYYY-MM-DD>[-partN].md` | `daily` |
@@ -366,7 +366,7 @@ The embedder supports model-aware prefixes: LFM2.5 uses `prompt_name` (`query:`/
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SANDBOX_ENABLED` | `auto` / `true` / `false` | `auto` |
-| `SANDBOX_IMAGE` | Local image tag (not published to GHCR in v0.4) | `umanschat-sandbox-python:v0.4` |
+| `SANDBOX_IMAGE` | Local image tag (not published to GHCR in v0.4) | `minerva-sandbox-python:v0.4` |
 | `SANDBOX_MIN_FREE_MEM_PERCENT` | Reject runs below free-memory % | `15` |
 | `SANDBOX_MAX_CONCURRENT` | Max concurrent containers | `1` |
 | `SANDBOX_DEFAULT_TIMEOUT_SEC` | Wall-clock timeout | `30` |

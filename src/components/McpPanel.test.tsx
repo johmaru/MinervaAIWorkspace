@@ -18,7 +18,7 @@ import { McpPanel } from "@/components/McpPanel";
 import { I18nProvider } from "@/components/I18nProvider";
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
   // Default: GET returns empty list.
   mockClientFetch.mockResolvedValue({
     ok: true,

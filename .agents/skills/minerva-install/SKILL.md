@@ -1,4 +1,4 @@
-# UmansChat Install Skill
+# MinervaAIWorkspace Install Skill
 
 Setup and verification guide for the sandbox (`sandbox_run`) feature (v0.4).
 
@@ -16,7 +16,7 @@ locally or in Docker Compose.
 - **Docker Desktop** (Windows / macOS) or **Docker Engine** (Linux).
   - On Windows, use the WSL2 backend.
   - Verify: `docker info` exits 0 and prints a Server Version.
-- The UmansChat app must be able to reach the `docker` CLI from its process.
+- The MinervaAIWorkspace app must be able to reach the `docker` CLI from its process.
   - Native exe / dev (`bun run dev`): the Docker Desktop daemon is reachable
     directly.
   - Docker Compose: the app container needs the host Docker socket mounted
@@ -31,7 +31,7 @@ locally or in Docker Compose.
    docker compose --profile sandbox build
    ```
 
-   This builds `umanschat-sandbox-python:v0.4` into the host's image store.
+   This builds `minerva-sandbox-python:v0.4` into the host's image store.
    The `sandbox` service is profile-gated — it builds but does not start.
 
 2. Build and start the app:
@@ -52,14 +52,14 @@ locally or in Docker Compose.
 1. Build the prebuilt sandbox image once:
 
    ```bash
-   docker build -t umanschat-sandbox-python:v0.4 sandbox/python
+   docker build -t minerva-sandbox-python:v0.4 sandbox/python
    ```
 
 2. Smoke-test both runtimes:
 
    ```bash
-   docker run --rm umanschat-sandbox-python:v0.4 python -c "print(1)"
-   docker run --rm umanschat-sandbox-python:v0.4 node -e "console.log(1)"
+   docker run --rm minerva-sandbox-python:v0.4 python -c "print(1)"
+   docker run --rm minerva-sandbox-python:v0.4 node -e "console.log(1)"
    ```
 
    Both should print `1`.
@@ -79,7 +79,7 @@ no error, no half-enabled state.
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `SANDBOX_ENABLED` | `auto` | `auto` = enable if Docker + image present; `true` = require Docker (fail tool if missing); `false` = force off |
-| `SANDBOX_IMAGE` | `umanschat-sandbox-python:v0.4` | Prebuilt image tag (must exist locally) |
+| `SANDBOX_IMAGE` | `minerva-sandbox-python:v0.4` | Prebuilt image tag (must exist locally) |
 | `SANDBOX_MIN_FREE_MEM_PERCENT` | `15` | Reject runs when free mem % below this |
 | `SANDBOX_MAX_CONCURRENT` | `1` | Max simultaneous sandbox containers per app process |
 | `SANDBOX_DEFAULT_TIMEOUT_SEC` | `30` | code_run wall-clock timeout |
@@ -93,7 +93,7 @@ returns a non-empty array, `sandbox_run` is in the tool list sent to the LLM.
 Quick checks:
 
 - `docker info` → exits 0.
-- `docker image inspect umanschat-sandbox-python:v0.4` → exits 0.
+- `docker image inspect minerva-sandbox-python:v0.4` → exits 0.
 - In a chat, the model can call `sandbox_run` with inline `code`.
 
 If the tool is missing, the most common cause is the image not being built
@@ -104,7 +104,7 @@ dev prerequisite.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `sandbox_run` tool not offered | Docker not reachable, or image not built | `docker info`; `docker compose --profile sandbox build` (Compose) or `docker build -t umanschat-sandbox-python:v0.4 sandbox/python` (native) |
+| `sandbox_run` tool not offered | Docker not reachable, or image not built | `docker info`; `docker compose --profile sandbox build` (Compose) or `docker build -t minerva-sandbox-python:v0.4 sandbox/python` (native) |
 | `image_missing` error at run time | Image tag mismatch or not built | Verify `SANDBOX_IMAGE` env matches the built tag |
 | `docker_unavailable` at run time | App-in-Compose without socket mount | Verify `/var/run/docker.sock` is mounted in `docker-compose.yml` |
 | `insufficient_host_memory` | Free mem below `SANDBOX_MIN_FREE_MEM_PERCENT` | Close other apps or lower the threshold (not recommended below 10) |

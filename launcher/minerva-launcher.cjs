@@ -1,5 +1,5 @@
 /**
- * umanschat-launcher.cjs — Launcher for the standalone distribution.
+ * minerva-launcher.cjs — Launcher for the standalone distribution.
  *
  * 1. Resolve the app root (the directory of server.js)
  * 2. Ensure the data/ directory exists
@@ -26,13 +26,13 @@ const PORT = process.env.PORT || "3001";
 // appRoot resolution: for a compiled exe, use the directory of process.execPath;
 // when running directly under node/bun, use __dirname.
 // An exe compiled with bun build --compile may have __dirname point to a temp extraction dir.
-const isCompiled = process.execPath.endsWith("umanschat.exe") ||
-                   process.execPath.endsWith("umanschat");
+const isCompiled = process.execPath.endsWith("minerva.exe") ||
+                   process.execPath.endsWith("minerva");
 const appRoot = isCompiled
   ? dirname(process.execPath)
   : __dirname;
 
-// 1. Resolve user data root (~/.umans_chat_unofficial) and migrate legacy appRoot data.
+// 1. Resolve user data root (~/.minerva_ai_workspace) and migrate legacy appRoot data.
 // The exe folder becomes purely application binaries — safe to delete/replace.
 // On first launch with legacy appRoot/.env + appRoot/data, copies them to user folder.
 const userDataRoot = resolveUserDataRoot();
@@ -85,12 +85,12 @@ function syncEnv() {
   }
 }
 
-// Resolve DATABASE_URL in .env to an absolute path (default: data/umanschat.db).
+// Resolve DATABASE_URL in .env to an absolute path (default: data/minerva.db).
 // server.js changes the CWD via process.chdir(__dirname), so a relative path
 // would open a different file than the migration target.
 // Using an absolute path relative to appRoot guarantees the same file regardless of CWD.
 function resolveDbPath() {
-  let dbUrl = `data/umanschat.db`;
+  let dbUrl = `data/minerva.db`;
   const envPath = paths.envPath;
   if (existsSync(envPath)) {
     const envRaw = readFileSync(envPath, "utf8");
@@ -163,7 +163,7 @@ function waitForServer(host, port, timeoutMs = 30000) {
 
 // ── Update application ──
 // Reads the marker file written by /api/update POST, swaps files from
-// staging into appRoot (preserving data/ and .env), replaces umanschat.exe
+// staging into appRoot (preserving data/ and .env), replaces minerva.exe
 // (rename-running → copy-new), then spawns the new exe and exits.
 async function applyUpdate() {
   const marker = JSON.parse(readFileSync(markerPath, "utf8"));
@@ -192,29 +192,29 @@ async function applyUpdate() {
   const entries = readdirSync(stagingDir);
   for (const entry of entries) {
     if (entry === "data" || entry === ".env") continue;
-    if (entry === "umanschat.exe") continue; // Handle separately
+    if (entry === "minerva.exe") continue; // Handle separately
     const src = join(stagingDir, entry);
     const dst = join(appRoot, entry);
     cpSync(src, dst, { recursive: true, force: true });
     console.log("[launcher] Updated:", entry);
   }
 
-  // 3. Replace umanschat.exe (can't overwrite running exe → rename + copy)
-  const exePath = join(appRoot, "umanschat.exe");
-  const oldExePath = join(appRoot, "umanschat.exe.old");
-  const newExePath = join(stagingDir, "umanschat.exe");
+  // 3. Replace minerva.exe (can't overwrite running exe → rename + copy)
+  const exePath = join(appRoot, "minerva.exe");
+  const oldExePath = join(appRoot, "minerva.exe.old");
+  const newExePath = join(stagingDir, "minerva.exe");
   if (existsSync(newExePath)) {
     // Rename running exe (Windows allows renaming a running exe)
     if (existsSync(oldExePath)) unlinkSync(oldExePath);
     renameSync(exePath, oldExePath);
     cpSync(newExePath, exePath);
-    console.log("[launcher] Replaced umanschat.exe");
+    console.log("[launcher] Replaced minerva.exe");
   }
 
   // 4. Delete marker file
   unlinkSync(markerPath);
 
-  // 5. Spawn new umanschat.exe (detached — survives parent exit)
+  // 5. Spawn new minerva.exe (detached — survives parent exit)
   const newProc = spawn(exePath, [], {
     detached: true,
     stdio: "ignore",
@@ -228,16 +228,16 @@ async function applyUpdate() {
 }
 
 // ── Main processing ──
-console.log("[launcher] UmansChat starting...");
+console.log("[launcher] MinervaAIWorkspace starting...");
 // Clean up old exe from a previous update (Windows can't delete a running exe,
 // so the old one is renamed to .old and deleted on next startup)
-const oldExe = join(appRoot, "umanschat.exe.old");
+const oldExe = join(appRoot, "minerva.exe.old");
 if (existsSync(oldExe)) {
   try {
     unlinkSync(oldExe);
-    console.log("[launcher] Cleaned up umanschat.exe.old");
+    console.log("[launcher] Cleaned up minerva.exe.old");
   } catch (err) {
-    console.warn("[launcher] Could not delete umanschat.exe.old:", err.message);
+    console.warn("[launcher] Could not delete minerva.exe.old:", err.message);
   }
 }
 syncEnv();
@@ -267,12 +267,12 @@ if (existsSync(envPath)) {
   }
 }
 
-// Set UMANS_USER_ROOT so the server (and its helpers getDataDir/resolveEnvPath)
+// Set MINERVA_USER_ROOT so the server (and its helpers getDataDir/resolveEnvPath)
 // locate .env, data/, cloudflared, and update staging in the user folder.
-process.env.UMANS_USER_ROOT = userDataRoot;
+process.env.MINERVA_USER_ROOT = userDataRoot;
 
 // 5. Start the standalone server.
-// The compiled umanschat.exe runs the launcher via Bun, but the app uses
+// The compiled minerva.exe runs the launcher via Bun, but the app uses
 // better-sqlite3 which Bun does not support. Docker runs `node server.js`,
 // so the exe distribution does the same: spawn the bundled node.exe.
 const nodeExe = join(appRoot, "node.exe");
@@ -290,7 +290,7 @@ let child = null;
 function startServer() {
   child = spawn(nodeExe, [serverPath], {
     cwd: appRoot,
-    env: { ...process.env, PORT, DATABASE_URL: dbPath, UMANS_USER_ROOT: userDataRoot },
+    env: { ...process.env, PORT, DATABASE_URL: dbPath, MINERVA_USER_ROOT: userDataRoot },
     stdio: "inherit",
   });
   child.on("error", (err) => {

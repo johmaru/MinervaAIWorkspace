@@ -14,7 +14,7 @@
  *
  * Scopes: `read:user repo`
  * Headers: Authorization: Bearer, Accept: application/vnd.github+json,
- *          X-GitHub-Api-Version: 2022-11-28, User-Agent: UmansChat
+ *          X-GitHub-Api-Version: 2022-11-28, User-Agent: MinervaAIWorkspace
  */
 
 import type { ConnectionRow, DispatchResult } from "./types";
@@ -120,7 +120,7 @@ function githubHeaders(accessToken: string): Record<string, string> {
     Authorization: `Bearer ${accessToken}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": API_VERSION,
-    "User-Agent": "UmansChat",
+    "User-Agent": "MinervaAIWorkspace",
   };
 }
 

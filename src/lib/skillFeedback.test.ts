@@ -17,7 +17,7 @@ let threadId: string;
 beforeAll(async () => {
   const [user] = await db
     .insert(users)
-    .values({ nickname: "skillFeedback-test", email: "skillfb-test@umanschat.test" })
+    .values({ nickname: "skillFeedback-test", email: "skillfb-test@minerva.test" })
     .returning();
   userId = user.id;
   createdUserIds.push(user.id);
@@ -173,7 +173,7 @@ describe("applySkillFeedback", () => {
   it("returns null for another user's event (userId isolation)", async () => {
     const [otherUser] = await db
       .insert(users)
-      .values({ nickname: "other-user", email: "other-skillfb@umanschat.test" })
+      .values({ nickname: "other-user", email: "other-skillfb@minerva.test" })
       .returning();
     createdUserIds.push(otherUser.id);
 

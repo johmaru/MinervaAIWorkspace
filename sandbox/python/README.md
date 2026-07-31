@@ -5,7 +5,7 @@
 > presets (file inspection, malware analysis) are not yet implemented.
 > See `docs/superpowers/specs/2026-07-15-sandbox-architecture-design.md`.
 
-Prebuilt Docker image for UmansChat's Tier 1 `code_run` sandbox. Ships Python
+Prebuilt Docker image for MinervaAIWorkspace's Tier 1 `code_run` sandbox. Ships Python
 3.12 and Node.js so the `sandbox_run` tool can execute inline `python` or
 `javascript` code in an isolated, network-less, read-only container.
 
@@ -25,7 +25,7 @@ socket mounted, so it can spawn sandbox siblings from this image.
 ### Native / dev (`bun run dev`)
 
 ```bash
-docker build -t umanschat-sandbox-python:v0.4 sandbox/python
+docker build -t minerva-sandbox-python:v0.4 sandbox/python
 ```
 
 You only need to build this once per host. The image is **not** published to
@@ -34,8 +34,8 @@ GHCR in v0.4 — it is a local dev prerequisite when the sandbox feature is on.
 ## Smoke test
 
 ```bash
-docker run --rm umanschat-sandbox-python:v0.4 python -c "print(1)"
-docker run --rm umanschat-sandbox-python:v0.4 node -e "console.log(1)"
+docker run --rm minerva-sandbox-python:v0.4 python -c "print(1)"
+docker run --rm minerva-sandbox-python:v0.4 node -e "console.log(1)"
 ```
 
 Both should print `1`.
@@ -54,7 +54,7 @@ docker run --rm \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
   -v <stagingDir>:/work:ro \
   -w /work \
-  umanschat-sandbox-python:v0.4 \
+  minerva-sandbox-python:v0.4 \
   python main.py    # or: node main.js
 ```
 
@@ -88,7 +88,7 @@ future optional CI job (`sandbox-image`) may build and push it.
 
 ## App-in-Docker (Docker-in-Docker sibling)
 
-If the UmansChat app itself runs inside Docker Compose, it needs access to
+If the MinervaAIWorkspace app itself runs inside Docker Compose, it needs access to
 the host Docker socket to spawn sibling containers. Add to `docker-compose.yml`:
 
 ```yaml
@@ -99,7 +99,7 @@ the host Docker socket to spawn sibling containers. Add to `docker-compose.yml`:
 
 Without the socket, `shouldExposeSandboxTool()` returns `false` and the
 `sandbox_run` tool is not offered to the LLM. See
-`.agents/skills/umanschat-install/SKILL.md` for the full setup.
+`.agents/skills/minerva-install/SKILL.md` for the full setup.
 
 ## Windows path conversion
 

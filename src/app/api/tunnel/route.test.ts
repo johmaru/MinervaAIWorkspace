@@ -88,7 +88,7 @@ describe("/api/tunnel", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             token: "test-token-12345",
-            authUrl: "https://umanschat.example.com",
+            authUrl: "https://minerva.example.com",
           }),
         }),
       );
@@ -107,7 +107,7 @@ describe("/api/tunnel", () => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            authUrl: "https://umanschat.example.com",
+            authUrl: "https://minerva.example.com",
           }),
         }),
       );
@@ -222,7 +222,7 @@ describe("/api/tunnel", () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
-          headers: { "Content-Type": "application/json", cookie: "umanschat-locale=en" },
+          headers: { "Content-Type": "application/json", cookie: "minerva-locale=en" },
           body: JSON.stringify({ authUrl: "https://example.com" }),
         }),
       );
@@ -235,7 +235,7 @@ describe("/api/tunnel", () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
-          headers: { "Content-Type": "application/json", cookie: "umanschat-locale=en" },
+          headers: { "Content-Type": "application/json", cookie: "minerva-locale=en" },
           body: JSON.stringify({ token: "test-token", authUrl: "http://example.com" }),
         }),
       );
@@ -248,7 +248,7 @@ describe("/api/tunnel", () => {
       const res = await POST(
         new Request("http://localhost/api/tunnel", {
           method: "POST",
-          headers: { "Content-Type": "application/json", cookie: "umanschat-locale=ja" },
+          headers: { "Content-Type": "application/json", cookie: "minerva-locale=ja" },
           body: JSON.stringify({ authUrl: "https://example.com" }),
         }),
       );

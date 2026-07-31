@@ -1,6 +1,6 @@
 # Memory System
 
-Fact/working memory extraction, RAG retrieval, and recency scoring for UmansChat conversations.
+Fact/working memory extraction, RAG retrieval, and recency scoring for MinervaAIWorkspace conversations.
 
 ## Relevant source files
 

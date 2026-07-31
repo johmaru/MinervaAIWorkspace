@@ -103,7 +103,7 @@ export async function isSandboxImagePresent(image: string): Promise<boolean> {
 
 /** Default image tag (env-overridable). */
 export function getSandboxImage(): string {
-  return process.env.SANDBOX_IMAGE || "umanschat-sandbox-python:v0.4";
+  return process.env.SANDBOX_IMAGE || "minerva-sandbox-python:v0.4";
 }
 
 /**

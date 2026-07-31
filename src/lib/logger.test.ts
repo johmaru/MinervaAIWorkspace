@@ -34,7 +34,7 @@ let tmpDir: string;
 beforeEach(() => {
   savedEnv = { ...process.env };
   // Redirect file output to a temp dir so tests never touch real data/logs
-  tmpDir = mkdtempSync(join(tmpdir(), "umanschat-log-test-"));
+  tmpDir = mkdtempSync(join(tmpdir(), "minerva-log-test-"));
   _setLogDirForTest(tmpDir);
   // Default: disable file output for most tests
   process.env.LOG_FILE_ENABLED = "false";
@@ -195,7 +195,7 @@ describe("logger format", () => {
 // ── File Output ─────────────────────────────────────────────────────────
 
 describe("logger file output", () => {
-  it("writes to data/logs/umanschat.log when LOG_FILE_ENABLED=true", async () => {
+  it("writes to data/logs/minerva.log when LOG_FILE_ENABLED=true", async () => {
     process.env.LOG_LEVEL = "info";
     process.env.LOG_FILE_ENABLED = "true";
     const logPath = getLogFilePath();

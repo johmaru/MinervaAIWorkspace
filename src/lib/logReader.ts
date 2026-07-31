@@ -1,7 +1,7 @@
 /**
  * Process log reader.
  *
- * Reads the tail of data/logs/umanschat.log
+ * Reads the tail of data/logs/minerva.log
  * (path resolved by logger.getLogFilePath()).
  * File logging is always enabled (Docker and exe).
  */

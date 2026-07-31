@@ -5,11 +5,11 @@ services:
   # Local development (build from source):
   #   docker compose up -d --build
   app:
-    image: ${UMANSCHAT_APP_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-app:latest}
+    image: ${MINERVA_APP_IMAGE:-ghcr.io/johmaru/minerva-ai-workspace-app:latest}
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: umanschat-app
+    container_name: minerva-app
     restart: unless-stopped
     depends_on:
       embedder:
@@ -20,7 +20,7 @@ services:
     # across rebuilds (not baked into the image)
     volumes:
       - ./.env:/app/.env
-      # SQLite data persistence: keep data/umanschat.db on the host
+      # SQLite data persistence: keep data/minerva.db on the host
       - ./data:/app/data
       # Chat export: mount a host directory into the container.
       # Set CHAT_EXPORT_HOST_PATH in .env to a host path (use forward slashes on Windows: C:/Users/...).
@@ -62,7 +62,7 @@ services:
   # from it via the mounted docker.sock.
   # Run: docker compose build sandbox
   sandbox:
-    image: umanschat-sandbox-python:v0.4
+    image: minerva-sandbox-python:v0.4
     build:
       context: ./sandbox/python
       dockerfile: Dockerfile
@@ -72,12 +72,12 @@ services:
   # When TUNNEL_TOKEN is not set, this does not start; access directly via localhost:3001.
   # Tunnel creation steps:
   #   1. https://one.dash.cloudflare.com/ → Networks → Tunnels → Create a tunnel
-  #   2. Type: Cloudflared → specify a tunnel name (e.g. umanschat)
+  #   2. Type: Cloudflared → specify a tunnel name (e.g. minerva)
   #   3. Route to the app service via Public Hostname: Service=http://app:3000
   #   4. Set the issued token as TUNNEL_TOKEN in .env
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: umanschat-cloudflared
+    container_name: minerva-cloudflared
     restart: unless-stopped
     depends_on:
       - app
@@ -87,11 +87,11 @@ services:
     profiles: ["tunnel"]  # Activated with --profile tunnel. Does not start when TUNNEL_TOKEN is unset
 
   scraper:
-    image: ${UMANSCHAT_SCRAPER_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-scraper:latest}
+    image: ${MINERVA_SCRAPER_IMAGE:-ghcr.io/johmaru/minerva-ai-workspace-scraper:latest}
     build:
       context: ./scraper
       dockerfile: Dockerfile
-    container_name: umanschat-scraper
+    container_name: minerva-scraper
     restart: unless-stopped
     expose:
       - "8000"
@@ -103,11 +103,11 @@ services:
       SCRAPE_PROXY: ${SCRAPE_PROXY:-}
 
   embedder:
-    image: ${UMANSCHAT_EMBEDDER_IMAGE:-ghcr.io/johmaru/umanschat-unofficial-embedder:latest}
+    image: ${MINERVA_EMBEDDER_IMAGE:-ghcr.io/johmaru/minerva-ai-workspace-embedder:latest}
     build:
       context: ./embedder
       dockerfile: Dockerfile
-    container_name: umanschat-embedder
+    container_name: minerva-embedder
     restart: unless-stopped
     ports:
       - "8001:8001"
@@ -123,11 +123,11 @@ services:
               count: ${EMBEDDER_GPU_COUNT:-0}
               capabilities: [gpu]
     volumes:
-      - umanschat-embedder-hf:/root/.cache/huggingface
+      - minerva-embedder-hf:/root/.cache/huggingface
 
   searxng:
     image: searxng/searxng:latest
-    container_name: umanschat-searxng
+    container_name: minerva-searxng
     restart: unless-stopped
     ports:
       - "8081:8080"
@@ -136,32 +136,32 @@ services:
       - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
     environment:
       - SEARXNG_BASE_URL=http://searxng:8080
-      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-umanschat-searxng-dev-secret}
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-minerva-searxng-dev-secret}
     depends_on:
       - tor
 
   tor:
     image: dperson/torproxy:latest
-    container_name: umanschat-tor
+    container_name: minerva-tor
     restart: unless-stopped
     expose:
       - "9050"
       - "9051"
     environment:
-      - TORPASSWORD=umanschat-tor-control
+      - TORPASSWORD=minerva-tor-control
   # Qdrant vector database (optional; enables VECTOR_BACKEND=qdrant)
   # Start with: docker compose --profile qdrant up -d qdrant
   # When using Qdrant, set VECTOR_BACKEND=qdrant and QDRANT_URL=http://qdrant:6333 in .env
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: umanschat-qdrant
+    container_name: minerva-qdrant
     restart: unless-stopped
     ports:
       - "6333:6333"
     volumes:
-      - umanschat-qdrant:/qdrant/storage
+      - minerva-qdrant:/qdrant/storage
     profiles: ["qdrant"]
 
 volumes:
-  umanschat-embedder-hf:
-  umanschat-qdrant:
+  minerva-embedder-hf:
+  minerva-qdrant:

@@ -1,5 +1,10 @@
 import type { Locale } from "./types";
-import { DEFAULT_LOCALE, LOCALE_COOKIE_NAME, SUPPORTED_LOCALES } from "./types";
+import {
+  DEFAULT_LOCALE,
+  LOCALE_COOKIE_NAME,
+  LEGACY_LOCALE_COOKIE_NAME,
+  SUPPORTED_LOCALES,
+} from "./types";
 import { ja, en } from "./dictionaries";
 
 const dictionaries = { ja, en } as const;
@@ -30,10 +35,13 @@ export function t(locale: Locale, key: string, params?: Record<string, string | 
 /**
  * Detects the locale from a cookie in a Route Handler.
  * Falls back to DEFAULT_LOCALE if the cookie is missing or has an invalid value.
+ * Reads the new cookie first, then the legacy umanschat-locale cookie.
  */
 export function getRequestLocale(request: Request): Locale {
   const cookieHeader = request.headers.get("cookie") ?? "";
-  const match = cookieHeader.match(new RegExp(`${LOCALE_COOKIE_NAME}=([^;]+)`));
+  const match =
+    cookieHeader.match(new RegExp(`${LOCALE_COOKIE_NAME}=([^;]+)`)) ??
+    cookieHeader.match(new RegExp(`${LEGACY_LOCALE_COOKIE_NAME}=([^;]+)`));
   const raw = match?.[1] ?? DEFAULT_LOCALE;
   return SUPPORTED_LOCALES.includes(raw as Locale) ? (raw as Locale) : DEFAULT_LOCALE;
 }

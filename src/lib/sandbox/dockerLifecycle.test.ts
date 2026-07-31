@@ -16,7 +16,7 @@ import type { RunCommandFn } from "./dockerDetect";
 
 const baseReq: SandboxExecRequest = {
   runId: "run_abc123",
-  image: "umanschat-sandbox-python:v0.4",
+  image: "minerva-sandbox-python:v0.4",
   language: "python",
   code: "print('hello')",
   timeoutSec: 30,
@@ -120,13 +120,13 @@ describe("buildDockerRunArgv", () => {
 
   it("appends python main.py for python", () => {
     const argv = buildDockerRunArgv({ ...baseReq, language: "python" });
-    const imgIdx = argv.indexOf("umanschat-sandbox-python:v0.4");
+    const imgIdx = argv.indexOf("minerva-sandbox-python:v0.4");
     expect(argv.slice(imgIdx + 1)).toEqual(["python", "main.py"]);
   });
 
   it("appends node main.js for javascript", () => {
     const argv = buildDockerRunArgv({ ...baseReq, language: "javascript" });
-    const imgIdx = argv.indexOf("umanschat-sandbox-python:v0.4");
+    const imgIdx = argv.indexOf("minerva-sandbox-python:v0.4");
     expect(argv.slice(imgIdx + 1)).toEqual(["node", "main.js"]);
   });
 
@@ -355,7 +355,7 @@ describe("buildOutputVolumeRmArgv", () => {
 
 describe("buildOutputVolumeInitArgv", () => {
   it("chowns the output volume as root", () => {
-    const argv = buildOutputVolumeInitArgv("run_abc123", "umanschat-sandbox-python:v0.4");
+    const argv = buildOutputVolumeInitArgv("run_abc123", "minerva-sandbox-python:v0.4");
     expect(argv).toContain("run");
     expect(argv).toContain("--rm");
     const userIdx = argv.indexOf("--user");
@@ -370,7 +370,7 @@ describe("buildOutputVolumeInitArgv", () => {
 
 describe("buildOutputRecoveryArgv", () => {
   it("mounts the output volume read-only and cats the file", () => {
-    const argv = buildOutputRecoveryArgv("run_abc123", "umanschat-sandbox-python:v0.4", "/out/data.jsonl");
+    const argv = buildOutputRecoveryArgv("run_abc123", "minerva-sandbox-python:v0.4", "/out/data.jsonl");
     expect(argv).toContain("run");
     expect(argv).toContain("--rm");
     const volIdx = argv.indexOf("-v");

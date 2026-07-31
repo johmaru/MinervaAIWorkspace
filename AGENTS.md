@@ -50,11 +50,11 @@ Beyond this file, AI agents should read these for deeper context:
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-<!-- BEGIN:umanschat-debug-skill -->
-# UmansChat Debug Guide
+<!-- BEGIN:minerva-debug-skill -->
+# MinervaAIWorkspace Debug Guide
 
 Before debugging SSE streaming, Docker build, transformers.js, SQLite, or
-Next.js 16 issues in this project, read `skill://umanschat-debug`
+Next.js 16 issues in this project, read `skill://minerva-debug`
 for known pitfalls and solutions discovered during development.
 
 Key pitfall: `generateMemories` in `src/app/api/chat/route.ts` must run via
@@ -67,7 +67,7 @@ Next.js runtime. Calling `after()` inside `start()` silently fails because
 the request context (waitUntil) is already gone — the callback never runs.
 Use a Promise bridge (`streamDone`) so the `after()` callback in the POST
 body can await stream completion and read the final `assistantContent`.
-<!-- END:umanschat-debug-skill -->
+<!-- END:minerva-debug-skill -->
 
 <!-- BEGIN:frontend-quality-rules -->
 # Frontend Quality Rules
@@ -188,7 +188,7 @@ See `skill://work-completion-checklist` section 7 (Skill Creation After Implemen
 - These are separate systems with different purposes; do not mix them. The `.agents/skills/` directory is never read by the running app, and the `skills` DB table is never read by dev agents.
 
 ### Public product vs personal domain logic
-UmansChat is a **public** app. Core agent tools (`STREAM_TOOLS`) and `src/lib` product APIs must stay **schema-agnostic** (JSONL fields, workspace files, sandbox, generic KB). Do **not** add tools or libraries that encode one developer's private data format (game dumps, personal pipelines). Domain transforms belong in the user's workspace (scripts → JSONL → `kb_from_jsonl`), runtime skills, or out-of-tree plugins — not in the shared core.
+MinervaAIWorkspace is a **public** app. Core agent tools (`STREAM_TOOLS`) and `src/lib` product APIs must stay **schema-agnostic** (JSONL fields, workspace files, sandbox, generic KB). Do **not** add tools or libraries that encode one developer's private data format (game dumps, personal pipelines). Domain transforms belong in the user's workspace (scripts → JSONL → `kb_from_jsonl`), runtime skills, or out-of-tree plugins — not in the shared core.
 
 
 ## Release & Distribution
@@ -200,7 +200,7 @@ generate and publish both artifacts on release.
 Two distribution formats, both produced by GitHub Actions on every release:
 
 - **Docker images** (GHCR): `app`, `scraper`, `embedder` — 3 images, tagged `:<version>` + `:latest`.
-- **Windows standalone exe**: `UmansChat-<version>-windows-x64.zip` — attached to the GitHub Release.
+- **Windows standalone exe**: `MinervaAIWorkspace-<version>-windows-x64.zip` — attached to the GitHub Release.
 
 ### Release trigger
 
@@ -218,7 +218,7 @@ The `version` input is required. It cannot run without it (prevents accidental o
 1. `prepare` — computes a single shared `version` + `tag` (consumed by all later jobs).
    Manual dispatch → `v${inputs.version}` (version input is required).
 2. `docker` (ubuntu-latest) — builds & pushes the 3 images to GHCR.
-3. `exe` (windows-latest) — runs `bun run pack:exe` natively, zips `dist/UmansChat/`,
+3. `exe` (windows-latest) — runs `bun run pack:exe` natively, zips `dist/Minerva/`,
    uploads as a workflow artifact. **No cross-compilation** — the exe is built on
    Windows to match what end-users download.
 4. `release` (`needs: [prepare, docker, exe]`) — creates the GitHub Release and
@@ -228,15 +228,15 @@ The `version` input is required. It cannot run without it (prevents accidental o
 ### GHCR image names (all lowercase — GHCR rejects uppercase)
 
 ```
-ghcr.io/johmaru/umanschat-unofficial-app:<version>
-ghcr.io/johmaru/umanschat-unofficial-scraper:<version>
-ghcr.io/johmaru/umanschat-unofficial-embedder:<version>
+ghcr.io/johmaru/minerva-ai-workspace-app:<version>
+ghcr.io/johmaru/minerva-ai-workspace-scraper:<version>
+ghcr.io/johmaru/minerva-ai-workspace-embedder:<version>
 ```
 
 ### Local build commands
 
 ```bash
-bun run pack:exe    # build .next/standalone → assemble dist/UmansChat/ → compile umanschat.exe
+bun run pack:exe    # build .next/standalone → assemble dist/Minerva/ → compile minerva.exe
 docker compose up -d --build   # local dev: build all 3 images from source
 docker compose pull            # release: pull published GHCR images
 ```
@@ -252,7 +252,7 @@ The exe distribution must contain the same application code as the Docker image.
 Both produce the same Next.js standalone output with `DATABASE_URL=":memory:"`
 (Dockerfile uses `npx next build`; pack-exe.ts uses `bun run build`).
 Do not add exe-only or Docker-only code paths unless a fundamental platform constraint
-forces it — and if so, document it in `skill://umanschat-debug` and here.
+forces it — and if so, document it in `skill://minerva-debug` and here.
 
 ## Cloudflare Tunnel GUI
 
@@ -263,7 +263,7 @@ Token changes and AUTH_URL switching take effect immediately without restarting 
 
 - **API**: `/api/tunnel` (GET: status, POST: start, DELETE: stop)
   - Token is never returned in plaintext in GET responses (only `hasToken`)
-  - AUTH_URL is saved to .env dynamically and mirrored to UMANS_CONFIGURED_AUTH_URL; redirects follow the request Host header (dual local + Cloudflare access, no localhost trap, no restart needed)
+  - AUTH_URL is saved to .env dynamically and mirrored to MINERVA_CONFIGURED_AUTH_URL; redirects follow the request Host header (dual local + Cloudflare access, no localhost trap, no restart needed)
   - On token change, `startTunnel(token, { force: true })` stops and restarts (avoids using stale tokens)
 - **Process management**: `src/lib/tunnel.ts`
   - Docker environment: `docker compose --profile tunnel up -d --force-recreate cloudflared`

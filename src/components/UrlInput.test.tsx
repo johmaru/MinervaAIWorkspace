@@ -8,7 +8,7 @@ import { UrlInput } from "@/components/UrlInput";
 import { I18nProvider } from "@/components/I18nProvider";
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string) => {

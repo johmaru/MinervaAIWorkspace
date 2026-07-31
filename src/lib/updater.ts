@@ -30,10 +30,10 @@ export interface DownloadResult {
   version: string;
 }
 
-/** Detect exe environment: not Docker AND umanschat.exe exists in cwd */
+/** Detect exe environment: not Docker AND minerva.exe exists in cwd */
 export function isExeEnv(): boolean {
   if (isDockerEnv()) return false;
-  return existsSync(join(process.cwd(), "umanschat.exe"));
+  return existsSync(join(process.cwd(), "minerva.exe"));
 }
 
 /** Read current version from package.json in process.cwd() */
@@ -74,7 +74,7 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
   }
   const res = await fetch(
     `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
-    { headers: { "User-Agent": "UmansChat-Updater" } },
+    { headers: { "User-Agent": "MinervaAIWorkspace-Updater" } },
   );
   if (res.status === 404) throw new Error("No releases found");
   if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
@@ -102,7 +102,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
   const release = await fetchLatestRelease();
   const latestVersion = release.tag_name.replace(/^v/, "");
   const zipAsset = release.assets.find((a) =>
-    a.name.match(/UmansChat-.*-windows-x64\.zip$/),
+    a.name.match(/MinervaAIWorkspace-.*-windows-x64\.zip$/),
   );
 
   return {
@@ -141,7 +141,7 @@ export async function downloadUpdate(
 
   const dataDir = getDataDir();
   const updatesDir = join(dataDir, "updates");
-  const zipPath = join(updatesDir, `UmansChat-${version}-windows-x64.zip`);
+  const zipPath = join(updatesDir, `MinervaAIWorkspace-${version}-windows-x64.zip`);
   const stagingDir = join(updatesDir, "staging");
 
   // Download

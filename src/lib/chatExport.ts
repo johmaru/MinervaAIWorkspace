@@ -111,6 +111,8 @@ function resolveExportPath(rawPath: string): string {
   const root = getUserDataRoot();
   if (root) return join(root, rawPath);
   const isCompiled =
+    process.execPath.endsWith("minerva.exe") ||
+    process.execPath.endsWith("minerva") ||
     process.execPath.endsWith("umanschat.exe") ||
     process.execPath.endsWith("umanschat");
   const base = isCompiled ? dirname(process.execPath) : process.cwd();

@@ -44,7 +44,7 @@ vi.mock("@/components/ChatWindow", () => ({
 }));
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
 });
 
 afterEach(() => {

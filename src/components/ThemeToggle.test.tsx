@@ -19,7 +19,7 @@ const mockMatchMedia = vi.fn().mockReturnValue({
 beforeEach(() => {
   vi.stubGlobal("matchMedia", mockMatchMedia);
   localStorage.clear();
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
 });
 
 afterEach(() => {

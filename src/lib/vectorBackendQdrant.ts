@@ -18,7 +18,7 @@ interface QdrantHit {
   payload: Record<string, unknown>;
 }
 
-const COLLECTION = "umanschat_kb";
+const COLLECTION = "minerva_kb";
 
 export class QdrantBackend implements VectorBackend {
   private url: string;

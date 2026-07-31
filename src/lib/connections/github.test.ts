@@ -129,7 +129,7 @@ describe("callGithubApi", () => {
 
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     const headers = init.headers as Record<string, string>;
-    expect(headers["User-Agent"]).toBe("UmansChat");
+    expect(headers["User-Agent"]).toBe("MinervaAIWorkspace");
     expect(headers.Authorization).toBe("Bearer token");
     expect(headers.Accept).toBe("application/vnd.github+json");
   });

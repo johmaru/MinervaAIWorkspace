@@ -147,7 +147,7 @@ function chatReq(
       rapid: opts?.rapid,
       timeRange: opts?.timeRange,
     }),
-    headers: { "Content-Type": "application/json", cookie: `umanschat-locale=${opts?.locale ?? "ja"}` },
+    headers: { "Content-Type": "application/json", cookie: `minerva-locale=${opts?.locale ?? "ja"}` },
   });
 }
 

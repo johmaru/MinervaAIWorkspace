@@ -10,7 +10,8 @@ import { useThreads } from "@/hooks/useThreads";
 import { useFolders, type FolderSummary } from "@/hooks/useFolders";
 import { useI18n } from "@/components/I18nProvider";
 
-const ACTIVE_THREAD_STORAGE_KEY = "umanschat-active-thread";
+const ACTIVE_THREAD_STORAGE_KEY = "minerva-active-thread";
+const LEGACY_ACTIVE_THREAD_STORAGE_KEY = "umanschat-active-thread";
 
 /**
  * Application shell. Holds the active thread state here and
@@ -49,7 +50,8 @@ export function ChatShell() {
     if (threads.length === 0) return;
     const saved =
       typeof window !== "undefined"
-        ? window.localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY)
+        ? window.localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY) ??
+          window.localStorage.getItem(LEGACY_ACTIVE_THREAD_STORAGE_KEY)
         : null;
     if (saved && threads.some((t) => t.id === saved) && !activeThreadId) {
       setActiveThreadId(saved);
@@ -244,7 +246,7 @@ export function ChatShell() {
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
-          <span className="text-sm font-semibold tracking-tight text-foreground">UmansChat</span>
+          <span className="text-sm font-semibold tracking-tight text-foreground">MinervaAIWorkspace</span>
         </div>
         <ChatWindow
           threadId={activeThreadId}

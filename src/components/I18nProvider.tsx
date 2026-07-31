@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Locale } from "@/lib/i18n/types";
-import { DEFAULT_LOCALE, LOCALE_COOKIE_NAME, LOCALE_STORAGE_KEY, SUPPORTED_LOCALES } from "@/lib/i18n/types";
+import { DEFAULT_LOCALE, LOCALE_COOKIE_NAME, LOCALE_STORAGE_KEY, LEGACY_LOCALE_STORAGE_KEY, SUPPORTED_LOCALES } from "@/lib/i18n/types";
 import { t as tFunction } from "@/lib/i18n";
 
 type I18nContextValue = {
@@ -28,10 +28,14 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   // caused by mismatch between SSR lang="en" and client ja.
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
+      const stored =
+        localStorage.getItem(LOCALE_STORAGE_KEY) ??
+        localStorage.getItem(LEGACY_LOCALE_STORAGE_KEY);
       if (stored && SUPPORTED_LOCALES.includes(stored as Locale)) {
         setLocaleState(stored as Locale);
         document.documentElement.lang = stored;
+        // Promote legacy key to the new name
+        localStorage.setItem(LOCALE_STORAGE_KEY, stored);
       }
     } catch {
       // localStorage unavailable (e.g. private mode) — ignore

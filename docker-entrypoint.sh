@@ -17,9 +17,9 @@ node --experimental-strip-types /app/scripts/sync-env.ts || {
 # This mirrors applyExeEnvDefaults in scripts/pack-preserve.ts for the exe path.
 case "$DATABASE_URL" in
   postgres://*|postgresql://*)
-    echo "[entrypoint] Detected PostgreSQL DATABASE_URL (postgres://...). Switching to SQLite (data/umanschat.db)."
+    echo "[entrypoint] Detected PostgreSQL DATABASE_URL (postgres://...). Switching to SQLite (data/minerva.db)."
     echo "[entrypoint] Previous PG data is not migrated."
-    export DATABASE_URL="/app/data/umanschat.db"
+    export DATABASE_URL="/app/data/minerva.db"
     ;;
 esac
 case "$DATABASE_URL" in
@@ -27,18 +27,25 @@ case "$DATABASE_URL" in
   *)
     # :memory:, empty, or relative → resolve against /app
     if [ -z "$DATABASE_URL" ] || [ "$DATABASE_URL" = ":memory:" ]; then
-      export DATABASE_URL="/app/data/umanschat.db"
+      export DATABASE_URL="/app/data/minerva.db"
     else
       export DATABASE_URL="/app/$DATABASE_URL"
     fi
     ;;
 esac
 mkdir -p "$(dirname "$DATABASE_URL")"
+
+# One-shot: if minerva.db is missing but umanschat.db exists, copy it.
+DB_DIR="$(dirname "$DATABASE_URL")"
+if [ ! -f "$DATABASE_URL" ] && [ -f "$DB_DIR/umanschat.db" ]; then
+  echo "[entrypoint] Migrating umanschat.db → $(basename "$DATABASE_URL")"
+  cp "$DB_DIR/umanschat.db" "$DATABASE_URL"
+fi
+
 # Remove stale WAL/SHM sidecars from the old WAL-mode setup. With
 # journal_mode=DELETE these are unused; a leftover -shm (especially a
 # truncated 3-byte one from bind-mount mmap corruption) can confuse the
 # first open. Runs on every start; a no-op after the first restart.
-DB_DIR="$(dirname "$DATABASE_URL")"
 rm -f "$DB_DIR"/*.db-wal "$DB_DIR"/*.db-shm 2>/dev/null || true
 
 # Run database migrations (creates all tables + indexes).

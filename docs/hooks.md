@@ -1,4 +1,4 @@
-> React hooks powering chat, threads, and folders — the client-side state layer of UmansChat.
+> React hooks powering chat, threads, and folders — the client-side state layer of MinervaAIWorkspace.
 
 **Relevant source files:**
 - `src/hooks/useChat.ts` — core chat hook (single-thread, branching, SSE streaming)
@@ -10,7 +10,7 @@
 
 ## Overview
 
-UmansChat's frontend state is organized around three hooks that map cleanly to the three sidebar concerns: the active conversation (`useChat`), the thread list (`useThreads`), and the folder list (`useFolders`). All three use [`clientFetch`](#clientfetch-and-401-handling) for every network call so that expired sessions are handled uniformly.
+MinervaAIWorkspace's frontend state is organized around three hooks that map cleanly to the three sidebar concerns: the active conversation (`useChat`), the thread list (`useThreads`), and the folder list (`useFolders`). All three use [`clientFetch`](#clientfetch-and-401-handling) for every network call so that expired sessions are handled uniformly.
 
 | Hook | Purpose | Backing API |
 |------|---------|-------------|

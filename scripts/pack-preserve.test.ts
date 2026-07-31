@@ -40,7 +40,7 @@ describe("pack-preserve", () => {
     it("copies both .env and data/ when both exist", () => {
       writeFileSync(join(prevOutDir, ".env"), "REGISTRATION_LOCKED=true\n", "utf8");
       mkdirSync(join(prevOutDir, "data"), { recursive: true });
-      writeFileSync(join(prevOutDir, "data", "umanschat.db"), "db-bytes", "utf8");
+      writeFileSync(join(prevOutDir, "data", "minerva.db"), "db-bytes", "utf8");
 
       const stashed = stashInstallState(prevOutDir, stashDir);
 
@@ -48,7 +48,7 @@ describe("pack-preserve", () => {
       expect(readFileSync(join(stashDir, ".env"), "utf8")).toBe(
         "REGISTRATION_LOCKED=true\n",
       );
-      expect(existsSync(join(stashDir, "data", "umanschat.db"))).toBe(true);
+      expect(existsSync(join(stashDir, "data", "minerva.db"))).toBe(true);
     });
 
     it("copies only .env when data/ is absent", () => {
@@ -84,14 +84,14 @@ describe("pack-preserve", () => {
 
     it("recursively copies nested data/ tree", () => {
       mkdirSync(join(prevOutDir, "data", "cloudflared"), { recursive: true });
-      writeFileSync(join(prevOutDir, "data", "umanschat.db"), "db", "utf8");
+      writeFileSync(join(prevOutDir, "data", "minerva.db"), "db", "utf8");
       writeFileSync(join(prevOutDir, "data", "cloudflared", "binary"), "bin", "utf8");
 
       const stashed = stashInstallState(prevOutDir, stashDir);
 
       expect(stashed.data).toBe(true);
       expect(existsSync(join(stashDir, "data", "cloudflared", "binary"))).toBe(true);
-      expect(readFileSync(join(stashDir, "data", "umanschat.db"), "utf8")).toBe("db");
+      expect(readFileSync(join(stashDir, "data", "minerva.db"), "utf8")).toBe("db");
     });
   });
 
@@ -185,7 +185,7 @@ describe("pack-preserve", () => {
       expect(out).not.toContain("SCRAPER_URL=http://scraper:8000");
       expect(out).toContain("SEARXNG_URL=");
       expect(out).not.toContain("SEARXNG_URL=http://searxng:8080");
-      expect(out).toContain("DATABASE_URL=data/umanschat.db");
+      expect(out).toContain("DATABASE_URL=data/minerva.db");
       expect(out).not.toContain("DATABASE_URL=postgres://host/db");
     });
 
@@ -223,7 +223,7 @@ describe("pack-preserve", () => {
       expect(out).toContain("EMBEDDER_URL=");
       expect(out).toContain("SCRAPER_URL=");
       expect(out).toContain("SEARXNG_URL=");
-      expect(out).toContain("DATABASE_URL=data/umanschat.db");
+      expect(out).toContain("DATABASE_URL=data/minerva.db");
     });
 
     it("preserves REGISTRATION_LOCKED=true end-to-end (stash -> restore -> sanitize)", () => {

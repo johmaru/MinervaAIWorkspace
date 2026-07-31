@@ -96,8 +96,8 @@ vi.mock("@/components/ThreadSettings", () => ({
 }));
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
-  localStorage.setItem("umanschat-send-mode", "enter");
+  localStorage.setItem("minerva-locale", "ja");
+  localStorage.setItem("minerva-send-mode", "enter");
   mockState = {
     messages: [],
     thread: null,
@@ -416,7 +416,7 @@ describe("ChatWindow — message rendering", () => {
 
 describe("ChatWindow — ctrl-enter mode (default)", () => {
   beforeEach(() => {
-    localStorage.removeItem("umanschat-send-mode");
+    localStorage.removeItem("minerva-send-mode");
     mockState.thread = mockThread();
   });
 

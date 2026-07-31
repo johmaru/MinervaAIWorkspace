@@ -42,7 +42,7 @@ vi.mock("./dockerDetect", async (importOriginal) => {
       if (sandboxState.dockerAvailable && sandboxState.imagePresent) return true;
       return false;
     },
-    getSandboxImage: () => "umanschat-sandbox-python:v0.4",
+    getSandboxImage: () => "minerva-sandbox-python:v0.4",
     defaultRunCommand: async (argv: string[]) => {
       // Track volume create/rm for cleanup tests.
       if (argv[0] === "volume" && argv[1] === "create") {

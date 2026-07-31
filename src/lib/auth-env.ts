@@ -8,7 +8,7 @@
  * public origin. Both break dual access.
  *
  * Fix: neutralizeAuthUrlForDualAccess() copies AUTH_URL into
- * UMANS_CONFIGURED_AUTH_URL (the UI/OAuth-console base) and then deletes
+ * MINERVA_CONFIGURED_AUTH_URL (the UI/OAuth-console base) and then deletes
  * process.env.AUTH_URL so Auth.js falls through to request headers under
  * AUTH_TRUST_HOST=true. Redirects then follow the incoming host (see
  * src/lib/request-origin.ts resolvePublicOrigin).
@@ -18,13 +18,23 @@
  * (src/auth.ts).
  */
 
-export const CONFIGURED_AUTH_URL_ENV = "UMANS_CONFIGURED_AUTH_URL";
+export const CONFIGURED_AUTH_URL_ENV = "MINERVA_CONFIGURED_AUTH_URL";
+/** @deprecated One-release fallback for pre-rename installs */
+const LEGACY_CONFIGURED_AUTH_URL_ENV = "UMANS_CONFIGURED_AUTH_URL";
 
 const DEFAULT_AUTH_URL = "http://localhost:3001";
 
+function readConfiguredAuthUrlEnv(): string | undefined {
+  return (
+    process.env[CONFIGURED_AUTH_URL_ENV] ||
+    process.env[LEGACY_CONFIGURED_AUTH_URL_ENV] ||
+    undefined
+  );
+}
+
 /**
  * Call once at module load (auth.ts and proxy.ts, first import).
- * Copies AUTH_URL → UMANS_CONFIGURED_AUTH_URL when the mirror is empty,
+ * Copies AUTH_URL → MINERVA_CONFIGURED_AUTH_URL when the mirror is empty,
  * then always deletes process.env.AUTH_URL (and NEXTAUTH_URL) so Auth.js
  * uses request headers under AUTH_TRUST_HOST.
  *
@@ -35,8 +45,15 @@ export function neutralizeAuthUrlForDualAccess(): void {
   const nextAuthUrl = process.env.NEXTAUTH_URL;
 
   // Preserve the configured value in the mirror env var when empty
-  if (authUrl && !process.env[CONFIGURED_AUTH_URL_ENV]) {
+  if (authUrl && !readConfiguredAuthUrlEnv()) {
     process.env[CONFIGURED_AUTH_URL_ENV] = authUrl;
+  } else if (
+    !process.env[CONFIGURED_AUTH_URL_ENV] &&
+    process.env[LEGACY_CONFIGURED_AUTH_URL_ENV]
+  ) {
+    // Promote legacy mirror to the new name
+    process.env[CONFIGURED_AUTH_URL_ENV] =
+      process.env[LEGACY_CONFIGURED_AUTH_URL_ENV];
   }
 
   // Always clear AUTH_URL / NEXTAUTH_URL so reqWithEnvURL is a no-op and
@@ -52,7 +69,7 @@ export function neutralizeAuthUrlForDualAccess(): void {
  */
 export function getConfiguredAuthUrl(): string {
   return (
-    process.env[CONFIGURED_AUTH_URL_ENV] ??
+    readConfiguredAuthUrlEnv() ??
     process.env.AUTH_URL ??
     DEFAULT_AUTH_URL
   );
@@ -60,7 +77,7 @@ export function getConfiguredAuthUrl(): string {
 
 /**
  * Sets the configured public base URL (from Settings GUI / tunnel API).
- * Writes UMANS_CONFIGURED_AUTH_URL and deletes process.env.AUTH_URL so
+ * Writes MINERVA_CONFIGURED_AUTH_URL and deletes process.env.AUTH_URL so
  * Auth.js does not pick up a sticky origin.
  */
 export function setConfiguredAuthUrl(url: string): void {

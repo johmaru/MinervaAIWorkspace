@@ -812,7 +812,7 @@ export async function searchKnowledgeBases(
     // Wider recall for re-ranking (subject boost needs the right speaker in the pool)
     const recallLimit = Math.min(40, Math.max(limit * 5, 20));
     const hits = await getVectorBackend().search(queryVector, {
-      collection: "umanschat_kb",
+      collection: "minerva_kb",
       userId,
       kbIds,
       limit: recallLimit,

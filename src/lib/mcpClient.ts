@@ -151,7 +151,7 @@ export async function connectMcpServer(
       if (config.transport === "sse") {
         // Legacy SSE only — single path, no Streamable attempt.
         const client = new Client(
-          { name: "umanschat-mcp-client", version: "1.0.0" },
+          { name: "minerva-mcp-client", version: "1.0.0" },
           { capabilities: {} },
         );
         const transport = new SSEClientTransport(url, { requestInit });
@@ -165,7 +165,7 @@ export async function connectMcpServer(
       const httpTransport = new StreamableHTTPClientTransport(url, { requestInit });
       try {
         const client = new Client(
-          { name: "umanschat-mcp-client", version: "1.0.0" },
+          { name: "minerva-mcp-client", version: "1.0.0" },
           { capabilities: {} },
         );
         await client.connect(httpTransport);
@@ -175,7 +175,7 @@ export async function connectMcpServer(
         logger.warn("mcp", "StreamableHTTP failed, falling back to SSE", { server: config.name, hasHeaders, error: httpErr instanceof Error ? httpErr.message : String(httpErr) });
         // Fresh Client for the SSE fallback — never reuse the failed one.
         const sseClient = new Client(
-          { name: "umanschat-mcp-client", version: "1.0.0" },
+          { name: "minerva-mcp-client", version: "1.0.0" },
           { capabilities: {} },
         );
         const sseTransport = new SSEClientTransport(url, { requestInit });
@@ -202,7 +202,7 @@ export async function connectMcpServer(
         LANG: process.env.LANG ?? "en_US.UTF-8",
       };
       const client = new Client(
-        { name: "umanschat-mcp-client", version: "1.0.0" },
+        { name: "minerva-mcp-client", version: "1.0.0" },
         { capabilities: {} },
       );
       const transport = new StdioClientTransport({

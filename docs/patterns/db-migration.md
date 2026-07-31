@@ -1,6 +1,6 @@
 # Pattern: Database Migration
 
-How to add or modify database tables in UmansChat.
+How to add or modify database tables in MinervaAIWorkspace.
 
 ## Golden rules
 

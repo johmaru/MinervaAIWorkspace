@@ -6,6 +6,6 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "sqlite",
   dbCredentials: {
-    url: resolve(process.env.DATABASE_URL ?? "data/umanschat.db"),
+    url: resolve(process.env.DATABASE_URL ?? "data/minerva.db"),
   },
 });

@@ -24,7 +24,7 @@ import { randomUUID } from "node:crypto";
 
 const QDRANT_URL = (process.env.QDRANT_URL || "http://localhost:6333").replace(/\/$/, "");
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY || undefined;
-const COLLECTION = "umanschat_kb";
+const COLLECTION = "minerva_kb";
 const EMBED_DIM = Number(process.env.EMBED_DIM) || 768;
 const EMBED_MODEL = process.env.EMBED_MODEL || "cl-nagoya/ruri-v3-310m";
 const BATCH_SIZE = 100;

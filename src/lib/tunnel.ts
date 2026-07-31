@@ -89,7 +89,7 @@ export function httpsDownload(
   const { promise, resolve, reject } = Promise.withResolvers<void>();
   const file = createWriteStream(dest);
 
-  const req = request(url, { headers: { "User-Agent": "UmansChat-Updater" } }, (res) => {
+  const req = request(url, { headers: { "User-Agent": "MinervaAIWorkspace-Updater" } }, (res) => {
     // Handle 3xx redirects: GitHub Releases redirects 302 → CDN
     if (
       res.statusCode &&

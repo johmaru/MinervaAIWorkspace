@@ -17,7 +17,7 @@ import { join, resolve } from "node:path";
 // Remove any leftover file from a previous run before creating a new one.
 if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("/app/data/")) {
   const workerId = process.env.VITEST_WORKER_ID ?? "0";
-  process.env.DATABASE_URL = join(tmpdir(), `umanschat-test-${process.pid}-${workerId}.db`);
+  process.env.DATABASE_URL = join(tmpdir(), `minerva-test-${process.pid}-${workerId}.db`);
   try { unlinkSync(process.env.DATABASE_URL); } catch { /* does not exist on first run */ }
 }
 
@@ -59,8 +59,8 @@ if (process.env.SEARXNG_URL?.includes("searxng:")) {
 // Use dynamic import to load it after DATABASE_URL is configured.
 // db is cached on globalThis, so all test files share the same migrated DB.
 // Migration and test-user creation run only once per process (globalThis guard).
-const globalForTestSetup = globalThis as unknown as { __umanschatTestDbReady?: boolean };
-if (!globalForTestSetup.__umanschatTestDbReady) {
+const globalForTestSetup = globalThis as unknown as { __minervaTestDbReady?: boolean };
+if (!globalForTestSetup.__minervaTestDbReady) {
   const { db } = await import("@/db");
   const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
   migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
@@ -70,5 +70,5 @@ if (!globalForTestSetup.__umanschatTestDbReady) {
   // it is not deleted in afterAll (the temp DB is disposable).
   const { users } = await import("@/db/schema");
   await db.insert(users).values({ id: "test-user-id", nickname: "tester", email: "t@example.com" }).onConflictDoNothing();
-  globalForTestSetup.__umanschatTestDbReady = true;
+  globalForTestSetup.__minervaTestDbReady = true;
 }

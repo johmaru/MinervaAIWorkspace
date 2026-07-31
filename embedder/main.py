@@ -1,5 +1,5 @@
 """
-UmansChat embedder — FastAPI service for sentence-transformers embedding models.
+MinervaAIWorkspace embedder — FastAPI service for sentence-transformers embedding models.
 
 Supports multiple models with model-aware prefix/pooling configuration:
 - LiquidAI/LFM2.5-Embedding-350M: prompt_name="query"/"document", CLS→mean pooling fix

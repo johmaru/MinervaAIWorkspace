@@ -1,4 +1,4 @@
-Database and schema reference for the UmansChat backend — SQLite, Drizzle ORM, connection setup, full table/index reference, and migrations.
+Database and schema reference for the MinervaAIWorkspace backend — SQLite, Drizzle ORM, connection setup, full table/index reference, and migrations.
 
 ## Relevant source files
 
@@ -7,17 +7,17 @@ Database and schema reference for the UmansChat backend — SQLite, Drizzle ORM,
 - `drizzle.config.ts` — drizzle-kit configuration
 - `drizzle/*.sql` — generated migration files
 - `docker-entrypoint.sh` — migration runner for Docker
-- `launcher/umanschat-launcher.cjs` — migration runner for the standalone exe
+- `launcher/minerva-launcher.cjs` — migration runner for the standalone exe
 - `package.json` — `predev` hook (local-dev migration runner)
 - `vitest.setup.ts` — programmatic migrator used by the test suite
 
 ## Stack
 
-UmansChat uses **SQLite** via the [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) synchronous native driver, accessed through the **[Drizzle ORM](https://orm.drizzle.team/)** (`drizzle-orm/better-sqlite3`).
+MinervaAIWorkspace uses **SQLite** via the [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) synchronous native driver, accessed through the **[Drizzle ORM](https://orm.drizzle.team/)** (`drizzle-orm/better-sqlite3`).
 
 - **Driver:** `better-sqlite3` — a synchronous, native C++ binding. Calls block the Node.js event loop, which is fine for a single-user chat application.
 - **ORM:** Drizzle — lightweight, type-safe, SQL-first. The schema is defined in TypeScript (`src/db/schema.ts`) and Drizzle generates SQL migrations with `drizzle-kit`.
-- **DB file:** `data/umanschat.db` (a single file on disk; the `data/` directory is created automatically on first launch). Overridable via the `DATABASE_URL` environment variable.
+- **DB file:** `data/minerva.db` (a single file on disk; the `data/` directory is created automatically on first launch). Overridable via the `DATABASE_URL` environment variable.
 
 No external database server is required. Vector search uses sqlite-vec (v0.1.9), a loadable SQLite extension bundled with the app — embeddings are stored as Float32 BLOB and cosine distance is computed via `vec_distance_cosine()` SQL function (see [Embedding storage](#embedding-storage)).
 
@@ -31,7 +31,7 @@ No external database server is required. Vector search uses sqlite-vec (v0.1.9),
 // src/db/index.ts (simplified)
 const globalForDb = globalThis as unknown as { sqlite?: Database.Database; db?: Db };
 
-const dbPath = process.env.DATABASE_URL || join(process.cwd(), "data", "umanschat.db");
+const dbPath = process.env.DATABASE_URL || join(process.cwd(), "data", "minerva.db");
 mkdirSync(dirname(dbPath), { recursive: true }); // create data/ on first launch
 
 const sqlite = globalForDb.sqlite ?? openDatabase(dbPath);
@@ -147,7 +147,7 @@ OAuth/OIDC account links, managed by Auth.js `DrizzleAdapter`. One row per `(pro
 
 ### `sessions`
 
-Auth.js session records (database-session mode). UmansChat uses a JWT session strategy, so this table is defined for compatibility but the JWT is the source of truth at runtime.
+Auth.js session records (database-session mode). MinervaAIWorkspace uses a JWT session strategy, so this table is defined for compatibility but the JWT is the source of truth at runtime.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -440,13 +440,13 @@ Embedding vectors for `pages` body text. Same dimensionality as `memories.embedd
 
 ## Migrations
 
-UmansChat uses **[drizzle-kit](https://orm.drizzle.team/docs/migrations)** for schema migrations. The workflow is:
+MinervaAIWorkspace uses **[drizzle-kit](https://orm.drizzle.team/docs/migrations)** for schema migrations. The workflow is:
 
 1. Edit `src/db/schema.ts`.
 2. Generate a new migration: `bunx drizzle-kit generate` (creates `drizzle/NNNN_<name>.sql`).
 3. Apply migrations: `bunx drizzle-kit migrate` (reads `drizzle.config.ts`, applies pending `.sql` files in order, tracks applied state in the `__drizzle_migrations` table).
 
-`drizzle.config.ts` points at `./src/db/schema.ts` for the schema source and `./drizzle` for the migration output folder. The DB URL resolves from `DATABASE_URL` (defaulting to `data/umanschat.db`).
+`drizzle.config.ts` points at `./src/db/schema.ts` for the schema source and `./drizzle` for the migration output folder. The DB URL resolves from `DATABASE_URL` (defaulting to `data/minerva.db`).
 
 ### Migration runner per environment
 
@@ -455,7 +455,7 @@ Migrations run **before the server starts** in every deployment mode:
 | Environment | How migrations run | File |
 |-------------|--------------------|------|
 | **Docker** | `npx drizzle-kit migrate` in the container entrypoint | `docker-entrypoint.sh` |
-| **Standalone exe** | `drizzle-orm/better-sqlite3/migrator`'s `migrate()` programmatically in the launcher | `launcher/umanschat-launcher.cjs` (`runMigrations`) |
+| **Standalone exe** | `drizzle-orm/better-sqlite3/migrator`'s `migrate()` programmatically in the launcher | `launcher/minerva-launcher.cjs` (`runMigrations`) |
 | **Local dev** | `bunx drizzle-kit migrate` in the `predev` npm hook | `package.json` (`scripts.predev`) |
 | **Tests** | `drizzle-orm/better-sqlite3/migrator`'s `migrate()` programmatically in setup | `vitest.setup.ts` |
 
@@ -497,7 +497,7 @@ The SQLite file is **not** shipped with the app — it is created on first launc
 ### Local dev
 
 ```sh
-bunx drizzle-kit migrate   # creates data/umanschat.db + tables (also runs via `bun run dev` predev hook)
+bunx drizzle-kit migrate   # creates data/minerva.db + tables (also runs via `bun run dev` predev hook)
 bun run dev                 # starts Next.js, opens the DB singleton
 ```
 
@@ -505,7 +505,7 @@ bun run dev                 # starts Next.js, opens the DB singleton
 
 ### Docker
 
-1. The entrypoint resolves `DATABASE_URL` to an absolute path under `/app` (default `/app/data/umanschat.db`) so the standalone server and the migration command share the same file regardless of CWD.
+1. The entrypoint resolves `DATABASE_URL` to an absolute path under `/app` (default `/app/data/minerva.db`) so the standalone server and the migration command share the same file regardless of CWD.
 2. It creates the data directory with `mkdir -p`.
 3. It removes stale `*.db-wal` / `*.db-shm` sidecars.
 4. It runs `npx drizzle-kit migrate`, which creates the file if missing and applies all migrations.
@@ -514,16 +514,16 @@ The `data/` directory is volume-mounted so the database persists across containe
 
 ### Standalone exe
 
-`launcher/umanschat-launcher.cjs`:
+`launcher/minerva-launcher.cjs`:
 
 1. Resolves the app root and the `.env` file.
-2. `resolveDbPath()` reads `DATABASE_URL` from `.env` (defaulting to `data/umanschat.db`) and makes it absolute relative to the app root.
+2. `resolveDbPath()` reads `DATABASE_URL` from `.env` (defaulting to `data/minerva.db`) and makes it absolute relative to the app root.
 3. `runMigrations()` creates the data directory, opens a temporary `better-sqlite3` connection, and calls `drizzle-orm`'s `migrate()` programmatically with `migrationsFolder = <appRoot>/drizzle`.
 4. Closes the temporary connection; the main server process then opens the singleton and serves.
 
 ## Embedding storage
 
-UmansChat stores embedding vectors as **Float32 BLOB** via sqlite-vec:
+MinervaAIWorkspace stores embedding vectors as **Float32 BLOB** via sqlite-vec:
 
 ```ts
 // src/db/schema.ts — embeddingColumn customType

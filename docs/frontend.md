@@ -1,6 +1,6 @@
 # Frontend Components
 
-UmansChat frontend: component catalog, server/client boundaries, UI primitives, markdown rendering, and key architectural patterns. Built with Next.js 16 App Router, React 19, Tailwind CSS v4, and Motion (Framer Motion).
+MinervaAIWorkspace frontend: component catalog, server/client boundaries, UI primitives, markdown rendering, and key architectural patterns. Built with Next.js 16 App Router, React 19, Tailwind CSS v4, and Motion (Framer Motion).
 
 ## Relevant source files
 

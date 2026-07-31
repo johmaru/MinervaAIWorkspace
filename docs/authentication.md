@@ -1,4 +1,4 @@
-Authentication and user data isolation for UmansChat — Auth.js v5 setup, providers, session management, and the per-user data scoping pattern enforced across every API route.
+Authentication and user data isolation for MinervaAIWorkspace — Auth.js v5 setup, providers, session management, and the per-user data scoping pattern enforced across every API route.
 
 ## Relevant source files
 
@@ -13,7 +13,7 @@ Authentication and user data isolation for UmansChat — Auth.js v5 setup, provi
 
 ## Overview
 
-UmansChat authenticates users with **Auth.js v5** (NextAuth v5). Two providers are supported:
+MinervaAIWorkspace authenticates users with **Auth.js v5** (NextAuth v5). Two providers are supported:
 
 1. **Credentials** — email + password (always enabled).
 2. **Google OAuth** — conditionally enabled when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
@@ -428,15 +428,15 @@ All auth env vars are defined in `.env.example`. See [Settings & Environment](./
 
 `AUTH_URL` is the configured public base URL of the deployment. It serves as the canonical name for the Settings UI, tunnel status display, and OAuth-provider console redirect URI registration.
 
-**Dual-access behavior:** Auth.js no longer reads `AUTH_URL` for request-origin rewriting. At module load, `src/lib/auth-env.ts` copies `AUTH_URL` into an internal mirror (`UMANS_CONFIGURED_AUTH_URL`) and deletes `process.env.AUTH_URL` so Auth.js's `reqWithEnvURL` is a no-op. Under `AUTH_TRUST_HOST=true`, Auth.js derives the origin from the incoming request's `X-Forwarded-Host` / `Host` + `X-Forwarded-Proto` headers. This means both `http://localhost:3001` and a public `https://...` URL work simultaneously — redirects follow the access path, not a sticky env value.
+**Dual-access behavior:** Auth.js no longer reads `AUTH_URL` for request-origin rewriting. At module load, `src/lib/auth-env.ts` copies `AUTH_URL` into an internal mirror (`MINERVA_CONFIGURED_AUTH_URL`) and deletes `process.env.AUTH_URL` so Auth.js's `reqWithEnvURL` is a no-op. Under `AUTH_TRUST_HOST=true`, Auth.js derives the origin from the incoming request's `X-Forwarded-Host` / `Host` + `X-Forwarded-Proto` headers. This means both `http://localhost:3001` and a public `https://...` URL work simultaneously — redirects follow the access path, not a sticky env value.
 
-The `authorized` callback in `src/auth.config.ts` uses `resolvePublicOrigin()` (from `src/lib/request-origin.ts`) to build redirect URLs from the request headers, falling back to `UMANS_CONFIGURED_AUTH_URL` only when no host header is present.
+The `authorized` callback in `src/auth.config.ts` uses `resolvePublicOrigin()` (from `src/lib/request-origin.ts`) to build redirect URLs from the request headers, falling back to `MINERVA_CONFIGURED_AUTH_URL` only when no host header is present.
 
 OAuth redirect URIs are derived from the request origin the same way:
 1. **Google OAuth** — `{origin}/api/auth/callback/google` (origin from request headers via Auth.js).
 2. **Notion OAuth** — `{origin}/api/connections/notion/callback` (read via `resolvePublicOrigin` in the Notion routes).
 
-When using a Cloudflare Tunnel, set `AUTH_URL` to the tunnel's public HTTPS URL so the Settings UI and OAuth consoles know the public name. The tunnel API (`POST /api/tunnel`) saves `AUTH_URL` to `.env` and mirrors it to `UMANS_CONFIGURED_AUTH_URL` at runtime — no restart needed. See [Deployment](./deployment.md) for the tunnel setup.
+When using a Cloudflare Tunnel, set `AUTH_URL` to the tunnel's public HTTPS URL so the Settings UI and OAuth consoles know the public name. The tunnel API (`POST /api/tunnel`) saves `AUTH_URL` to `.env` and mirrors it to `MINERVA_CONFIGURED_AUTH_URL` at runtime — no restart needed. See [Deployment](./deployment.md) for the tunnel setup.
 
 > **Dual OAuth:** if both local and public access need Connect Notion / Google, register both redirect URIs (`http://localhost:3001/...` and `https://your-tunnel.example.com/...`) in the provider console. Page routing does not depend on OAuth registration.
 

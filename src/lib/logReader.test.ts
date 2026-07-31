@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 
 const TMP_ROOT = join(tmpdir(), "logreader-test");
 const LOG_DIR = join(TMP_ROOT, "logs");
-const LOG_FILE = join(LOG_DIR, "umanschat.log");
+const LOG_FILE = join(LOG_DIR, "minerva.log");
 
 const SAMPLE_LINES = [
   "[2025-01-01T00:00:00.000Z] [debug] [app] debug message",
@@ -91,7 +91,7 @@ describe("logReader", () => {
 
     it("skips lines without a [LEVEL] marker", async () => {
       const lines = [
-        "UmansChat v1.0.0 — startup banner",
+        "MinervaAIWorkspace v1.0.0 — startup banner",
         "[2025-01-01T00:00:00.000Z] [info] [app] started",
         "=== End of startup ===",
       ].join("\n");

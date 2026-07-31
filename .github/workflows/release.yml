@@ -2,15 +2,15 @@
 # Triggered manually via workflow_dispatch (Actions tab → Release → Run workflow).
 #
 # Produces:
-#   - ghcr.io/johmaru/umanschat-unofficial-app:<version>
-#   - ghcr.io/johmaru/umanschat-unofficial-scraper:<version>
-#   - ghcr.io/johmaru/umanschat-unofficial-embedder:<version>
-#   - UmansChat-<version>-windows-x64.zip  (attached to the GitHub Release)
+#   - ghcr.io/johmaru/minerva-ai-workspace-app:<version>
+#   - ghcr.io/johmaru/minerva-ai-workspace-scraper:<version>
+#   - ghcr.io/johmaru/minerva-ai-workspace-embedder:<version>
+#   - MinervaAIWorkspace-<version>-windows-x64.zip  (attached to the GitHub Release)
 #
 # Pipeline:
 #   prepare  → computes a single shared version/tag (consumed by all later jobs)
 #   docker   → builds & pushes the 3 images to GHCR  (needs: prepare)
-#   exe      → builds umanschat.exe natively on windows-latest  (needs: prepare)
+#   exe      → builds minerva.exe natively on windows-latest  (needs: prepare)
 #   release  → creates the GitHub Release + attaches the zip  (needs: prepare, docker, exe)
 #
 # The release job only runs after BOTH artifacts succeed, so a Docker build
@@ -33,7 +33,7 @@ permissions:
 env:
   # GHCR rejects uppercase repository components — force lowercase.
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/johmaru/umanschat-unofficial
+  IMAGE_PREFIX: ghcr.io/johmaru/minerva-ai-workspace
 
 jobs:
   # ── Compute a single shared version + tag name ────────────────────────
@@ -131,15 +131,15 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ needs.prepare.outputs.version }}"
-          $zip = "UmansChat-$version-windows-x64.zip"
-          Compress-Archive -Path dist\UmansChat\* -DestinationPath $zip
+          $zip = "MinervaAIWorkspace-$version-windows-x64.zip"
+          Compress-Archive -Path dist\Minerva\* -DestinationPath $zip
           Write-Host "Created $zip"
 
       - name: Upload zip as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: umanschat-exe-${{ needs.prepare.outputs.version }}
-          path: UmansChat-${{ needs.prepare.outputs.version }}-windows-x64.zip
+          name: minerva-exe-${{ needs.prepare.outputs.version }}
+          path: MinervaAIWorkspace-${{ needs.prepare.outputs.version }}-windows-x64.zip
           retention-days: 5
 
   # ── GitHub Release (only after both artifacts succeed) ────────────────
@@ -150,15 +150,15 @@ jobs:
       - name: Download exe zip artifact
         uses: actions/download-artifact@v4
         with:
-          name: umanschat-exe-${{ needs.prepare.outputs.version }}
+          name: minerva-exe-${{ needs.prepare.outputs.version }}
           path: release-assets
 
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          name: UmansChat ${{ needs.prepare.outputs.tag }}
-          files: release-assets/UmansChat-${{ needs.prepare.outputs.version }}-windows-x64.zip
+          name: MinervaAIWorkspace ${{ needs.prepare.outputs.tag }}
+          files: release-assets/MinervaAIWorkspace-${{ needs.prepare.outputs.version }}-windows-x64.zip
           draft: false
           prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
           generate_release_notes: true

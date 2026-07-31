@@ -9,7 +9,7 @@ import { I18nProvider } from "@/components/I18nProvider";
 import type { MessageAttachment } from "@/hooks/useChat";
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
 });
 
 afterEach(() => {

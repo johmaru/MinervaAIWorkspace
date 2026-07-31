@@ -4,7 +4,7 @@ How to add or modify an API route handler in `src/app/api/`.
 
 ## Structure
 
-Every API route in UmansChat follows the same shape:
+Every API route in MinervaAIWorkspace follows the same shape:
 
 ```typescript
 // src/app/api/<resource>/route.ts

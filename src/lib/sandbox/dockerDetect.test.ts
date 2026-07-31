@@ -48,7 +48,7 @@ describe("getSandboxImage", () => {
 
   it("returns default tag when env unset", () => {
     vi.stubEnv("SANDBOX_IMAGE", "");
-    expect(getSandboxImage()).toBe("umanschat-sandbox-python:v0.4");
+    expect(getSandboxImage()).toBe("minerva-sandbox-python:v0.4");
   });
 
   it("returns env override when set", () => {
@@ -88,7 +88,7 @@ describe("isSandboxImagePresent", () => {
 
   it("returns true when docker image inspect exits 0", async () => {
     _setRunCommand(async () => ({ exitCode: 0, stdout: "[]", stderr: "" }));
-    expect(await isSandboxImagePresent("umanschat-sandbox-python:v0.4")).toBe(true);
+    expect(await isSandboxImagePresent("minerva-sandbox-python:v0.4")).toBe(true);
   });
 
   it("returns false when image absent (exit 1)", async () => {

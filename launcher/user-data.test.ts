@@ -40,15 +40,29 @@ describe("launcher/user-data.cjs", () => {
   });
 
   describe("resolveUserDataRoot", () => {
-    it("returns USERPROFILE/.umans_chat_unofficial when USERPROFILE set", () => {
+    it("returns USERPROFILE/.minerva_ai_workspace when USERPROFILE set", () => {
       vi.stubEnv("USERPROFILE", "/test/home");
-      expect(resolveUserDataRoot()).toBe(join("/test/home", ".umans_chat_unofficial"));
+      expect(resolveUserDataRoot()).toBe(join("/test/home", ".minerva_ai_workspace"));
     });
 
     it("falls back to HOME when USERPROFILE unset", () => {
       delete process.env.USERPROFILE;
       vi.stubEnv("HOME", "/test/home2");
-      expect(resolveUserDataRoot()).toBe(join("/test/home2", ".umans_chat_unofficial"));
+      expect(resolveUserDataRoot()).toBe(join("/test/home2", ".minerva_ai_workspace"));
+    });
+
+    it("migrates ~/.umans_chat_unofficial to ~/.minerva_ai_workspace when new dir absent", () => {
+      const home = join(base, "home");
+      mkdirSync(home, { recursive: true });
+      const legacy = join(home, ".umans_chat_unofficial");
+      mkdirSync(legacy, { recursive: true });
+      writeFileSync(join(legacy, "marker"), "ok");
+      vi.stubEnv("USERPROFILE", home);
+      delete process.env.HOME;
+
+      const root = resolveUserDataRoot();
+      expect(root).toBe(join(home, ".minerva_ai_workspace"));
+      expect(existsSync(join(root, "marker"))).toBe(true);
     });
 
     it("throws when neither USERPROFILE nor HOME set", () => {
@@ -62,12 +76,21 @@ describe("launcher/user-data.cjs", () => {
     it("copies legacy .env and data/ when targets absent", () => {
       writeFileSync(join(appRoot, ".env"), "REGISTRATION_LOCKED=true\nLLM_API_KEY=secret\n");
       mkdirSync(join(appRoot, "data"), { recursive: true });
-      writeFileSync(join(appRoot, "data", "umanschat.db"), "db-bytes");
+      writeFileSync(join(appRoot, "data", "minerva.db"), "db-bytes");
 
       migrateLegacyData(appRoot, userDataRoot);
 
       expect(readFileSync(join(userDataRoot, ".env"), "utf8")).toBe("REGISTRATION_LOCKED=true\nLLM_API_KEY=secret\n");
-      expect(readFileSync(join(userDataRoot, "data", "umanschat.db"), "utf8")).toBe("db-bytes");
+      expect(readFileSync(join(userDataRoot, "data", "minerva.db"), "utf8")).toBe("db-bytes");
+    });
+
+    it("promotes umanschat.db to minerva.db when copying legacy data/", () => {
+      mkdirSync(join(appRoot, "data"), { recursive: true });
+      writeFileSync(join(appRoot, "data", "umanschat.db"), "legacy-db");
+
+      migrateLegacyData(appRoot, userDataRoot);
+
+      expect(readFileSync(join(userDataRoot, "data", "minerva.db"), "utf8")).toBe("legacy-db");
     });
 
     it("skips .env copy when target .env already exists", () => {
@@ -79,25 +102,25 @@ describe("launcher/user-data.cjs", () => {
       expect(readFileSync(join(userDataRoot, ".env"), "utf8")).toBe("NEW=value\n");
     });
 
-    it("skips data/ copy when target umanschat.db already exists", () => {
+    it("skips data/ copy when target minerva.db already exists", () => {
       mkdirSync(join(appRoot, "data"), { recursive: true });
-      writeFileSync(join(appRoot, "data", "umanschat.db"), "old-db");
+      writeFileSync(join(appRoot, "data", "minerva.db"), "old-db");
       mkdirSync(join(userDataRoot, "data"), { recursive: true });
-      writeFileSync(join(userDataRoot, "data", "umanschat.db"), "new-db");
+      writeFileSync(join(userDataRoot, "data", "minerva.db"), "new-db");
 
       migrateLegacyData(appRoot, userDataRoot);
 
-      expect(readFileSync(join(userDataRoot, "data", "umanschat.db"), "utf8")).toBe("new-db");
+      expect(readFileSync(join(userDataRoot, "data", "minerva.db"), "utf8")).toBe("new-db");
     });
 
     it("migrates data/ when target cloudflared/ exists but no DB (partial launch)", () => {
       mkdirSync(join(appRoot, "data"), { recursive: true });
-      writeFileSync(join(appRoot, "data", "umanschat.db"), "real-db");
+      writeFileSync(join(appRoot, "data", "minerva.db"), "real-db");
       mkdirSync(join(userDataRoot, "data", "cloudflared"), { recursive: true });
 
       migrateLegacyData(appRoot, userDataRoot);
 
-      expect(readFileSync(join(userDataRoot, "data", "umanschat.db"), "utf8")).toBe("real-db");
+      expect(readFileSync(join(userDataRoot, "data", "minerva.db"), "utf8")).toBe("real-db");
     });
 
     it("is a no-op when no legacy .env or data/ exist", () => {
@@ -118,12 +141,12 @@ describe("launcher/user-data.cjs", () => {
     it("leaves appRoot intact as backup", () => {
       writeFileSync(join(appRoot, ".env"), "KEY=val\n");
       mkdirSync(join(appRoot, "data"), { recursive: true });
-      writeFileSync(join(appRoot, "data", "umanschat.db"), "db");
+      writeFileSync(join(appRoot, "data", "minerva.db"), "db");
 
       migrateLegacyData(appRoot, userDataRoot);
 
       expect(existsSync(join(appRoot, ".env"))).toBe(true);
-      expect(existsSync(join(appRoot, "data", "umanschat.db"))).toBe(true);
+      expect(existsSync(join(appRoot, "data", "minerva.db"))).toBe(true);
     });
   });
 
@@ -132,7 +155,7 @@ describe("launcher/user-data.cjs", () => {
       const paths = resolveDataPaths("/custom/root");
       expect(paths.envPath).toBe(join("/custom/root", ".env"));
       expect(paths.dataDir).toBe(join("/custom/root", "data"));
-      expect(paths.dbPath).toBe(join("/custom/root", "data", "umanschat.db"));
+      expect(paths.dbPath).toBe(join("/custom/root", "data", "minerva.db"));
       expect(paths.cloudflaredDir).toBe(join("/custom/root", "data", "cloudflared"));
       expect(paths.updatesDir).toBe(join("/custom/root", "data", "updates"));
       expect(paths.markerPath).toBe(join("/custom/root", "data", ".update-pending"));

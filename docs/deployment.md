@@ -1,6 +1,6 @@
 # Deployment
 
-How UmansChat is built, packaged, released, and run — covering Docker Compose, the standalone Windows exe, CI/CD pipelines, Cloudflare Tunnel, and local development.
+How MinervaAIWorkspace is built, packaged, released, and run — covering Docker Compose, the standalone Windows exe, CI/CD pipelines, Cloudflare Tunnel, and local development.
 
 ## Relevant source files
 
@@ -8,7 +8,7 @@ How UmansChat is built, packaged, released, and run — covering Docker Compose,
 - `Dockerfile` — 3-stage build (deps → build → runner) for the `app` image
 - `docker-entrypoint.sh` — container startup: env sync, DB path resolution, migrations
 - `scripts/pack-exe.ts` — standalone distribution assembler (build → copy → prune → compile)
-- `launcher/umanschat-launcher.cjs` — exe entry point: env sync, migrations, server launch, browser open
+- `launcher/minerva-launcher.cjs` — exe entry point: env sync, migrations, server launch, browser open
 - `src/lib/tunnel.ts` — Cloudflare Tunnel lifecycle (Docker container vs downloaded binary)
 - `src/app/api/tunnel/route.ts` — tunnel control API (start/stop/status)
 - `.github/workflows/ci.yml` — CI: typecheck on push/PR
@@ -18,16 +18,16 @@ How UmansChat is built, packaged, released, and run — covering Docker Compose,
 
 ## Docker deployment
 
-Docker Compose is the primary deployment method. Six services form the full stack; the `app` service is UmansChat itself and the rest are supporting microservices.
+Docker Compose is the primary deployment method. Six services form the full stack; the `app` service is MinervaAIWorkspace itself and the rest are supporting microservices.
 
 ### Services
 
 | Service | Container image | Host→container port | Purpose |
 |---------|-----------------|----------------------|---------|
-| `app` | `ghcr.io/johmaru/umanschat-unofficial-app` | `3001→3000` | Next.js standalone server (the main application) |
+| `app` | `ghcr.io/johmaru/minerva-ai-workspace-app` | `3001→3000` | Next.js standalone server (the main application) |
 | `cloudflared` | `cloudflare/cloudflared:latest` | — | Cloudflare Tunnel (profile `tunnel`, opt-in) |
-| `scraper` | `ghcr.io/johmaru/umanschat-unofficial-scraper` | `8000` (internal) | Scrapling FastAPI web scraper |
-| `embedder` | `ghcr.io/johmaru/umanschat-unofficial-embedder` | `8001→8001` | Python sentence-transformers embedding service |
+| `scraper` | `ghcr.io/johmaru/minerva-ai-workspace-scraper` | `8000` (internal) | Scrapling FastAPI web scraper |
+| `embedder` | `ghcr.io/johmaru/minerva-ai-workspace-embedder` | `8001→8001` | Python sentence-transformers embedding service |
 | `searxng` | `searxng/searxng:latest` | `8081→8080` | SearXNG meta-search engine |
 | `tor` | `dperson/torproxy:latest` | `9050` (internal) | Tor SOCKS proxy for anonymous scraping |
 
@@ -38,8 +38,8 @@ The `app` service depends on `embedder` and `scraper` (both `service_started`); 
 | Volume | Mount | Purpose |
 |--------|-------|---------|
 | `./.env` | `/app/.env` | Environment config — GUI edits persist across rebuilds (not baked into the image) |
-| `./data` | `/app/data` | SQLite database persistence (`data/umanschat.db` lives on the host) |
-| `umanschat-embedder-hf` (named) | `/root/.cache/huggingface` | HuggingFace model cache for the embedder |
+| `./data` | `/app/data` | SQLite database persistence (`data/minerva.db` lives on the host) |
+| `minerva-embedder-hf` (named) | `/root/.cache/huggingface` | HuggingFace model cache for the embedder |
 
 ### Environment
 
@@ -60,7 +60,7 @@ The entrypoint runs four steps before handing off to the server:
 
 1. **Sync `.env`** — runs `node --experimental-strip-types /app/scripts/sync-env.ts` to append any new keys from `.env.example` into `.env`. Because `.env` is volume-mounted, this also updates the host file. Failure is non-fatal (warns and continues).
 
-2. **Resolve `DATABASE_URL` to an absolute path** — the standalone server calls `process.chdir("/app/.next/standalone/")`, so a relative DB path would resolve to the wrong location. The entrypoint converts `:memory:`, empty, or relative paths to `/app/data/umanschat.db` (or `/app/<relative>`), then `mkdir -p` the directory.
+2. **Resolve `DATABASE_URL` to an absolute path** — the standalone server calls `process.chdir("/app/.next/standalone/")`, so a relative DB path would resolve to the wrong location. The entrypoint converts `:memory:`, empty, or relative paths to `/app/data/minerva.db` (or `/app/<relative>`), then `mkdir -p` the directory.
 
 3. **Remove stale WAL/SHM sidecars** — deletes `*.db-wal` and `*.db-shm` in the DB directory. The app uses `journal_mode=DELETE` (not WAL) because Docker Desktop bind mounts corrupt WAL `-shm` files. This cleanup runs on every start and is a no-op after the first restart.
 
@@ -89,36 +89,36 @@ See [Cloudflare Tunnel](#cloudflare-tunnel) below for tunnel setup.
 
 ## Standalone exe (Windows)
 
-The standalone distribution is a single double-clickable `umanschat.exe` plus its supporting files, built with Bun's `--compile` feature. The launcher (compiled into the exe) runs via the embedded Bun runtime, but spawns a bundled `node.exe` to run `server.js` — the app uses `better-sqlite3`, which Bun does not support. Both `umanschat.exe` and `node.exe` are included in the distribution, so end users need nothing else installed.
+The standalone distribution is a single double-clickable `minerva.exe` plus its supporting files, built with Bun's `--compile` feature. The launcher (compiled into the exe) runs via the embedded Bun runtime, but spawns a bundled `node.exe` to run `server.js` — the app uses `better-sqlite3`, which Bun does not support. Both `minerva.exe` and `node.exe` are included in the distribution, so end users need nothing else installed.
 
 ### pack-exe.ts pipeline
 
-`scripts/pack-exe.ts` assembles the distribution into `dist/UmansChat/` in this order:
+`scripts/pack-exe.ts` assembles the distribution into `dist/Minerva/` in this order:
 
 1. **Build** — `bun run build` with `DATABASE_URL=":memory:"` (build-time only; the real DB is created at runtime). Produces `.next/standalone/` via Next.js output-file tracing.
 
-2. **Clean** — removes any prior `dist/UmansChat/` directory. Before wiping, pack stashes the existing `dist/UmansChat/.env` and `data/` (if present) to a temp dir, then restores them after assemble and re-applies exe-only service defaults so Docker hostnames do not stick. Security keys (`REGISTRATION_LOCKED`, `ALLOWED_REGISTRATION_IPS`), secrets, and other user `.env` values survive an in-place rebuild. The in-app updater already preserved `.env`/`data/` when copying staging → appRoot; pack now matches that for the dist folder. This only applies to in-place `dist/UmansChat` rebuilds — a fresh extract into a new empty folder correctly starts unlocked for first admin creation.
+2. **Clean** — removes any prior `dist/Minerva/` directory. Before wiping, pack stashes the existing `dist/Minerva/.env` and `data/` (if present) to a temp dir, then restores them after assemble and re-applies exe-only service defaults so Docker hostnames do not stick. Security keys (`REGISTRATION_LOCKED`, `ALLOWED_REGISTRATION_IPS`), secrets, and other user `.env` values survive an in-place rebuild. The in-app updater already preserved `.env`/`data/` when copying staging → appRoot; pack now matches that for the dist folder. This only applies to in-place `dist/Minerva` rebuilds — a fresh extract into a new empty folder correctly starts unlocked for first admin creation.
 
-3. **Copy standalone output** — copies `.next/standalone/*` → `dist/UmansChat/`. On Windows, Next.js's output-file-tracing creates junctions (for `@xenova/transformers-<hash>` and `better-sqlite3-<hash>`). `cpSync` fails on junctions with `EPERM`, so the script detects junctions, skips them during the copy, and then copies their targets as real directories. Junctions point to absolute paths that would break at the distribution destination, so this step is essential.
+3. **Copy standalone output** — copies `.next/standalone/*` → `dist/Minerva/`. On Windows, Next.js's output-file-tracing creates junctions (for `@xenova/transformers-<hash>` and `better-sqlite3-<hash>`). `cpSync` fails on junctions with `EPERM`, so the script detects junctions, skips them during the copy, and then copies their targets as real directories. Junctions point to absolute paths that would break at the distribution destination, so this step is essential.
 
-4. **Copy assets** — copies `public/`, `.next/static/`, `drizzle/` (migrations), `drizzle.config.ts`, `scripts/sync-env.ts`, `.env.example`, `launcher/umanschat-launcher.cjs` (renamed to `umanschat.cjs`), and `package.json` (required by `bun build --compile`).
+4. **Copy assets** — copies `public/`, `.next/static/`, `drizzle/` (migrations), `drizzle.config.ts`, `scripts/sync-env.ts`, `.env.example`, `launcher/minerva-launcher.cjs` (renamed to `minerva.cjs`), and `package.json` (required by `bun build --compile`).
 
-5. **Copy `node.exe`** — resolves `node` from PATH (via `where node`) and copies it into `dist/UmansChat/node.exe`. The launcher spawns this to run `server.js`, since the app uses `better-sqlite3` (unsupported by Bun).
+5. **Copy `node.exe`** — resolves `node` from PATH (via `where node`) and copies it into `dist/Minerva/node.exe`. The launcher spawns this to run `server.js`, since the app uses `better-sqlite3` (unsupported by Bun).
 
 6. **Prune tests** — recursively deletes `*.test.ts` and `*.test.tsx` files (Next.js's file tracing also copies these into standalone; they're not needed at runtime and bloat the package).
 
-7. **Compile** — runs `bun build --compile` on `umanschat.cjs`, producing `umanschat.exe`. This embeds the Bun runtime. If compilation fails (e.g. Bun version mismatch), it falls back to writing `umanschat.bat` (`@echo off\r\nbun umanschat.cjs`) which requires Bun on the user's PATH.
+7. **Compile** — runs `bun build --compile` on `minerva.cjs`, producing `minerva.exe`. This embeds the Bun runtime. If compilation fails (e.g. Bun version mismatch), it falls back to writing `minerva.bat` (`@echo off\r\nbun minerva.cjs`) which requires Bun on the user's PATH.
 
 ### Launcher sequence
 
-`launcher/umanschat-launcher.cjs` (compiled into the exe) runs on every launch:
+`launcher/minerva-launcher.cjs` (compiled into the exe) runs on every launch:
 
 1. **Resolve `appRoot`** — when compiled, uses `dirname(process.execPath)` (the exe's directory); when run under node/bun directly, uses `__dirname`. This matters because `bun build --compile` can make `__dirname` point to a temp extraction directory.
 
-2. **Resolve user data root + migrate** — resolves `%USERPROFILE%\.umans_chat_unofficial\` as the user data root (`launcher/user-data.cjs`). If a legacy `appRoot/.env` and `appRoot/data` exist (from a prior version), copies them to the user data root. The legacy files are left in `appRoot` as a backup. Sets `UMANS_USER_ROOT` env var so the server's `getDataDir()` and `resolveEnvPath()` locate `.env`, `data/`, cloudflared, and update staging in the user folder. The exe folder becomes purely application binaries — safe to delete, rebuild, or replace without data loss.
+2. **Resolve user data root + migrate** — resolves `%USERPROFILE%\.minerva_ai_workspace\` as the user data root (`launcher/user-data.cjs`). If a legacy `appRoot/.env` and `appRoot/data` exist (from a prior version), copies them to the user data root. The legacy files are left in `appRoot` as a backup. Sets `MINERVA_USER_ROOT` env var so the server's `getDataDir()` and `resolveEnvPath()` locate `.env`, `data/`, cloudflared, and update staging in the user folder. The exe folder becomes purely application binaries — safe to delete, rebuild, or replace without data loss.
 3. **Sync `.env`** — appends any new keys from `.env.example` into `.env` without modifying existing values. Mirrors the Docker entrypoint's sync step.
 
-4. **Resolve `DATABASE_URL`** — converts the `.env` value to an absolute path (default `data/umanschat.db`). Like the Docker entrypoint, this is necessary because the standalone server calls `process.chdir(__dirname)`.
+4. **Resolve `DATABASE_URL`** — converts the `.env` value to an absolute path (default `data/minerva.db`). Like the Docker entrypoint, this is necessary because the standalone server calls `process.chdir(__dirname)`.
 
 5. **Run migrations** — uses Drizzle's programmatic migrator (`drizzle-orm/bun-sqlite/migrator`) with the built-in `bun:sqlite` module. `better-sqlite3` cannot be loaded from inside a `bun build --compile` exe (its `bindings` module resolves to a virtual path). Opens the SQLite file, sets `journal_mode=WAL` (the exe doesn't suffer from Docker's bind-mount WAL corruption), runs migrations, then closes the connection. The server reopens the file on startup via `better-sqlite3` under Node.
 
@@ -130,8 +130,8 @@ The standalone distribution is a single double-clickable `umanschat.exe` plus it
 
 On first launch, the user sees:
 - A console window with `[launcher]` progress lines.
-- `.env` is created from `.env.example` (if absent) in `%USERPROFILE%\.umans_chat_unofficial\` with all keys present.
-- `data/umanschat.db` is created in `%USERPROFILE%\.umans_chat_unofficial\data\` and migrations run.
+- `.env` is created from `.env.example` (if absent) in `%USERPROFILE%\.minerva_ai_workspace\` with all keys present.
+- `data/minerva.db` is created in `%USERPROFILE%\.minerva_ai_workspace\data\` and migrations run.
 - The browser opens to `http://localhost:3001` showing the login page.
 - Because `userCount === 0`, the login page shows first-run admin registration. The first registered user becomes the admin and inherits any ownerless data. See [Authentication](./authentication.md).
 
@@ -139,12 +139,12 @@ The user must then edit `.env` (in the user data folder) to set `LLM_API_KEY`, `
 
 ### User data location
 
-The exe distribution stores `.env` and `data/` (SQLite DB, cloudflared binary, update staging) in `%USERPROFILE%\.umans_chat_unofficial\` — not in the exe folder. This means:
+The exe distribution stores `.env` and `data/` (SQLite DB, cloudflared binary, update staging) in `%USERPROFILE%\.minerva_ai_workspace\` — not in the exe folder. This means:
 
 - Deleting, rebuilding, or replacing the exe folder does not affect user data.
 - On first launch of a new exe, if a legacy `appRoot/.env` and `appRoot/data` exist (from a prior version), the launcher automatically migrates them to the user data folder. The legacy files are left in `appRoot` as a backup.
-- The launcher sets `UMANS_USER_ROOT` env var for the server. When unset (dev/Docker), paths fall back to the current behavior (cwd-based).
-- When `UMANS_USER_ROOT` is unset but the process is a compiled exe (diagnostic direct run), `getDataDir()` falls back to `dirname(process.execPath)/data`, matching prior behavior.
+- The launcher sets `MINERVA_USER_ROOT` env var for the server. When unset (dev/Docker), paths fall back to the current behavior (cwd-based).
+- When `MINERVA_USER_ROOT` is unset but the process is a compiled exe (diagnostic direct run), `getDataDir()` falls back to `dirname(process.execPath)/data`, matching prior behavior.
 
 ## CI
 
@@ -183,9 +183,9 @@ Runs on `ubuntu-latest` (needs `prepare`). Logs into GHCR with `GITHUB_TOKEN`, s
 
 | Image | Context | Dockerfile |
 |-------|---------|------------|
-| `ghcr.io/johmaru/umanschat-unofficial-app` | `.` | `./Dockerfile` |
-| `ghcr.io/johmaru/umanschat-unofficial-scraper` | `./scraper` | `./scraper/Dockerfile` |
-| `ghcr.io/johmaru/umanschat-unofficial-embedder` | `./embedder` | `./embedder/Dockerfile` |
+| `ghcr.io/johmaru/minerva-ai-workspace-app` | `.` | `./Dockerfile` |
+| `ghcr.io/johmaru/minerva-ai-workspace-scraper` | `./scraper` | `./scraper/Dockerfile` |
+| `ghcr.io/johmaru/minerva-ai-workspace-embedder` | `./embedder` | `./embedder/Dockerfile` |
 
 Each build uses GitHub Actions cache (`type=gha`, `mode=max`) to speed up subsequent releases.
 
@@ -195,8 +195,8 @@ Runs on `windows-latest` (needs `prepare`). Builds the standalone distribution n
 
 1. Setup Bun 1.3, `bun install --frozen-lockfile`.
 2. `bun run pack:exe` (with `DATABASE_URL=":memory:"`) — runs `scripts/pack-exe.ts`.
-3. Zip the `dist/UmansChat/` contents into `UmansChat-<version>-windows-x64.zip` via PowerShell `Compress-Archive`.
-4. Upload the zip as a workflow artifact (`umanschat-exe-<version>`, 5-day retention).
+3. Zip the `dist/Minerva/` contents into `MinervaAIWorkspace-<version>-windows-x64.zip` via PowerShell `Compress-Archive`.
+4. Upload the zip as a workflow artifact (`minerva-exe-<version>`, 5-day retention).
 
 ### release
 
@@ -205,8 +205,8 @@ Runs on `ubuntu-latest` (needs `prepare`, `docker`, **and** `exe`). Because it d
 1. Downloads the exe zip artifact.
 2. Creates/updates a GitHub Release via `softprops/action-gh-release@v2`:
    - Tag: `v<version>` (e.g. `v1.2.3`)
-   - Name: `UmansChat v<version>`
-   - Asset: `UmansChat-<version>-windows-x64.zip`
+   - Name: `MinervaAIWorkspace v<version>`
+   - Asset: `MinervaAIWorkspace-<version>-windows-x64.zip`
    - `prerelease: true` if the version contains a hyphen (e.g. `1.2.3-rc1`)
    - `generate_release_notes: true` — auto-generates from commit history / PR titles
 
@@ -214,7 +214,7 @@ Required permissions: `contents: write` (create release + upload asset) and `pac
 
 ## Cloudflare Tunnel
 
-UmansChat optionally exposes the app over public HTTPS via a Cloudflare named tunnel, without port forwarding or a reverse proxy. This is useful for accessing the app remotely or for OAuth callbacks that require HTTPS.
+MinervaAIWorkspace optionally exposes the app over public HTTPS via a Cloudflare named tunnel, without port forwarding or a reverse proxy. This is useful for accessing the app remotely or for OAuth callbacks that require HTTPS.
 
 `src/lib/tunnel.ts` manages the tunnel as a child process in both Docker and exe environments. The Docker socket is no longer mounted.
 
@@ -267,10 +267,10 @@ The tunnel token (`TUNNEL_TOKEN`) is treated as a secret throughout:
 
 ### AUTH_URL dynamic switching
 
-When a tunnel is started, the public HTTPS hostname is saved as `AUTH_URL` in `.env` (persisted) and mirrored to the internal `UMANS_CONFIGURED_AUTH_URL` env var. Auth.js no longer reads `AUTH_URL` from `process.env` for request-origin rewriting — at module load, `src/lib/auth-env.ts` copies it to the mirror and deletes `process.env.AUTH_URL` so `reqWithEnvURL` is a no-op. Under `AUTH_TRUST_HOST=true`, Auth.js derives the origin from the request headers (`X-Forwarded-Host` / `Host` + `X-Forwarded-Proto`), so both local and public access work simultaneously.
+When a tunnel is started, the public HTTPS hostname is saved as `AUTH_URL` in `.env` (persisted) and mirrored to the internal `MINERVA_CONFIGURED_AUTH_URL` env var. Auth.js no longer reads `AUTH_URL` from `process.env` for request-origin rewriting — at module load, `src/lib/auth-env.ts` copies it to the mirror and deletes `process.env.AUTH_URL` so `reqWithEnvURL` is a no-op. Under `AUTH_TRUST_HOST=true`, Auth.js derives the origin from the request headers (`X-Forwarded-Host` / `Host` + `X-Forwarded-Proto`), so both local and public access work simultaneously.
 
-- `POST /api/tunnel` saves `AUTH_URL` to `.env` and calls `setConfiguredAuthUrl(authUrl)` (sets `UMANS_CONFIGURED_AUTH_URL`, deletes `process.env.AUTH_URL`).
-- The `authorized` callback and Notion OAuth routes use `resolvePublicOrigin()` (from `src/lib/request-origin.ts`) to derive the origin from request headers, falling back to `UMANS_CONFIGURED_AUTH_URL` when no host header is present.
+- `POST /api/tunnel` saves `AUTH_URL` to `.env` and calls `setConfiguredAuthUrl(authUrl)` (sets `MINERVA_CONFIGURED_AUTH_URL`, deletes `process.env.AUTH_URL`).
+- The `authorized` callback and Notion OAuth routes use `resolvePublicOrigin()` (from `src/lib/request-origin.ts`) to derive the origin from request headers, falling back to `MINERVA_CONFIGURED_AUTH_URL` when no host header is present.
 - `AUTH_URL` must start with `https://` (enforced by the API route — a non-HTTPS value returns `400`).
 
 `AUTH_URL` is still the base for Notion's OAuth redirect URI (`{origin}/api/connections/notion/callback`) and Google's (`{origin}/api/auth/callback/google`), where `origin` is derived from the request. It must match the URIs registered in the Notion and Google developer consoles for the host you use.
@@ -302,7 +302,7 @@ bun install
 cp .env.example .env
 # Edit .env: set LLM_API_KEY, AUTH_SECRET (bunx auth secret), etc.
 
-# 3. Run migrations (creates data/umanschat.db)
+# 3. Run migrations (creates data/minerva.db)
 bunx drizzle-kit migrate
 ```
 

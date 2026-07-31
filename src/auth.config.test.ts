@@ -30,20 +30,20 @@ function makeRequest(
 
 describe("authConfig.callbacks.authorized — dual-access redirects", () => {
   const originalAuthUrl = process.env.AUTH_URL;
-  const originalConfigured = process.env.UMANS_CONFIGURED_AUTH_URL;
+  const originalConfigured = process.env.MINERVA_CONFIGURED_AUTH_URL;
 
   beforeEach(() => {
     delete process.env.AUTH_URL;
     delete process.env.NEXTAUTH_URL;
-    delete process.env.UMANS_CONFIGURED_AUTH_URL;
+    delete process.env.MINERVA_CONFIGURED_AUTH_URL;
   });
 
   afterEach(() => {
     if (originalAuthUrl !== undefined) process.env.AUTH_URL = originalAuthUrl;
     else delete process.env.AUTH_URL;
     if (originalConfigured !== undefined)
-      process.env.UMANS_CONFIGURED_AUTH_URL = originalConfigured;
-    else delete process.env.UMANS_CONFIGURED_AUTH_URL;
+      process.env.MINERVA_CONFIGURED_AUTH_URL = originalConfigured;
+    else delete process.env.MINERVA_CONFIGURED_AUTH_URL;
   });
 
   describe("unauthenticated page access", () => {
@@ -93,7 +93,7 @@ describe("authConfig.callbacks.authorized — dual-access redirects", () => {
     });
 
     it("local host stays local even when public AUTH_URL is configured", async () => {
-      process.env.UMANS_CONFIGURED_AUTH_URL = "https://umans.johmaru.jp";
+      process.env.MINERVA_CONFIGURED_AUTH_URL = "https://umans.johmaru.jp";
       const req = makeRequest(
         "/dashboard",
         { host: "localhost:3001" },
@@ -169,7 +169,7 @@ describe("authConfig.callbacks.authorized — dual-access redirects", () => {
     });
 
     it("stays local even when public AUTH_URL is configured", async () => {
-      process.env.UMANS_CONFIGURED_AUTH_URL = "https://umans.johmaru.jp";
+      process.env.MINERVA_CONFIGURED_AUTH_URL = "https://umans.johmaru.jp";
       const req = makeRequest(
         "/login",
         { host: "localhost:3001" },

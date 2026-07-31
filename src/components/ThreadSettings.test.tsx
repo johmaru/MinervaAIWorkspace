@@ -11,7 +11,7 @@ import { I18nProvider } from "@/components/I18nProvider";
 const mockModels = ["umans-glm-5.2", "gpt-4o-mini", "gpt-4o"];
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string) => {

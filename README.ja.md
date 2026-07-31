@@ -1,4 +1,4 @@
-# UmansChat
+# MinervaAIWorkspace
 
 **UmansAI** をバックエンドとする、セルフホスト可能なオープンソース AI ワークスペース。ChatGPT ライクな会話に、枝分かれスレッド、セマンティック記憶、Web 知識の取り込み、MCP ツール、外部コネクション、マルチモデルワークフロー、再利用可能なスキル、隔離コード実行、パーソナライズを統合。
 
@@ -6,7 +6,7 @@
 
 ## プロジェクトの状態
 
-**UmansChat はプレリリース版です。** バージョン間で破壊的変更が発生する可能性があります — データベーススキーマ、設定変数、API が予告なく変更されることがあります。更新前に `data/` ディレクトリと `.env` をバックアップしてください。
+**MinervaAIWorkspace はプレリリース版です。** バージョン間で破壊的変更が発生する可能性があります — データベーススキーマ、設定変数、API が予告なく変更されることがあります。更新前に `data/` ディレクトリと `.env` をバックアップしてください。
 
 **Docker が推奨デプロイ方法です。** Docker Compose が全サービス（アプリ、embedder、scraper、SearXNG、Tor）を統合し、`docker compose pull && docker compose up -d` で簡単に更新できます。Docker を使わないスタンドアロン Windows exe も提供されています。
 
@@ -69,11 +69,11 @@
 - **チャットエクスポート** — 任意でターン毎 Markdown 出力（`CHAT_EXPORT_PATH` / Docker は `CHAT_EXPORT_HOST_PATH`）
 - **埋め込みモデル切替** — ローカル ONNX（transformers.js）または HTTP Python embedder
 - **Tor プロキシ** — 匿名スクレイピング
-- **exe リビルド / 自動更新時のデータ保持** — `.env` と `data/` は `%USERPROFILE%\.umans_chat_unofficial\`
+- **exe リビルド / 自動更新時のデータ保持** — `.env` と `data/` は `%USERPROFILE%\.minerva_ai_workspace\`
 
 ## アーキテクチャ
 
-UmansChat は Next.js 16 + React 19 のアプリで、バックエンドは SQLite（better-sqlite3）— ファイルベースで別サーバー不要です。Docker Compose はアプリとオプションサービスをまとめて起動します。
+MinervaAIWorkspace は Next.js 16 + React 19 のアプリで、バックエンドは SQLite（better-sqlite3）— ファイルベースで別サーバー不要です。Docker Compose はアプリとオプションサービスをまとめて起動します。
 
 ```mermaid
 flowchart LR
@@ -153,13 +153,13 @@ docker compose --profile sandbox build
 ```bash
 bun install
 cp .env.example .env   # LLM_API_KEY を設定; bunx auth secret
-bun run pack:exe       # → dist/UmansChat/
-# umanschat.exe をダブルクリック（または node dist/UmansChat/umanschat.cjs）
+bun run pack:exe       # → dist/Minerva/
+# minerva.exe をダブルクリック（または node dist/Minerva/minerva.cjs）
 ```
 
-> **同一フォルダ再ビルド:** 既存 `dist/UmansChat/` への `pack:exe` は `.env` と `data/` を保持します。
+> **同一フォルダ再ビルド:** 既存 `dist/Minerva/` への `pack:exe` は `.env` と `data/` を保持します。
 >
-> **データの場所:** `%USERPROFILE%\.umans_chat_unofficial\`（exe フォルダではない）。旧版からのアップグレード時は自動移行。
+> **データの場所:** `%USERPROFILE%\.minerva_ai_workspace\`（exe フォルダではない）。旧版からのアップグレード時は自動移行。
 
 初回起動で DB 作成・マイグレーション・`:3001` 起動・ブラウザ表示。
 
@@ -178,10 +178,10 @@ bun run pack:exe       # → dist/UmansChat/
 手動実行（`workflow_dispatch`）のみ。各リリースで **両方** を公開:
 
 - **Docker（GHCR）** — `app` / `scraper` / `embedder` に `:<version>` と `:latest`
-  - `ghcr.io/johmaru/umanschat-unofficial-app:<version>`
-  - `ghcr.io/johmaru/umanschat-unofficial-scraper:<version>`
-  - `ghcr.io/johmaru/umanschat-unofficial-embedder:<version>`
-- **Windows exe** — `UmansChat-<version>-windows-x64.zip` を GitHub Release に添付
+  - `ghcr.io/johmaru/minerva-ai-workspace-app:<version>`
+  - `ghcr.io/johmaru/minerva-ai-workspace-scraper:<version>`
+  - `ghcr.io/johmaru/minerva-ai-workspace-embedder:<version>`
+- **Windows exe** — `MinervaAIWorkspace-<version>-windows-x64.zip` を GitHub Release に添付
 
 ```
 Actions → Release → Run workflow → バージョン入力（例: 1.2.3）
@@ -233,12 +233,12 @@ docker compose --profile sandbox build
 docker compose up -d --build
 
 # ネイティブ / exe / bun run dev
-docker build -t umanschat-sandbox-python:v0.4 sandbox/python
+docker build -t minerva-sandbox-python:v0.4 sandbox/python
 ```
 
 チャットで「Python サンドボックスで `print(2+2)` を実行して」などと依頼。イメージが無い場合はツールが単に提示されない（エラーや半端な状態にはならない）。
 
-詳細: [`.agents/skills/umanschat-install/SKILL.md`](./.agents/skills/umanschat-install/SKILL.md)
+詳細: [`.agents/skills/minerva-install/SKILL.md`](./.agents/skills/minerva-install/SKILL.md)
 
 ## Cloudflare Tunnel によるパブリックアクセス（任意）
 
@@ -334,11 +334,11 @@ embedder はモデル別のプレフィックスに対応: LFM2.5 は `prompt_na
 
 | 変数 | 説明 | デフォルト |
 |------|------|------------|
-| `DATABASE_URL` | SQLite ファイルパス | `data/umanschat.db` |
+| `DATABASE_URL` | SQLite ファイルパス | `data/minerva.db` |
 | `HOST_OS` | プロンプト注入 OS 名（`Windows`/`macOS`/`Linux`、空 = 自動） | — |
 | `TZ` | プロンプト日時のタイムゾーン（空 = `Asia/Tokyo`） | — |
 | `LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` |
-| `LOG_FILE_ENABLED` | `data/logs/umanschat.log` へ出力（自動: exe→true、Docker→false） | auto |
+| `LOG_FILE_ENABLED` | `data/logs/minerva.log` へ出力（自動: exe→true、Docker→false） | auto |
 | `LOG_FILE_MAX_SIZE` | ローテーション前サイズ（`.log.1` を 1 つ保持） | `5242880` |
 | `CHAT_EXPORT_PATH` | Markdown エクスポート先（空 = 無効） | — |
 | `CHAT_EXPORT_MODE` | `daily`: `<YYYY>/<MM>/<DD>/<title>.md` / `thread`: `<title>/<YYYY-MM-DD>[-partN].md` | `daily` |
@@ -366,7 +366,7 @@ embedder はモデル別のプレフィックスに対応: LFM2.5 は `prompt_na
 | 変数 | 説明 | デフォルト |
 |------|------|------------|
 | `SANDBOX_ENABLED` | `auto` / `true` / `false` | `auto` |
-| `SANDBOX_IMAGE` | ローカルイメージタグ（v0.4 では GHCR 非公開） | `umanschat-sandbox-python:v0.4` |
+| `SANDBOX_IMAGE` | ローカルイメージタグ（v0.4 では GHCR 非公開） | `minerva-sandbox-python:v0.4` |
 | `SANDBOX_MIN_FREE_MEM_PERCENT` | 空きメモリ % が下回ると拒否 | `15` |
 | `SANDBOX_MAX_CONCURRENT` | 同時コンテナ上限 | `1` |
 | `SANDBOX_DEFAULT_TIMEOUT_SEC` | 壁時計タイムアウト | `30` |

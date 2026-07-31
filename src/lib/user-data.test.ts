@@ -8,34 +8,42 @@ describe("user-data", () => {
   const origCwd = process.cwd();
 
   afterEach(() => {
+    delete process.env.MINERVA_USER_ROOT;
     delete process.env.UMANS_USER_ROOT;
     process.execPath = origExecPath;
     vi.restoreAllMocks();
   });
 
-  it("getUserDataRoot returns UMANS_USER_ROOT when set", () => {
-    vi.stubEnv("UMANS_USER_ROOT", "/custom/user/root");
+  it("getUserDataRoot returns MINERVA_USER_ROOT when set", () => {
+    vi.stubEnv("MINERVA_USER_ROOT", "/custom/user/root");
     expect(getUserDataRoot()).toBe("/custom/user/root");
   });
 
-  it("getUserDataRoot returns null when UMANS_USER_ROOT unset", () => {
+  it("getUserDataRoot falls back to legacy UMANS_USER_ROOT", () => {
+    delete process.env.MINERVA_USER_ROOT;
+    vi.stubEnv("UMANS_USER_ROOT", "/legacy/user/root");
+    expect(getUserDataRoot()).toBe("/legacy/user/root");
+  });
+
+  it("getUserDataRoot returns null when MINERVA_USER_ROOT unset", () => {
+    delete process.env.MINERVA_USER_ROOT;
     delete process.env.UMANS_USER_ROOT;
     expect(getUserDataRoot()).toBeNull();
   });
 
-  it("getDataDir returns join(root, data) when UMANS_USER_ROOT set", () => {
-    vi.stubEnv("UMANS_USER_ROOT", "/custom/user/root");
+  it("getDataDir returns join(root, data) when MINERVA_USER_ROOT set", () => {
+    vi.stubEnv("MINERVA_USER_ROOT", "/custom/user/root");
     expect(getDataDir()).toBe(join("/custom/user/root", "data"));
   });
 
   it("getDataDir falls back to dirname(execPath)/data for compiled exe", () => {
-    delete process.env.UMANS_USER_ROOT;
-    process.execPath = "/app/umanschat.exe";
+    delete process.env.MINERVA_USER_ROOT;
+    process.execPath = "/app/minerva.exe";
     expect(getDataDir()).toBe(join("/app", "data"));
   });
 
   it("getDataDir falls back to cwd/data for non-compiled (dev)", () => {
-    delete process.env.UMANS_USER_ROOT;
+    delete process.env.MINERVA_USER_ROOT;
     process.execPath = "/usr/local/bin/node";
     expect(getDataDir()).toBe(join(process.cwd(), "data"));
   });

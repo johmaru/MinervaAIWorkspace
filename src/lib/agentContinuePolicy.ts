@@ -1,7 +1,7 @@
 /**
  * Agent continue policy — OMP-style "keep going until the task is done".
  *
- * UmansChat historically exited the tool loop as soon as a completion emitted
+ * MinervaAIWorkspace historically exited the tool loop as soon as a completion emitted
  * **no tool_calls**, even when:
  * - the model only produced thinking (no user-visible answer), or
  * - tools already ran but the multi-step job is obviously unfinished.

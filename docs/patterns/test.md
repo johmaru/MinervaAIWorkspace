@@ -1,6 +1,6 @@
 # Pattern: Writing Tests
 
-How to write tests in UmansChat. Every new feature and bug fix MUST include tests.
+How to write tests in MinervaAIWorkspace. Every new feature and bug fix MUST include tests.
 
 ## File placement
 

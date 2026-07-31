@@ -30,7 +30,7 @@ const mockMemories = [
 const mockThreads = [{ id: "t1", title: "Test thread" }];
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string) => {

@@ -76,7 +76,7 @@ describe("updater", () => {
   });
 
   describe("isExeEnv", () => {
-    it("returns false in test environment (no umanschat.exe in cwd)", () => {
+    it("returns false in test environment (no minerva.exe in cwd)", () => {
       expect(isExeEnv()).toBe(false);
     });
   });
@@ -89,8 +89,8 @@ describe("updater", () => {
     });
 
     it("returns updateAvailable: true when GitHub release is newer", async () => {
-      // Simulate exe environment: create a temp umanschat.exe in cwd
-      const exePath = join(process.cwd(), "umanschat.exe");
+      // Simulate exe environment: create a temp minerva.exe in cwd
+      const exePath = join(process.cwd(), "minerva.exe");
       writeFileSync(exePath, "fake");
       try {
         // Mock fetch to return a newer release
@@ -98,7 +98,7 @@ describe("updater", () => {
           tag_name: "v9.9.9",
           body: "New release",
           assets: [
-            { name: "UmansChat-9.9.9-windows-x64.zip", browser_download_url: "https://example.com/zip" },
+            { name: "MinervaAIWorkspace-9.9.9-windows-x64.zip", browser_download_url: "https://example.com/zip" },
           ],
         };
         vi.stubGlobal("fetch", vi.fn(async () => ({
@@ -128,8 +128,8 @@ describe("updater", () => {
       ).rejects.toThrow("Auto-update is not available in this environment");
     });
 
-    it("uses UMANS_USER_ROOT/data for update paths when set", () => {
-      vi.stubEnv("UMANS_USER_ROOT", "/custom/user/root");
+    it("uses MINERVA_USER_ROOT/data for update paths when set", () => {
+      vi.stubEnv("MINERVA_USER_ROOT", "/custom/user/root");
       const dataDir = getDataDir();
       expect(dataDir).toBe(join("/custom/user/root", "data"));
       expect(join(dataDir, "updates")).toBe(

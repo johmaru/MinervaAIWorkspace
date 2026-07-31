@@ -1,4 +1,4 @@
-Internationalization (i18n) and theming for UmansChat — a custom, lightweight, zero-dependency translation system paired with a CSS-variable–based light/dark theme.
+Internationalization (i18n) and theming for MinervaAIWorkspace — a custom, lightweight, zero-dependency translation system paired with a CSS-variable–based light/dark theme.
 
 ## Relevant source files
 
@@ -16,7 +16,7 @@ Internationalization (i18n) and theming for UmansChat — a custom, lightweight,
 
 ## i18n Architecture
 
-UmansChat uses a **custom, lightweight, client-side i18n implementation** — no `next-intl`, `react-i18next`, or any external i18n library. The entire system is three small modules under `src/lib/i18n/` plus one React context provider.
+MinervaAIWorkspace uses a **custom, lightweight, client-side i18n implementation** — no `next-intl`, `react-i18next`, or any external i18n library. The entire system is three small modules under `src/lib/i18n/` plus one React context provider.
 
 Design principles:
 
@@ -36,15 +36,15 @@ export const SUPPORTED_LOCALES: Locale[] = ["en", "ja"];
 
 export const DEFAULT_LOCALE: Locale = "en";
 
-export const LOCALE_COOKIE_NAME = "umanschat-locale";
+export const LOCALE_COOKIE_NAME = "minerva-locale";
 
-export const LOCALE_STORAGE_KEY = "umanschat-locale";
+export const LOCALE_STORAGE_KEY = "minerva-locale";
 ```
 
 - **`Locale`** — the union of supported locale codes.
 - **`SUPPORTED_LOCALES`** — array used for runtime validation (e.g., checking a stored/cookie value is valid).
 - **`DEFAULT_LOCALE`** — `"en"`; used during SSR and as the ultimate fallback when a dictionary or key is missing.
-- **`LOCALE_COOKIE_NAME`** / **`LOCALE_STORAGE_KEY`** — both set to `"umanschat-locale"`. The provider writes the same value to both `localStorage` (for instant client restore) and a cookie (for server-side `getRequestLocale`).
+- **`LOCALE_COOKIE_NAME`** / **`LOCALE_STORAGE_KEY`** — both set to `"minerva-locale"`. The provider writes the same value to both `localStorage` (for instant client restore) and a cookie (for server-side `getRequestLocale`).
 
 ### Dictionaries
 
@@ -88,7 +88,7 @@ export type Dictionary = typeof ja;
 
 **Strings that are intentionally NOT translated** (kept out of the dictionaries):
 
-- The brand name `UmansChat`.
+- The brand name `MinervaAIWorkspace`.
 - Environment variable names (`LLM_API_KEY`, `LLM_MODEL`, …) and their technical values (`none`/`low`/`medium`/`high`/`max`, `socks5://tor:9050`).
 - English API validation error strings (intended for developers, not end users).
 - Default titles stored in the database: `"New chat"` / `"New folder"`.
@@ -181,7 +181,7 @@ export function getRequestLocale(request: Request): Locale {
 }
 ```
 
-This reads the `umanschat-locale` cookie from the incoming request. If the cookie is missing or holds an unsupported value, it falls back to `DEFAULT_LOCALE`. API routes that need to return localized messages (e.g., the settings route returning Tor status strings) use this to pick the right dictionary language.
+This reads the `minerva-locale` cookie from the incoming request. If the cookie is missing or holds an unsupported value, it falls back to `DEFAULT_LOCALE`. API routes that need to return localized messages (e.g., the settings route returning Tor status strings) use this to pick the right dictionary language.
 
 ### I18nProvider
 
@@ -326,7 +326,7 @@ export function ExportButton() {
 
 ## Theming
 
-UmansChat uses [`next-themes`](https://github.com/pacocoursey/next-themes) for dark/light mode toggling, with all visual tokens defined as CSS custom properties.
+MinervaAIWorkspace uses [`next-themes`](https://github.com/pacocoursey/next-themes) for dark/light mode toggling, with all visual tokens defined as CSS custom properties.
 
 ### next-themes setup
 

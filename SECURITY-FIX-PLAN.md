@@ -1,4 +1,4 @@
-# UmansChat Blocker 修正計画
+# MinervaAIWorkspace Blocker 修正計画
 
 **作成日**: 2026-07-14
 **対象**: セキュリティ診断で発見された Blocker 3件
@@ -412,7 +412,7 @@ Phase 3: B3（Docker socket）— B1 完了後に実行（B1 があれば B3 の
 - [ ] 手動: Tor トグルが機能する（scraper の /config 経由）
 - [ ] 手動: ログ読み取りが機能する（ファイルベース）
 - [ ] 手動: トンネル起動が機能する
-- [ ] 手動: `docker exec umanschat-app docker ps` が「docker: not found」を返す
+- [ ] 手動: `docker exec minerva-app docker ps` が「docker: not found」を返す
 - [ ] `npm test` で既存テストが全通過
 - [ ] `npm run typecheck` がエラーゼロ
 

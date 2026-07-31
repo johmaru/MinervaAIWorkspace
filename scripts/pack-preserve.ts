@@ -3,7 +3,7 @@
  *
  * pack-exe.ts wipes dist/ before rebuilding. Without preservation, an in-place
  * rebuild discards the user's live .env (REGISTRATION_LOCKED, secrets, etc.)
- * and data/ (SQLite DB). These helpers stash the prior dist/UmansChat/.env and
+ * and data/ (SQLite DB). These helpers stash the prior dist/Minerva/.env and
  * data/ to a temp dir before the wipe and restore them after assemble, then
  * re-apply exe-only service defaults so Docker hostnames do not stick.
  *
@@ -83,7 +83,7 @@ const exeDefaults: Record<string, string> = {
   EMBEDDER_URL: "",
   SCRAPER_URL: "",
   SEARXNG_URL: "",
-  DATABASE_URL: "data/umanschat.db",
+  DATABASE_URL: "data/minerva.db",
 };
 
 /**

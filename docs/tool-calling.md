@@ -1,4 +1,4 @@
-Tool calling, MCP integration, and connections (Notion) — how UmansChat routes tool calls, probes for model support, sanitizes rogue markup, and integrates external tool providers.
+Tool calling, MCP integration, and connections (Notion) — how MinervaAIWorkspace routes tool calls, probes for model support, sanitizes rogue markup, and integrates external tool providers.
 
 ## Relevant source files
 
@@ -19,7 +19,7 @@ Tool calling, MCP integration, and connections (Notion) — how UmansChat routes
 
 ## Overview
 
-UmansChat supports two parallel tool-calling paths, gated by a startup probe that determines whether the configured LLM stably supports function calling:
+MinervaAIWorkspace supports two parallel tool-calling paths, gated by a startup probe that determines whether the configured LLM stably supports function calling:
 
 - **Path A (pre-search):** For models that *don't* support function calling, the server decides whether to search *before* streaming, injects results as a system message, and the model answers in a single stream.
 - **Path B (in-stream function calling):** For models that *do* support function calling, tools are passed to `streamCompletion()`, which runs a multi-round tool-use loop with up to `MAX_TOOL_ROUNDS = 3` iterations.
@@ -37,7 +37,7 @@ On top of these built-in tools, two extensibility mechanisms allow external tool
 
 ### Why it exists
 
-GLM-5.2 (the default model) has a track record of unstable `response_format`, and tool-calling support may be similarly unstable. Rather than assuming every OpenAI-compatible model supports function calling, UmansChat probes the model once at startup and gates all tool-calling behavior on the result.
+GLM-5.2 (the default model) has a track record of unstable `response_format`, and tool-calling support may be similarly unstable. Rather than assuming every OpenAI-compatible model supports function calling, MinervaAIWorkspace probes the model once at startup and gates all tool-calling behavior on the result.
 
 ### How it works
 
@@ -201,7 +201,7 @@ on the host; `sandbox_run` runs arbitrary inline code in an isolated,
 network-less container. Both coexist in `STREAM_TOOLS` / `extraTools`.
 
 See [Sandbox Architecture](./superpowers/specs/2026-07-15-sandbox-architecture-design.md)
-and [Install Skill](../.agents/skills/umanschat-install/SKILL.md) for the full
+and [Install Skill](../.agents/skills/minerva-install/SKILL.md) for the full
 design and setup.
 
 ### The `streamCompletion()` tool-use loop
@@ -369,7 +369,7 @@ This is a **single-shot** workaround — it runs at most once. There is no infin
 
 **File:** `src/lib/mcpClient.ts`
 
-UmansChat integrates with external tool servers via the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). MCP servers are registered per-user and enabled per-thread.
+MinervaAIWorkspace integrates with external tool servers via the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). MCP servers are registered per-user and enabled per-thread.
 
 ### Registration
 

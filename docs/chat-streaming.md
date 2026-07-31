@@ -15,7 +15,7 @@ Chat and streaming subsystem — the SSE streaming pipeline, branching message t
 
 ## Overview
 
-UmansChat's chat subsystem is a streaming pipeline built around an OpenAI-compatible API client. A single endpoint (`POST /api/chat`) orchestrates context assembly, optional search/tool execution, dual-model debate, and Server-Sent Events (SSE) streaming. The client (`useChat` hook) reads the SSE stream and drives a branch-aware message tree in the UI.
+MinervaAIWorkspace's chat subsystem is a streaming pipeline built around an OpenAI-compatible API client. A single endpoint (`POST /api/chat`) orchestrates context assembly, optional search/tool execution, dual-model debate, and Server-Sent Events (SSE) streaming. The client (`useChat` hook) reads the SSE stream and drives a branch-aware message tree in the UI.
 
 The route runs on the Node.js runtime — `export const runtime = "nodejs"; export const dynamic = "force-dynamic";` (`route.ts:42-43`) — because it is long-lived, does filesystem and child-process work (MCP stdio), and uses `after()` from `next/server`, which is not available on the Edge runtime.
 
@@ -122,7 +122,7 @@ Notes:
 
 ## Branching model
 
-UmansChat implements a **tree-structured message store**. Every message has a `parentId` (nullable for roots). A thread has a single `currentLeafId` pointing at the currently-displayed leaf.
+MinervaAIWorkspace implements a **tree-structured message store**. Every message has a `parentId` (nullable for roots). A thread has a single `currentLeafId` pointing at the currently-displayed leaf.
 
 ### Data model
 

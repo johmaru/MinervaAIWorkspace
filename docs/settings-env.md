@@ -1,6 +1,6 @@
 Settings & Environment Configuration
 
-> All runtime configuration in UmansChat lives in a single `.env` file at the project root. The in-app Settings GUI (Settings modal) reads and writes this file at runtime via `POST /api/settings` — no server restart is required for most settings.
+> All runtime configuration in MinervaAIWorkspace lives in a single `.env` file at the project root. The in-app Settings GUI (Settings modal) reads and writes this file at runtime via `POST /api/settings` — no server restart is required for most settings.
 
 ## Relevant source files
 
@@ -10,11 +10,11 @@ Settings & Environment Configuration
 - `.env.example` — canonical list of all environment variables with defaults and comments
 - `docker-compose.yml` — Docker Compose-only environment overrides
 - `docker-entrypoint.sh` — Docker container entrypoint (runs `sync-env` + migrations)
-- `launcher/umanschat-launcher.cjs` — standalone exe launcher (runs `sync-env` + migrations)
+- `launcher/minerva-launcher.cjs` — standalone exe launcher (runs `sync-env` + migrations)
 
 ## Overview
 
-UmansChat uses a flat `.env` file as its sole configuration source. The file is read at startup by `dotenv` (local dev / exe) or `env_file` in Docker Compose, and it is also writable at runtime through the Settings API.
+MinervaAIWorkspace uses a flat `.env` file as its sole configuration source. The file is read at startup by `dotenv` (local dev / exe) or `env_file` in Docker Compose, and it is also writable at runtime through the Settings API.
 
 ### Two layers of configuration
 
@@ -210,7 +210,7 @@ If the scraper is temporarily unreachable, the `.env` and `process.env` values a
 
 ## Embedding model migration
 
-When the embedding model dimension (`EMBED_DIM`) changes, existing vector data becomes invalid because different models produce incompatible vector spaces. UmansChat handles this with a two-phase confirmation gate.
+When the embedding model dimension (`EMBED_DIM`) changes, existing vector data becomes invalid because different models produce incompatible vector spaces. MinervaAIWorkspace handles this with a two-phase confirmation gate.
 
 ### Dimension change detection
 
@@ -278,7 +278,7 @@ See [Embeddings & Vector Search](./embeddings.md) for details on the embedding p
 |-------------|------------|
 | Local dev | `package.json` `predev` script: `bun run scripts/sync-env.ts` (runs before `next dev`) |
 | Docker | `docker-entrypoint.sh`: `node --experimental-strip-types /app/scripts/sync-env.ts` |
-| Standalone exe | `launcher/umanschat-launcher.cjs` (runs sync-env before migrations + server start) |
+| Standalone exe | `launcher/minerva-launcher.cjs` (runs sync-env before migrations + server start) |
 
 ### How it works
 
@@ -301,7 +301,7 @@ export function syncEnv(examplePath: string, envPath: string, now: Date = new Da
 
 ### Why it exists
 
-As UmansChat evolves, new environment variables are added to `.env.example`. Without sync-env, users upgrading would miss new required keys, causing runtime errors. The script is idempotent — running it repeatedly has no effect once `.env` is up to date.
+As MinervaAIWorkspace evolves, new environment variables are added to `.env.example`. Without sync-env, users upgrading would miss new required keys, causing runtime errors. The script is idempotent — running it repeatedly has no effect once `.env` is up to date.
 
 ```text
 [sync-env] .env is up to date.
@@ -365,7 +365,7 @@ All variables below are defined in `.env.example`. Values shown are defaults fro
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `data/umanschat.db` | SQLite database file path (relative to app root or absolute). Standalone exe creates `data/umanschat.db` on first run. See [Database & Schema](./database.md). |
+| `DATABASE_URL` | `data/minerva.db` | SQLite database file path (relative to app root or absolute). Standalone exe creates `data/minerva.db` on first run. See [Database & Schema](./database.md). |
 | `HOST_OS` | *(empty)* | Operating system label injected into LLM prompts (`Windows` / `macOS` / `Linux`). Empty = auto-detect from `/proc/version`. |
 | `TZ` | *(empty)* | Timezone for date/time in LLM prompts. Empty defaults to `Asia/Tokyo`. |
 
@@ -412,10 +412,10 @@ These variables are **not** in `.env.example` — they are set only in `docker-c
 | `EMBEDDER_GPU_COUNT` | `docker-compose.yml` (embedder service) | `0` | Number of NVIDIA GPUs to reserve for the embedder. `0` = CPU fallback (safe with Docker Compose v2.18+). |
 | `TUNNEL_TOKEN` | `docker-compose.yml` (cloudflared service) | *(empty)* | Passed to the `cloudflared` container. Activated with `--profile tunnel`. |
 | `SEARXNG_BASE_URL` | `docker-compose.yml` (searxng service) | `http://searxng:8080` | SearXNG's own base URL for internal service discovery. |
-| `TORPASSWORD` | `docker-compose.yml` (tor service) | `umanschat-tor-control` | Tor control port password for the `dperson/torproxy` container. |
-| `UMANSCHAT_APP_IMAGE` | `docker-compose.yml` (app service) | `ghcr.io/johmaru/umanschat-unofficial-app:latest` | Override the app image (e.g., for pinning a version). |
-| `UMANSCHAT_SCRAPER_IMAGE` | `docker-compose.yml` (scraper service) | `ghcr.io/johmaru/umanschat-unofficial-scraper:latest` | Override the scraper image. |
-| `UMANSCHAT_EMBEDDER_IMAGE` | `docker-compose.yml` (embedder service) | `ghcr.io/johmaru/umanschat-unofficial-embedder:latest` | Override the embedder image. |
+| `TORPASSWORD` | `docker-compose.yml` (tor service) | `minerva-tor-control` | Tor control port password for the `dperson/torproxy` container. |
+| `MINERVA_APP_IMAGE` | `docker-compose.yml` (app service) | `ghcr.io/johmaru/minerva-ai-workspace-app:latest` | Override the app image (e.g., for pinning a version). |
+| `MINERVA_SCRAPER_IMAGE` | `docker-compose.yml` (scraper service) | `ghcr.io/johmaru/minerva-ai-workspace-scraper:latest` | Override the scraper image. |
+| `MINERVA_EMBEDDER_IMAGE` | `docker-compose.yml` (embedder service) | `ghcr.io/johmaru/minerva-ai-workspace-embedder:latest` | Override the embedder image. |
 
 > **Note on `SCRAPER_URL` / `SEARXNG_URL` / `EMBEDDER_URL`:** These appear in both `.env.example` (for standalone mode, where they may be empty/disabled) and `docker-compose.yml` (where they are set to Docker internal network addresses). In Docker, the compose `environment` block takes precedence over `env_file` for the same key, so the Docker internal addresses win. The `.env` values are still used when running standalone (exe or `bun dev`).
 

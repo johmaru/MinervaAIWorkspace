@@ -64,7 +64,7 @@ const baseSettings = {
   personalEmoji: 1,
   logLevel: "info",
   logFileEnabled: "true",
-  logFilePath: "/tmp/umanschat.log",
+  logFilePath: "/tmp/minerva.log",
   translateDefaultMulti: false,
   translateTimeout: 30,
 };
@@ -145,7 +145,7 @@ function renderModal() {
 }
 
 beforeEach(() => {
-  localStorage.setItem("umanschat-locale", "ja");
+  localStorage.setItem("minerva-locale", "ja");
 });
 
 afterEach(() => {

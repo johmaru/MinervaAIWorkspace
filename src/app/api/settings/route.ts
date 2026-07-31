@@ -590,7 +590,7 @@ export async function POST(req: Request) {
     }
     // AUTH_URL is written to .env for persistence, but Auth.js must NOT read a
     // sticky process.env.AUTH_URL (dual local + Cloudflare access). Mirror it
-    // to UMANS_CONFIGURED_AUTH_URL and delete AUTH_URL from process.env.
+    // to MINERVA_CONFIGURED_AUTH_URL and delete AUTH_URL from process.env.
     if (body.authUrl !== undefined) {
       setConfiguredAuthUrl(body.authUrl);
     }

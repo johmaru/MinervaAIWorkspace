@@ -1,4 +1,4 @@
-# UmansChat Sandbox — Python + Node image (v0.4)
+# MinervaAIWorkspace Sandbox — Python + Node image (v0.4)
 #
 # Prebuilt image for Tier 1 `code_run` sandbox executions.
 # Ships Python 3.12 (slim) and Node.js (distro) so the policy gate can
@@ -6,15 +6,15 @@
 # no network access at runtime (--network none is set by the orchestrator).
 #
 # Build:
-#   docker build -t umanschat-sandbox-python:v0.4 sandbox/python
+#   docker build -t minerva-sandbox-python:v0.4 sandbox/python
 #
 # Smoke:
-#   docker run --rm umanschat-sandbox-python:v0.4 python -c "print(1)"
-#   docker run --rm umanschat-sandbox-python:v0.4 node -e "console.log(1)"
+#   docker run --rm minerva-sandbox-python:v0.4 python -c "print(1)"
+#   docker run --rm minerva-sandbox-python:v0.4 node -e "console.log(1)"
 #
 # The image name is historical (it started python-only). Both runtimes live
 # in this single tag in v0.4; a future split would introduce
-# umanschat-sandbox-python-js:v0.5 etc.
+# minerva-sandbox-python-js:v0.5 etc.
 
 FROM python:3.12-slim-bookworm
 

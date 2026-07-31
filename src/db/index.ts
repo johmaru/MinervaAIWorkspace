@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
-import { mkdirSync, renameSync, unlinkSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { mkdirSync, renameSync, unlinkSync, readdirSync, statSync, openSync, readSync, closeSync, existsSync, cpSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, basename, join } from "node:path";
 import * as schema from "./schema";
@@ -19,7 +19,20 @@ const globalForDb = globalThis as unknown as {
   db?: Db;
 };
 
-const dbPath = process.env.DATABASE_URL || join(process.cwd(), "data", "umanschat.db");
+const DEFAULT_DB_REL = join("data", "minerva.db");
+const LEGACY_DB_REL = join("data", "umanschat.db");
+
+function resolveDefaultDbPath(): string {
+  const preferred = join(process.cwd(), DEFAULT_DB_REL);
+  const legacy = join(process.cwd(), LEGACY_DB_REL);
+  if (!existsSync(preferred) && existsSync(legacy)) {
+    mkdirSync(dirname(preferred), { recursive: true });
+    cpSync(legacy, preferred, { force: true });
+  }
+  return preferred;
+}
+
+const dbPath = process.env.DATABASE_URL || resolveDefaultDbPath();
 
 // Ensure the data directory exists (on first launch)
 mkdirSync(dirname(dbPath), { recursive: true });

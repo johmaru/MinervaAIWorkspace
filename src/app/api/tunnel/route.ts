@@ -7,7 +7,7 @@
  *
  * Design:
  *   - Token is not included in GET response (only hasToken indicates whether it is set)
- *   - AUTH_URL is saved to .env and mirrored to UMANS_CONFIGURED_AUTH_URL (UI/OAuth base).
+ *   - AUTH_URL is saved to .env and mirrored to MINERVA_CONFIGURED_AUTH_URL (UI/OAuth base).
  *     Auth.js no longer reads AUTH_URL for request origin; dual local + Cloudflare
  *     access derives the origin from request headers (see src/lib/request-origin.ts).
  *   - Works in both Docker and exe environments (src/lib/tunnel.ts determines the environment)
@@ -46,9 +46,9 @@ type TunnelBody = {
  *
  * body:
  *   token: Cloudflare Tunnel token (can be omitted if same as existing)
- *   authUrl: Public URL (e.g. https://umanschat.example.com)
+ *   authUrl: Public URL (e.g. https://minerva.example.com)
  *
- * Saves the token and AUTH_URL to .env, mirrors AUTH_URL to UMANS_CONFIGURED_AUTH_URL
+ * Saves the token and AUTH_URL to .env, mirrors AUTH_URL to MINERVA_CONFIGURED_AUTH_URL
  * (UI/OAuth base), and deletes process.env.AUTH_URL so Auth.js derives the origin from
  * request headers (dual local + Cloudflare access, no restart needed).
  */
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
     envContent = updateEnvContent(envContent, updates);
     writeFileSync(envPath, envContent);
 
-    // Reflect token in process.env; mirror AUTH_URL to UMANS_CONFIGURED_AUTH_URL
+    // Reflect token in process.env; mirror AUTH_URL to MINERVA_CONFIGURED_AUTH_URL
     // and delete process.env.AUTH_URL so Auth.js uses request headers (dual access).
     process.env.TUNNEL_TOKEN = token;
     setConfiguredAuthUrl(authUrl);

@@ -1,6 +1,6 @@
 # Embeddings & Vector Search
 
-Documentation of UmansChat's embedding generation subsystem: the provider abstraction over local ONNX and HTTP Python embedders, embedding storage as Float32 BLOB in SQLite, vector search via sqlite-vec's `vec_distance_cosine()` SQL function, content hashing for deduplication, and the dimension-migration flow.
+Documentation of MinervaAIWorkspace's embedding generation subsystem: the provider abstraction over local ONNX and HTTP Python embedders, embedding storage as Float32 BLOB in SQLite, vector search via sqlite-vec's `vec_distance_cosine()` SQL function, content hashing for deduplication, and the dimension-migration flow.
 
 ## Relevant source files
 
@@ -15,7 +15,7 @@ Documentation of UmansChat's embedding generation subsystem: the provider abstra
 
 ## Overview
 
-UmansChat abstracts embedding generation behind a single `embedText` / `embedTexts` interface in `src/lib/embed.ts`. Two backends are selectable at runtime via environment variables:
+MinervaAIWorkspace abstracts embedding generation behind a single `embedText` / `embedTexts` interface in `src/lib/embed.ts`. Two backends are selectable at runtime via environment variables:
 
 - **Local provider** (default `local`) — runs an ONNX model in-process via `@xenova/transformers` (transformers.js). No external service required; the model weights are downloaded lazily on first use.
 - **HTTP provider** (`http`) — delegates to a Python `sentence-transformers` microservice (the "embedder") reachable at `EMBEDDER_URL`. The app POSTs batches of texts and receives vector arrays back.

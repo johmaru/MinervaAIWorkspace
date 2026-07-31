@@ -1,6 +1,6 @@
 # Glossary — Domain Terms
 
-UmansChat-specific terminology. Read this before reading code or docs — many
+MinervaAIWorkspace-specific terminology. Read this before reading code or docs — many
 terms have project-specific meanings that differ from general AI/chat usage.
 
 ## Conversation Model
@@ -48,7 +48,7 @@ to navigate within the group.
 
 ## Chat Modes
 
-UmansChat has two response modes (`thread.responseMode`: `single` | `dual`)
+MinervaAIWorkspace has two response modes (`thread.responseMode`: `single` | `dual`)
 and an optional `rapid` flag on the chat request body. The combinations are:
 
 ### Single Mode (default)
@@ -248,8 +248,8 @@ Outlook Mail, Outlook Calendar. Each has its own tool-name prefix (e.g. `notion_
 `gmail_`, `github_`) and dispatches via `resolveProviderFromToolName`.
 
 **Remote MCP vs OAuth Connection:** Remote MCP servers own their own OAuth/tokens
-(the MCP server handles auth, UmansChat only passes static headers). OAuth
-Connections store tokens in UmansChat and expose hardcoded tools. Use remote MCP
+(the MCP server handles auth, MinervaAIWorkspace only passes static headers). OAuth
+Connections store tokens in MinervaAIWorkspace and expose hardcoded tools. Use remote MCP
 for services not in the provider list above.
 
 DB table: `connections`
@@ -322,7 +322,7 @@ See: `AGENTS.md` → Cloudflare Tunnel GUI
 
 ### Standalone exe
 
-A Windows executable (`UmansChat-<version>-windows-x64.zip`) built by
+A Windows executable (`MinervaAIWorkspace-<version>-windows-x64.zip`) built by
 `scripts/pack-exe.ts` on Windows CI. Contains the same application code as the
 Docker image. Uses `DATABASE_URL=":memory:"`.
 
