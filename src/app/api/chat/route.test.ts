@@ -87,6 +87,8 @@ import { createLLM } from "@/lib/llm";
 
 // Reset mock call history and return values between tests (prevent leaks)
 beforeEach(() => {
+  // Unit tests mock createLLM; Cursor provider bypasses that path.
+  process.env.LLM_PROVIDER = "openai";
   vi.mocked(searchWeb).mockReset();
   vi.mocked(searchWikipedia).mockReset();
   capturedMessages.length = 0;

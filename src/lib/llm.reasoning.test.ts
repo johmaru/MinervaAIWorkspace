@@ -15,13 +15,25 @@ const fetchMock = vi.fn(() =>
   Promise.reject(new Error("test: force MODEL_REASONING fallback")),
 );
 
+const ORIGINAL = {
+  LLM_PROVIDER: process.env.LLM_PROVIDER,
+  LLM_BASE_URL: process.env.LLM_BASE_URL,
+  LLM_MODEL: process.env.LLM_MODEL,
+};
+
 beforeEach(() => {
+  process.env.LLM_PROVIDER = "openai";
+  delete process.env.LLM_BASE_URL;
   fetchMock.mockClear();
   vi.stubGlobal("fetch", fetchMock);
   resetUmansModelsCache();
 });
 
 afterEach(() => {
+  for (const [k, v] of Object.entries(ORIGINAL)) {
+    if (v === undefined) delete (process.env as Record<string, string | undefined>)[k];
+    else (process.env as Record<string, string | undefined>)[k] = v;
+  }
   vi.unstubAllGlobals();
   resetUmansModelsCache();
 });
@@ -70,8 +82,14 @@ describe("getReasoningLevels", () => {
     expect(await getReasoningLevels("umans-kimi-k2.6")).toEqual([]);
   });
 
-  it("unknown model returns empty array", async () => {
-    expect(await getReasoningLevels("gpt-4o-mini")).toEqual([]);
+  it("unknown / freeform model returns DEFAULT_REASONING_LEVELS", async () => {
+    expect(await getReasoningLevels("gpt-4o-mini")).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
   });
 
   it("umans-qwen3.6-35b-a3b returns same levels as umans-flash (alias)", async () => {
@@ -102,7 +120,30 @@ describe("getDefaultReasoningEffort", () => {
     expect(await getDefaultReasoningEffort("umans-kimi-k2.7")).toBeNull();
   });
 
-  it("unknown model returns null", async () => {
-    expect(await getDefaultReasoningEffort("gpt-4o-mini")).toBeNull();
+  it("unknown / freeform model defaults to medium", async () => {
+    expect(await getDefaultReasoningEffort("gpt-4o-mini")).toBe("medium");
+  });
+});
+
+describe("getReasoningLevels — OpenAI-compatible catalog", () => {
+  it("uses DEFAULT_REASONING_LEVELS for OpenAI /models entries without Umans metadata", async () => {
+    process.env.LLM_PROVIDER = "openai";
+    process.env.LLM_BASE_URL = "https://api.openai.com/v1";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ id: "gpt-4.1" }] }),
+      }),
+    );
+    resetUmansModelsCache();
+    expect(await getReasoningLevels("gpt-4.1")).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+    expect(await getDefaultReasoningEffort("gpt-4.1")).toBe("medium");
   });
 });

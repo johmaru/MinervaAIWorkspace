@@ -32,7 +32,7 @@ A self-hosted, open-source AI workspace powered by **UmansAI**. Combines ChatGPT
 - **Dual-model conclusions** — cross-review or debate between two models; synthesized final answer with collapsible A/B details
 - **Hyper-Thinking mode** — 1–5 self-review rounds from distinct perspectives; final answer streamed, drafts in collapsible trace
 - **Council mode** — 2–6 persona panels debate under a time limit; final model synthesizes; full discussion in collapsible block
-- **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`; Flash: `none`/`low`/`medium`/`high`)
+- **Thinking effort control** — per-model reasoning levels (e.g. GLM-5.2: `none`/`high`/`max`; Flash: `none`/`low`/`medium`/`high`); freeform model IDs use the generic `none`–`max` set
 
 ### Knowledge, memory & search
 

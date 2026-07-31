@@ -17,10 +17,17 @@ afterEach(() => {
 import { GET } from "@/app/api/models/route";
 import { resetUmansModelsCache } from "@/lib/llm";
 
-const originalEnv = { ...process.env };
+const ORIGINAL = {
+  LLM_MODEL: process.env.LLM_MODEL,
+  LLM_PROVIDER: process.env.LLM_PROVIDER,
+  LLM_BASE_URL: process.env.LLM_BASE_URL,
+};
 
 afterEach(() => {
-  process.env = { ...originalEnv };
+  for (const [k, v] of Object.entries(ORIGINAL)) {
+    if (v === undefined) delete (process.env as Record<string, string | undefined>)[k];
+    else (process.env as Record<string, string | undefined>)[k] = v;
+  }
   resetUmansModelsCache();
 });
 
@@ -42,6 +49,8 @@ const SAMPLE_API_RESPONSE = {
 describe("GET /api/models", () => {
   beforeEach(() => {
     resetUmansModelsCache();
+    process.env.LLM_PROVIDER = "openai";
+    delete process.env.LLM_BASE_URL;
   });
 
   it("returns model list and displayNames from API", async () => {

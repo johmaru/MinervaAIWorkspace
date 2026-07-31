@@ -7,7 +7,7 @@ vi.mock("@/lib/i18n/types", async (importOriginal) => {
   return { ...actual, DEFAULT_LOCALE: "ja" as const };
 });
 
-import { SettingsModal } from "@/components/SettingsModal";
+import { SettingsModal, resolveClientReasoningLevels } from "@/components/SettingsModal";
 import { I18nProvider } from "@/components/I18nProvider";
 
 /** A representative settings payload returned by GET /api/settings. */
@@ -163,6 +163,36 @@ afterEach(() => {
 function settingsPostCalls(calls: { url: string; init?: RequestInit }[]) {
   return calls.filter((c) => c.url === "/api/settings" && c.init?.method === "POST");
 }
+
+describe("resolveClientReasoningLevels", () => {
+  it("uses the generic set for freeform models missing from the catalog", () => {
+    expect(resolveClientReasoningLevels("gpt-4.1", {})).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+  });
+
+  it("keeps empty levels for Umans not-controllable catalog entries", () => {
+    expect(
+      resolveClientReasoningLevels("umans-coder", { "umans-coder": [] }, "https://api.code.umans.ai/v1"),
+    ).toEqual([]);
+  });
+
+  it("falls back to the generic set when a non-Umans catalog entry has empty levels", () => {
+    expect(
+      resolveClientReasoningLevels("gpt-4o", { "gpt-4o": [] }, "https://api.openai.com/v1"),
+    ).toEqual(["none", "low", "medium", "high", "max"]);
+  });
+
+  it("preserves advertised non-empty levels", () => {
+    expect(
+      resolveClientReasoningLevels("umans-glm-5.2", { "umans-glm-5.2": ["none", "high", "max"] }),
+    ).toEqual(["none", "high", "max"]);
+  });
+});
 
 describe("SettingsModal — immediate partial persistence", () => {
   it("toggling registration lock sends immediate POST { registrationLocked: true }", async () => {

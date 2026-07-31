@@ -46,6 +46,12 @@ try {
   // Skip if .env is absent (e.g. when env is set directly in CI)
 }
 
+// Unit tests mock createLLM and expect the OpenAI-compatible chat path.
+// A developer .env with LLM_PROVIDER=cursor would otherwise route chat tests
+// through the real Cursor SDK and fail. Cursor-specific tests set the env
+// themselves and restore it in afterEach.
+process.env.LLM_PROVIDER = "openai";
+
 // When running tests from the host, override Docker-internal service names with host-reachable ports.
 // Inside Docker (production) these are overridden by docker-compose.yml environment, so no effect.
 if (process.env.EMBEDDER_URL?.includes("embedder:")) {

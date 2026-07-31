@@ -116,6 +116,23 @@ export type ReasoningConfig = {
   canDisable: boolean;
 };
 
+/** Generic OpenAI-compatible reasoning levels when the provider does not advertise capabilities. */
+export const DEFAULT_REASONING_LEVELS: readonly string[] = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "max",
+];
+
+export function defaultReasoningConfig(): ReasoningConfig {
+  return {
+    levels: [...DEFAULT_REASONING_LEVELS],
+    defaultLevel: "medium",
+    canDisable: false,
+  };
+}
+
 export const MODEL_REASONING: Record<string, ReasoningConfig> = {
   "umans-kimi-k2.6": { levels: [], defaultLevel: null, canDisable: false },
   "umans-kimi-k2.7": { levels: [], defaultLevel: null, canDisable: false },
@@ -230,7 +247,7 @@ async function fetchOpenAICompatibleModels(base: string): Promise<UmansModelInfo
     return ids.map((id) => ({
       id,
       displayName: id,
-      reasoning: MODEL_REASONING[id] ?? { levels: [], defaultLevel: null, canDisable: false },
+      reasoning: MODEL_REASONING[id] ?? defaultReasoningConfig(),
       deprecated: false,
     }));
   } catch {
@@ -239,7 +256,7 @@ async function fetchOpenAICompatibleModels(base: string): Promise<UmansModelInfo
       {
         id,
         displayName: id,
-        reasoning: MODEL_REASONING[id] ?? { levels: [], defaultLevel: null, canDisable: false },
+        reasoning: MODEL_REASONING[id] ?? defaultReasoningConfig(),
         deprecated: false,
       },
     ];
@@ -248,27 +265,43 @@ async function fetchOpenAICompatibleModels(base: string): Promise<UmansModelInfo
 
 /**
  * Returns the valid reasoning effort levels for the specified model.
- * Prefers API-sourced values; falls back to MODEL_REASONING on API failure.
- * Returns an empty array if the model is unknown or levels is empty (not controllable).
+ * Prefers API-sourced values; falls back to MODEL_REASONING, then
+ * DEFAULT_REASONING_LEVELS for freeform / OpenAI-compatible models without metadata.
+ * Returns an empty array only when the catalog (or MODEL_REASONING) marks the model
+ * as not controllable (e.g. umans-coder), or when provider is cursor.
  */
 export async function getReasoningLevels(model: string): Promise<string[]> {
   if (llmProvider() === "cursor") return [];
   const models = await getProviderModels();
   const found = models.find((m) => m.id === model);
-  if (found) return found.reasoning.levels;
-  return MODEL_REASONING[model]?.levels ?? [];
+  if (found) {
+    if (found.reasoning.levels.length > 0) return found.reasoning.levels;
+    // Empty catalog levels: Umans /models/info is authoritative (not controllable).
+    if (isUmansBaseUrl()) return [];
+    if (model in MODEL_REASONING) return MODEL_REASONING[model].levels;
+    return [...DEFAULT_REASONING_LEVELS];
+  }
+  if (model in MODEL_REASONING) return MODEL_REASONING[model].levels;
+  return [...DEFAULT_REASONING_LEVELS];
 }
 
 /**
  * Returns the default reasoning effort for the specified model.
  * Prefers API-sourced values. Returns null for non-controllable models (empty levels / null defaultLevel).
+ * Freeform / OpenAI-compatible models without metadata default to "medium".
  */
 export async function getDefaultReasoningEffort(model: string): Promise<string | null> {
   if (llmProvider() === "cursor") return null;
   const models = await getProviderModels();
   const found = models.find((m) => m.id === model);
-  if (found) return found.reasoning.defaultLevel;
-  return MODEL_REASONING[model]?.defaultLevel ?? null;
+  if (found) {
+    if (found.reasoning.levels.length > 0) return found.reasoning.defaultLevel;
+    if (isUmansBaseUrl()) return null;
+    if (model in MODEL_REASONING) return MODEL_REASONING[model].defaultLevel;
+    return "medium";
+  }
+  if (model in MODEL_REASONING) return MODEL_REASONING[model].defaultLevel;
+  return "medium";
 }
 
 /**

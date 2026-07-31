@@ -5,6 +5,30 @@ import { ModelCombobox } from "@/components/ModelCombobox";
 import { clientFetch } from "@/lib/clientFetch";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 
+const UMANS_ORIGIN = "https://api.code.umans.ai";
+const CLIENT_DEFAULT_REASONING_LEVELS = ["none", "low", "medium", "high", "max"];
+
+/**
+ * Resolve Thinking Effort options for the Settings UI.
+ * Missing catalog entries (freeform model IDs) get the generic OpenAI-compatible set.
+ * Empty catalog levels are respected only for the Umans endpoint (not controllable).
+ */
+export function resolveClientReasoningLevels(
+  model: string,
+  map: Record<string, string[]>,
+  baseUrl?: string,
+): string[] {
+  if (!(model in map)) return [...CLIENT_DEFAULT_REASONING_LEVELS];
+  const levels = map[model]!;
+  if (levels.length > 0) return levels;
+  try {
+    const origin = new URL(baseUrl?.trim() || UMANS_ORIGIN).origin;
+    if (origin === new URL(UMANS_ORIGIN).origin) return [];
+  } catch {
+    return [];
+  }
+  return [...CLIENT_DEFAULT_REASONING_LEVELS];
+}
 
 type EmbedModelOption = {
   model: string;
@@ -320,8 +344,16 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     settings.dbVectorDim > 0 &&
     selectedOption.dim !== settings.dbVectorDim;
 
-  const searchReasoningLevels = modelReasoningLevels[form.webSearchModel ?? ""] ?? ["none", "low", "medium", "high", "max"];
-  const currentReasoningLevels = modelReasoningLevels[form.llmModel ?? ""] ?? ["none", "low", "medium", "high", "max"];
+  const searchReasoningLevels = resolveClientReasoningLevels(
+    form.webSearchModel ?? "",
+    modelReasoningLevels,
+    form.llmBaseUrl,
+  );
+  const currentReasoningLevels = resolveClientReasoningLevels(
+    form.llmModel ?? "",
+    modelReasoningLevels,
+    form.llmBaseUrl,
+  );
 
   const handleSave = useCallback(async () => {
     setSaving(true);
