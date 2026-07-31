@@ -8,10 +8,12 @@ const nextConfig: NextConfig = {
   compress: false,
   // For standalone exe distribution: output server.js + required node_modules to .next/standalone.
   output: "standalone",
-  // Treat native modules as external packages (load via require instead of bundling).
+  // Treat native / heavy modules as external (load via require instead of bundling).
   // better-sqlite3 is a native addon; including it in the Next.js bundle causes
   // dlopen to fail during the "Collecting page data" phase.
-  serverExternalPackages: ["better-sqlite3", "sqlite-vec"],
+  // @cursor/sdk ships webpack chunks that reference sibling *.js.LICENSE.txt files;
+  // Turbopack treats those as modules and fails the production build unless externalized.
+  serverExternalPackages: ["better-sqlite3", "sqlite-vec", "@cursor/sdk"],
   // Include native binaries in the trace (required for standalone distribution).
   outputFileTracingIncludes: {
     "/*": [
@@ -20,6 +22,9 @@ const nextConfig: NextConfig = {
       "node_modules/@xenova/transformers/dist/**/*",
       "node_modules/sqlite-vec-windows-x64/**/*",
       "node_modules/sqlite-vec-linux-x64/**/*",
+      "node_modules/@cursor/sdk/**/*",
+      "node_modules/@cursor/sdk-linux-x64/**/*",
+      "node_modules/@cursor/sdk-win32-x64/**/*",
     ],
   },
   async headers() {

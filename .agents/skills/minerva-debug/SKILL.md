@@ -613,6 +613,31 @@ headers: { "Content-Type": "application/json", cookie: "MinervaAIWorkspace-local
 Logs: `hook-force-final-answer`, `hook-auto-user-report`.
 
 ---
+
+### 32. Docker / `next build` fails on `@cursor/sdk` `*.js.LICENSE.txt`
+
+**Symptom**: `npx next build` (Docker `app` stage) fails with:
+
+```
+./node_modules/@cursor/sdk/dist/esm/250.js.LICENSE.txt
+Unknown module type
+This module doesn't have an associated type.
+```
+
+**Cause**: `@cursor/sdk` ships webpack-bundled ESM chunks whose header comments reference sibling `*.js.LICENSE.txt` files. Turbopack follows those as modules and has no loader for `.txt`.
+
+**Fix**: Externalize the package so Next does not bundle it:
+
+```typescript
+serverExternalPackages: ["better-sqlite3", "sqlite-vec", "@cursor/sdk"],
+```
+
+Also add SDK (+ platform optional packages) to `outputFileTracingIncludes` for standalone.
+
+**File**: `next.config.ts`
+
+---
+
 ## Basic Debugging Steps
 
 1. **Reproduce the symptom** — reliably reproduce via browser or curl
