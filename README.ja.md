@@ -220,6 +220,7 @@ docker compose up -d scraper embedder searxng tor
 - セレクタには表示名（例: `Umans Qwen3.6 35B A3B`）
 - API 失敗時は組み込み `MODEL_REASONING` テーブルにフォールバック
 - 任意の **TTFT モデルフォールバック**: `LLM_FALLBACK_MODEL` + `LLM_FALLBACK_TIMEOUT_MS`（既定 10000）
+- **プラットフォームテンプレート** — 設定 → LLM: UmansAI / OpenCode Go / OpenAI / OpenRouter / Groq / DeepSeek / Mistral / xAI / Google Gemini / GitHub Models を選ぶとプロバイダと Base URL を自動入力（後から手編集可）
 
 ## サンドボックスコード実行（任意）
 

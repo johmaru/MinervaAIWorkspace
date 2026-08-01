@@ -220,6 +220,7 @@ The default provider is **OpenAI-compatible** with base URL `https://api.code.um
 - Selectors show display names (e.g. `Umans Qwen3.6 35B A3B`)
 - On API failure, falls back to the built-in `MODEL_REASONING` table
 - Optional **TTFT model fallback**: set `LLM_FALLBACK_MODEL` + `LLM_FALLBACK_TIMEOUT_MS` (default 10000)
+- **Platform templates** — Settings → LLM: pick UmansAI / OpenCode Go / OpenAI / OpenRouter / Groq / DeepSeek / Mistral / xAI / Google Gemini / GitHub Models to auto-fill the provider and base URL (still editable)
 
 ## Sandbox code execution (optional)
 
