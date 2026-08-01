@@ -71,12 +71,13 @@ function applyTemplate(id: string) {
 }
 ```
 
-### `src/lib/i18n/dictionaries.ts` — 新規キー（ja/en 各2）
+### `src/lib/i18n/dictionaries.ts` — 新規キー（ja/en 各3）
 
 | キー | ja | en |
 |---|---|---|
 | `settings.platformTemplate` | プラットフォーム | Platform |
 | `settings.platformTemplateDesc` | 選択するとプロバイダと Base URL を自動設定します（後から手編集可） | Selecting one auto-fills the provider and Base URL (editable afterwards) |
+| `settings.platformTemplateCustom` | カスタム（手入力） | Custom (manual entry) |
 
 ## 保存フロー
 
