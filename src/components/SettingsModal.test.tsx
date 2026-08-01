@@ -347,3 +347,68 @@ describe("SettingsModal — embedDirty and Save payload", () => {
     });
   });
 });
+
+describe("SettingsModal — platform templates", () => {
+  it("selecting a template fills provider=openai and baseUrl, and Save persists both", async () => {
+    const { calls } = mockFetch();
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+
+    const platform = screen.getByRole("combobox", { name: "プラットフォーム" });
+    expect(platform).toHaveValue("umans"); // default baseUrl matches UmansAI
+    fireEvent.change(platform, { target: { value: "opencode" } });
+
+    expect(screen.getByRole("combobox", { name: "プラットフォーム" })).toHaveValue("opencode");
+    expect(screen.getByDisplayValue("https://opencode.ai/zen/go/v1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const posts = settingsPostCalls(calls);
+      expect(posts.length).toBeGreaterThanOrEqual(1);
+      const body = JSON.parse(posts[0].init!.body as string);
+      expect(body).toMatchObject({
+        llmProvider: "openai",
+        llmBaseUrl: "https://opencode.ai/zen/go/v1",
+      });
+    });
+  });
+
+  it("switches from cursor provider to openai and reveals the baseUrl field", async () => {
+    mockFetch({ settings: { llmProvider: "cursor" } });
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+
+    // Cursor mode: base URL input is hidden
+    expect(screen.queryByDisplayValue("https://api.code.umans.ai/v1")).toBeNull();
+    expect(screen.getByDisplayValue("Cursor SDK")).toBeInTheDocument();
+
+    const platform = screen.getByRole("combobox", { name: "プラットフォーム" });
+    fireEvent.change(platform, { target: { value: "openai" } });
+
+    // Provider switched to OpenAI-compatible; base URL input now visible and filled
+    expect(screen.getByDisplayValue("OpenAI 互換")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Cursor SDK")).toBeNull();
+    expect(screen.getByDisplayValue("https://api.openai.com/v1")).toBeInTheDocument();
+  });
+
+  it("shows the matching template when current baseUrl equals a template", async () => {
+    mockFetch({ settings: { llmBaseUrl: "https://openrouter.ai/api/v1" } });
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+
+    expect(screen.getByRole("combobox", { name: "プラットフォーム" })).toHaveValue("openrouter");
+  });
+
+  it("custom selection does not change provider or baseUrl", async () => {
+    mockFetch();
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+
+    const platform = screen.getByRole("combobox", { name: "プラットフォーム" });
+    fireEvent.change(platform, { target: { value: "custom" } });
+
+    expect(platform).toHaveValue("custom");
+    expect(screen.getByDisplayValue("https://api.code.umans.ai/v1")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("OpenAI 互換")).toBeInTheDocument(); // provider untouched
+  });
+});

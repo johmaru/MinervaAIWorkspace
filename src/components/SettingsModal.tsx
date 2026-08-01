@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { ModelCombobox } from "@/components/ModelCombobox";
+import { LLM_PLATFORM_TEMPLATES } from "@/lib/llmTemplates";
 import { clientFetch } from "@/lib/clientFetch";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 
@@ -330,6 +331,28 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setMigrationConfirmed(false);
   }, []);
+
+  /** Template whose baseUrl exactly matches the current form value (or "custom"). */
+  const matchingTemplateId =
+    LLM_PLATFORM_TEMPLATES.find((t) => t.baseUrl === (form.llmBaseUrl ?? ""))?.id ?? "custom";
+
+  /** When the user explicitly picks "custom", keep showing it until the base URL is edited. */
+  const [customSelected, setCustomSelected] = useState(false);
+
+  const selectedTemplateId = customSelected ? "custom" : matchingTemplateId;
+
+  /** Auto-fill provider + base URL from a platform template. "custom" is a no-op for provider/baseUrl. */
+  const applyTemplate = (id: string) => {
+    if (id === "custom") {
+      setCustomSelected(true);
+      return;
+    }
+    setCustomSelected(false);
+    const tpl = LLM_PLATFORM_TEMPLATES.find((t) => t.id === id);
+    if (!tpl) return;
+    update("llmProvider", "openai");
+    update("llmBaseUrl", tpl.baseUrl);
+  };
 
   const selectedOption = settings?.embedModelOptions.find((o) => o.model === form.embedModel);
   const embedDirty =
@@ -705,6 +728,23 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
                   : t("settings.llmProviderOpenAIHint")}
               </p>
             </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block">
+                <span className="block text-xs font-medium text-foreground">{t("settings.platformTemplate")}</span>
+              </label>
+              <select
+                aria-label={t("settings.platformTemplate")}
+                value={selectedTemplateId}
+                onChange={(e) => applyTemplate(e.target.value)}
+                className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
+              >
+                <option value="custom">{t("settings.platformTemplateCustom")}</option>
+                {LLM_PLATFORM_TEMPLATES.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">{t("settings.platformTemplateDesc")}</p>
+            </div>
             {(form.llmProvider ?? "openai") === "openai" && (
               <>
             <div className="sm:col-span-2">
@@ -715,7 +755,10 @@ export function SettingsModal({ open, onClose, onOpenHelp }: Props) {
               <input
                 type="url"
                 value={form.llmBaseUrl ?? ""}
-                onChange={(e) => update("llmBaseUrl", e.target.value)}
+                onChange={(e) => {
+                  setCustomSelected(false);
+                  update("llmBaseUrl", e.target.value);
+                }}
                 placeholder="https://api.code.umans.ai/v1"
                 className="w-full rounded-xl bg-muted px-2 py-1.5 text-sm transition-all duration-200 focus:ring-2 focus:ring-foreground/20"
               />
