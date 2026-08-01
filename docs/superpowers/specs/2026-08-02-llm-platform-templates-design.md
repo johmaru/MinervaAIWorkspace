@@ -51,18 +51,21 @@ export type LlmPlatformId = (typeof LLM_PLATFORM_TEMPLATES)[number]["id"];
 1. テンプレート選択時: `update("llmProvider", "openai")` + `update("llmBaseUrl", <template.baseUrl>)`。APIキー・モデル・フォールバック等は触らない。
 2. 現在の `form.llmBaseUrl` がテンプレートの `baseUrl` と完全一致する場合、そのテンプレートを選択表示。不一致（手入力・未入力）なら `custom`。
 3. 選択後も Base URL 欄は自由に手編集可能（テンプレートは入力補助でありロックではない）。
+4. **カスタム上書き（実装で確定）**: ユーザーが明示的に `custom` を選択した場合、baseUrl がテンプレートと一致していても選択表示は `custom` のまま維持する（`customSelected` state）。Base URL 欄の手編集、または別テンプレートの選択で上書きは解除される。導出のみだと baseUrl 一致時に `custom` 選択が即座にテンプレートへ戻り、手入力モードに切り替えられないため。
 
-**選択状態の導出**（セレクトの `value`）:
+**選択状態の導出**（セレクトの `value`）。実装では `customSelected` 上書きstateを併用する（下記・挙動4）:
 
 ```ts
-const selectedTemplateId =
+const matchingTemplateId =
   LLM_PLATFORM_TEMPLATES.find((t) => t.baseUrl === (form.llmBaseUrl ?? ""))?.id ?? "custom";
+const selectedTemplateId = customSelected ? "custom" : matchingTemplateId;
 ```
 
 **変更時ハンドラ**:
 
 ```ts
 function applyTemplate(id: string) {
+  setCustomSelected(id === "custom");
   if (id === "custom") return; // 何もしない（手入力モードへ）
   const t = LLM_PLATFORM_TEMPLATES.find((x) => x.id === id);
   if (!t) return;
