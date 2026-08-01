@@ -7,7 +7,7 @@ import { clientFetch } from "@/lib/clientFetch";
 import { AnimateModal, MotionButton } from "@/components/ui/motion";
 
 const UMANS_ORIGIN = "https://api.code.umans.ai";
-const CLIENT_DEFAULT_REASONING_LEVELS = ["none", "low", "medium", "high", "max"];
+const CLIENT_DEFAULT_REASONING_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"];
 
 /**
  * Resolve Thinking Effort options for the Settings UI.

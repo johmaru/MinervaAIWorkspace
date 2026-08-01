@@ -122,6 +122,7 @@ export const DEFAULT_REASONING_LEVELS: readonly string[] = [
   "low",
   "medium",
   "high",
+  "xhigh",
   "max",
 ];
 

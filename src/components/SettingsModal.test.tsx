@@ -171,6 +171,7 @@ describe("resolveClientReasoningLevels", () => {
       "low",
       "medium",
       "high",
+      "xhigh",
       "max",
     ]);
   });
@@ -184,7 +185,7 @@ describe("resolveClientReasoningLevels", () => {
   it("falls back to the generic set when a non-Umans catalog entry has empty levels", () => {
     expect(
       resolveClientReasoningLevels("gpt-4o", { "gpt-4o": [] }, "https://api.openai.com/v1"),
-    ).toEqual(["none", "low", "medium", "high", "max"]);
+    ).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
   });
 
   it("preserves advertised non-empty levels", () => {

@@ -88,6 +88,7 @@ describe("getReasoningLevels", () => {
       "low",
       "medium",
       "high",
+      "xhigh",
       "max",
     ]);
   });
@@ -142,6 +143,7 @@ describe("getReasoningLevels — OpenAI-compatible catalog", () => {
       "low",
       "medium",
       "high",
+      "xhigh",
       "max",
     ]);
     expect(await getDefaultReasoningEffort("gpt-4.1")).toBe("medium");
