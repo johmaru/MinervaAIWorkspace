@@ -131,8 +131,11 @@ bunx auth secret
 #     GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 #     Redirect URI: http://localhost:3001/api/auth/callback/google
 
-# 3. Start all services
+# 3. Start the app (lean default: app only)
 docker compose up -d
+
+# Optional: Web search (scraper/SearXNG/Tor) and high-accuracy embedder (EMBED_PROVIDER=http)
+# docker compose --profile search --profile embedder up -d
 
 # 4. Open http://localhost:3001
 #    First launch: create an admin account
@@ -208,7 +211,7 @@ bun run dev            # predev runs sync-env + drizzle migrate
 Optional sidecars:
 
 ```bash
-docker compose up -d scraper embedder searxng tor
+docker compose --profile search --profile embedder up -d scraper embedder searxng tor
 # Point SCRAPER_URL / SEARXNG_URL / EMBEDDER_URL at host-exposed ports
 ```
 

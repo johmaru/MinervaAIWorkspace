@@ -1,4 +1,7 @@
 services:
+  # Lean default: `docker compose up -d` starts app only.
+  #   Web search (scraper/searxng/tor): `docker compose --profile search up -d`
+  #   High-accuracy embedder (EMBED_PROVIDER=http): `docker compose --profile embedder up -d`
   # Release distribution: use the public GHCR image by default.
   #   docker compose pull          (pull the release image from GHCR)
   #   docker compose up -d         (start with the pulled image)
@@ -14,8 +17,10 @@ services:
     depends_on:
       embedder:
         condition: service_started
+        required: false
       scraper:
         condition: service_started
+        required: false
     # Mount the host's .env: .env changes made via the GUI persist
     # across rebuilds (not baked into the image)
     volumes:
@@ -39,9 +44,12 @@ services:
     env_file:
       - .env
     environment:
-      SCRAPER_URL: http://scraper:8000
-      SEARXNG_URL: http://searxng:8080
+      SCRAPER_URL: ${SCRAPER_URL:-}
+      SEARXNG_URL: ${SEARXNG_URL:-}
+      # EMBEDDER_URL stays fixed (not passthrough): existing .env defaults to
+      # http://localhost:8001 which would break in-container use; unused when EMBED_PROVIDER=local.
       EMBEDDER_URL: http://embedder:8001
+      NODE_OPTIONS: "--max-old-space-size=1536"
       DOCKER_ENV: "true"
       # EMBED_* / WEB_SEARCH_* / THINKING_EFFORT / TOR_PROXY / SCRAPE_PROXY / DATABASE_URL are
       # read from the .env file (supports GUI editing)
@@ -55,6 +63,10 @@ services:
       CHAT_EXPORT_MODE: ${CHAT_EXPORT_MODE:-daily}
     ports:
       - "3001:3000"  # Also accessible via localhost:3001 when using Cloudflare Tunnel
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   # Sandbox image (v0.4): prebuilt image for code_run execution.
   # This service is NOT started — it only triggers `docker compose build`
@@ -93,6 +105,7 @@ services:
       dockerfile: Dockerfile
     container_name: minerva-scraper
     restart: unless-stopped
+    profiles: ["search"]
     expose:
       - "8000"
     depends_on:
@@ -101,6 +114,10 @@ services:
       SCRAPE_TIMEOUT: ${SCRAPE_TIMEOUT:-30}
       SEARXNG_URL: http://searxng:8080
       SCRAPE_PROXY: ${SCRAPE_PROXY:-}
+    deploy:
+      resources:
+        limits:
+          memory: 768M
 
   embedder:
     image: ${MINERVA_EMBEDDER_IMAGE:-ghcr.io/johmaru/minerva-ai-workspace-embedder:latest}
@@ -109,6 +126,7 @@ services:
       dockerfile: Dockerfile
     container_name: minerva-embedder
     restart: unless-stopped
+    profiles: ["embedder"]
     ports:
       - "8001:8001"
     environment:
@@ -117,6 +135,8 @@ services:
     # When unset, count:0 provides CPU fallback (safe with Docker Compose v2.18+).
     deploy:
       resources:
+        limits:
+          memory: 3G
         reservations:
           devices:
             - driver: nvidia
@@ -129,6 +149,7 @@ services:
     image: searxng/searxng:latest
     container_name: minerva-searxng
     restart: unless-stopped
+    profiles: ["search"]
     ports:
       - "8081:8080"
     volumes:
@@ -139,16 +160,25 @@ services:
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-minerva-searxng-dev-secret}
     depends_on:
       - tor
+    deploy:
+      resources:
+        limits:
+          memory: 768M
 
   tor:
     image: dperson/torproxy:latest
     container_name: minerva-tor
     restart: unless-stopped
+    profiles: ["search"]
     expose:
       - "9050"
       - "9051"
     environment:
       - TORPASSWORD=minerva-tor-control
+    deploy:
+      resources:
+        limits:
+          memory: 128M
   # Qdrant vector database (optional; enables VECTOR_BACKEND=qdrant)
   # Start with: docker compose --profile qdrant up -d qdrant
   # When using Qdrant, set VECTOR_BACKEND=qdrant and QDRANT_URL=http://qdrant:6333 in .env

@@ -131,8 +131,11 @@ bunx auth secret
 #     GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 #     リダイレクト URI: http://localhost:3001/api/auth/callback/google
 
-# 3. 全サービスを起動
+# 3. アプリを起動（リーン既定: app のみ）
 docker compose up -d
+
+# 任意: Web 検索（scraper/SearXNG/Tor）と高精度 embedder（EMBED_PROVIDER=http）
+# docker compose --profile search --profile embedder up -d
 
 # 4. http://localhost:3001 を開く
 #    初回は管理者アカウント作成
@@ -208,7 +211,7 @@ bun run dev            # predev が sync-env + drizzle migrate
 オプションのサイドカー:
 
 ```bash
-docker compose up -d scraper embedder searxng tor
+docker compose --profile search --profile embedder up -d scraper embedder searxng tor
 # SCRAPER_URL / SEARXNG_URL / EMBEDDER_URL をホスト公開ポートに向ける
 ```
 
