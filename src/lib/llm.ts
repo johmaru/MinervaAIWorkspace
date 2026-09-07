@@ -337,6 +337,41 @@ export async function buildDisableReasoningParams(
   return {};
 }
 
+/**
+ * Extracts the upstream API error detail from a chat-completions failure.
+ * The OpenAI SDK throws `APIError` whose `.message` is generic
+ * (`500 Internal server error`) while the real reason
+ * (`model_not_found`, auth, param mismatch) lives in `.status` and
+ * `.error` (`{ message, code, type }` or string). Returns the pieces the
+ * chat route logs and forwards to the client. `upstream` is truncated to
+ * 500 chars; the request body never echoes the API key, so no redact needed.
+ */
+export function extractUpstreamDetail(err: unknown): {
+  status?: number;
+  message?: string;
+  upstream?: string;
+} {
+  if (err === null || typeof err !== "object") return {};
+  const e = err as { status?: unknown; error?: unknown };
+  const status = typeof e.status === "number" ? e.status : undefined;
+  let message: string | undefined;
+  let upstream: string | undefined;
+  const body = e.error;
+  if (typeof body === "string" && body.length > 0) {
+    message = body;
+    upstream = body.slice(0, 500);
+  } else if (body !== null && typeof body === "object") {
+    const b = body as { message?: unknown };
+    if (typeof b.message === "string" && b.message.length > 0) message = b.message;
+    try {
+      upstream = JSON.stringify(body).slice(0, 500);
+    } catch {
+      upstream = String(body).slice(0, 500);
+    }
+  }
+  return { status, message, upstream };
+}
+
 /** Mapping of model id → display_name. */
 export async function getModelDisplayNames(): Promise<Record<string, string>> {
   if (llmProvider() === "cursor") {

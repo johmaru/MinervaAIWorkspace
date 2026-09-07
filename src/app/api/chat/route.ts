@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type OpenAI from "openai";
-import { createLLM, defaultModel, defaultSearchModel, searchThinkingEffort, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, fallbackModel, fallbackTimeoutMs, llmProvider } from "@/lib/llm";
+import { createLLM, defaultModel, defaultSearchModel, searchThinkingEffort, getReasoningLevels, getDefaultReasoningEffort, availableModels, buildDisableReasoningParams, extractUpstreamDetail, fallbackModel, fallbackTimeoutMs, llmBaseUrl, llmProvider } from "@/lib/llm";
 import { buildCursorPrompt, runCursorChat } from "@/lib/cursorLlm";
 import { db } from "@/db";
 import { messages, threads, users, mcpServers, connections, globalInstructions, folders } from "@/db/schema";
@@ -298,6 +298,21 @@ export async function POST(req: Request) {
 
       try {
         send("start", { userMessageId: prepared.userMessage.id });
+        // Stale-model guard: a provider template switch (e.g. Go → Zen) keeps
+        // the old model id, which the new endpoint rejects opaquely. Fail fast
+        // before any upstream call so UI/API paths share one checkpoint.
+        // Fail-open when the catalog itself is unreachable (single fallback entry).
+        if (!useCursorProvider) {
+          const catalog = await availableModels().catch(() => null);
+          const catalogUnreachable =
+            catalog !== null && catalog.length === 1 && catalog[0] === defaultModel() && finalModel !== catalog[0];
+          if (catalog !== null && !catalogUnreachable && !catalog.includes(finalModel)) {
+            const msg = `Model "${finalModel}" is not available on ${llmBaseUrl()} — カタログから選び直してください。`;
+            try { send("error", { message: msg }); } catch { /* client already gone */ }
+            logger.error("chat", "stream-error", { threadId: body.threadId, model: finalModel, error: msg });
+            return;
+          }
+        }
 
         // ── Cursor SDK provider: skip Minerva tools / dual / hyper / council ──
         if (useCursorProvider) {
@@ -701,8 +716,10 @@ export async function POST(req: Request) {
         // If the partial-save DB insert below throws, the error event is already sent.
         // send() is already error-safe (swallows enqueue errors),
         // but wrap defensively to ensure the partial-save below is always reachable.
-        try { send("error", { message: err instanceof Error ? err.message : t(locale, "chat.streamError") }); } catch { /* client already gone */ }
-        logger.error("chat", "stream-error", { threadId: body.threadId, error: err instanceof Error ? err.message : String(err) });
+        const detail = extractUpstreamDetail(err);
+        const fallbackMsg = err instanceof Error ? err.message : t(locale, "chat.streamError");
+        try { send("error", { message: detail.message ?? fallbackMsg, ...(detail.status !== undefined ? { status: detail.status } : {}) }); } catch { /* client already gone */ }
+        logger.error("chat", "stream-error", { threadId: body.threadId, model: finalModel, ...(detail.status !== undefined ? { status: detail.status } : {}), ...(detail.upstream ? { upstream: detail.upstream } : {}), error: err instanceof Error ? err.message : String(err) });
         // Save partial assistant content if any was generated before the error
         if (assistantContent) {
           try {
@@ -2441,7 +2458,7 @@ async function streamCompletion({
         // thinking-off was a major cause of shallow list_directory loops + fabrication.
         ...(reasoningEffort === "none"
           ? disableReasoningParams
-          : reasoningEffort
+          : reasoningEffort && (await getReasoningLevels(modelToUse)).includes(reasoningEffort)
             ? { reasoning_effort: reasoningEffort }
             : {}),
         ...(useToolsThisRound
@@ -3354,7 +3371,7 @@ async function streamCompletion({
         stream: true,
         ...(reasoningEffort === "none"
           ? disableReasoningParams
-          : reasoningEffort
+          : reasoningEffort && (await getReasoningLevels(modelToUse)).includes(reasoningEffort)
             ? { reasoning_effort: reasoningEffort }
             : {}),
         // No tools — answer only (hook-enforced).

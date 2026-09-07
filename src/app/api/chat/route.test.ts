@@ -74,6 +74,11 @@ vi.mock("@/lib/llm", async (importOriginal) => {
   return {
     ...actual,
     createLLM: vi.fn(() => (useFakeLlm.get() ? fakeLlm : actual.createLLM())),
+    // Hermetic catalog: real availableModels hits the network (/models) and
+    // would make the stale-model guard flap on fetch success/failure.
+    // Default to [defaultModel()] so existing default-model tests pass;
+    // per-test overrides via mockResolvedValueOnce.
+    availableModels: vi.fn(async () => [actual.defaultModel()]),
   };
 });
 
@@ -83,7 +88,7 @@ import { searchWikipedia } from "@/lib/wikipedia";
 import { buildMemoryContext } from "@/lib/memoryStore";
 import { probeToolSupport } from "@/lib/toolProbe";
 import { POST } from "@/app/api/chat/route";
-import { createLLM } from "@/lib/llm";
+import { availableModels, createLLM, resetUmansModelsCache } from "@/lib/llm";
 
 // Reset mock call history and return values between tests (prevent leaks)
 beforeEach(() => {
@@ -1272,5 +1277,135 @@ describe("POST /api/chat — TTFT model fallback", () => {
 
     // LLM呼び出しは1回のみ
     expect(callCount).toBe(1);
+  }, 30_000);
+});
+
+describe("POST /api/chat — stale-model guard + upstream detail + reasoning gate", () => {
+  const origBaseUrl = process.env.LLM_BASE_URL;
+  const origThinking = process.env.THINKING_EFFORT;
+  const realFetch = globalThis.fetch;
+
+  function modelReq(threadId: string, model: string): Request {
+    return new Request("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ threadId, content: "hi", model }),
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function okStream() {
+    return (async function* () {
+      yield { choices: [{ delta: { content: "OK" } }] };
+    })();
+  }
+
+  afterEach(() => {
+    vi.mocked(createLLM).mockReset();
+    vi.mocked(availableModels).mockReset();
+    vi.mocked(availableModels).mockImplementation(async () => ["catalog-model"]);
+    vi.mocked(probeToolSupport).mockReset();
+    vi.unstubAllGlobals();
+    resetUmansModelsCache();
+    if (origBaseUrl === undefined) delete process.env.LLM_BASE_URL;
+    else process.env.LLM_BASE_URL = origBaseUrl;
+    if (origThinking === undefined) delete process.env.THINKING_EFFORT;
+    else process.env.THINKING_EFFORT = origThinking;
+  });
+
+  it("catalog-out model → upstream create not called, error names the model", async () => {
+    const id = await createThread();
+    vi.mocked(availableModels).mockResolvedValueOnce(["catalog-model"]);
+    vi.mocked(probeToolSupport).mockResolvedValue({ supported: false, checkedAt: new Date() });
+    const create = vi.fn(async () => okStream());
+    vi.mocked(createLLM).mockReturnValue({ chat: { completions: { create } } } as never);
+
+    const res = await POST(modelReq(id, "ghost-model-xyz"));
+    expect(res.status).toBe(200);
+    const events = parseEvents(await sseChunks(res));
+
+    expect(create).not.toHaveBeenCalled();
+    const errors = events.filter((e) => e.event === "error");
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0].data.message)).toContain("ghost-model-xyz");
+    expect(events.some((e) => e.event === "done")).toBe(false);
+  }, 30_000);
+
+  it("upstream 404 model_not_found → SSE error carries upstream wording + status", async () => {
+    const id = await createThread();
+    vi.mocked(availableModels).mockResolvedValueOnce(["catalog-model"]);
+    vi.mocked(probeToolSupport).mockResolvedValue({ supported: false, checkedAt: new Date() });
+    const apiErr = Object.assign(new Error("404 Not Found"), {
+      status: 404,
+      error: { message: "model_not_found: no such model", code: "model_not_found", type: "invalid_request_error" },
+    });
+    const create = vi.fn(async (params: Record<string, unknown>) => {
+      if (params.stream) throw apiErr;
+      return { choices: [{ message: { content: "summary" } }] };
+    });
+    vi.mocked(createLLM).mockReturnValue({ chat: { completions: { create } } } as never);
+
+    const res = await POST(modelReq(id, "catalog-model"));
+    expect(res.status).toBe(200);
+    const events = parseEvents(await sseChunks(res));
+
+    const errors = events.filter((e) => e.event === "error");
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0].data.message)).toContain("model_not_found");
+    expect(errors[0].data.status).toBe(404);
+    expect(events.some((e) => e.event === "done")).toBe(false);
+  }, 30_000);
+
+  it("catalog default outside levels → reasoning_effort omitted; consistent default kept", async () => {
+    const id = await createThread();
+    // Umans-shape catalog: weird-model advertises ["high"] but defaults to
+    // "medium" (outside levels); sane-model is consistent ("high"/"high").
+    process.env.LLM_BASE_URL = "https://api.code.umans.ai/v1";
+    // Pin effort: ambient THINKING_EFFORT varies by machine (.env vs shell),
+    // and "medium" is outside weird-model's ["high"] but inside sane default.
+    process.env.THINKING_EFFORT = "medium";
+    resetUmansModelsCache();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        if (String(url).includes("/models/info")) {
+          return new Response(
+            JSON.stringify({
+              "weird-model": { name: "weird-model", capabilities: { reasoning: { levels: ["high"], default_level: "medium" } } },
+              "sane-model": { name: "sane-model", capabilities: { reasoning: { levels: ["high"], default_level: "high" } } },
+            }),
+            { status: 200 },
+          );
+        }
+        return (realFetch as typeof fetch)(String(url));
+      }),
+    );
+    vi.mocked(probeToolSupport).mockResolvedValue({ supported: false, checkedAt: new Date() });
+    const seen: Record<string, unknown>[] = [];
+    const create = vi.fn(async (params: Record<string, unknown>) => {
+      if (params.stream) {
+        seen.push(params);
+        return okStream();
+      }
+      return { choices: [{ message: { content: "summary" } }] };
+    });
+    vi.mocked(createLLM).mockReturnValue({ chat: { completions: { create } } } as never);
+
+    vi.mocked(availableModels).mockResolvedValueOnce(["weird-model", "sane-model"]);
+    const resWeird = await POST(modelReq(id, "weird-model"));
+    expect(resWeird.status).toBe(200);
+    await sseChunks(resWeird);
+    const streamingWeird = seen.filter((p) => p.stream);
+    expect(streamingWeird.length).toBeGreaterThan(0);
+    for (const p of streamingWeird) expect(p).not.toHaveProperty("reasoning_effort");
+
+    seen.length = 0;
+    vi.mocked(availableModels).mockResolvedValueOnce(["weird-model", "sane-model"]);
+    const id2 = await createThread();
+    const resSane = await POST(modelReq(id2, "sane-model"));
+    expect(resSane.status).toBe(200);
+    await sseChunks(resSane);
+    const streamingSane = seen.filter((p) => p.stream);
+    expect(streamingSane.length).toBeGreaterThan(0);
+    for (const p of streamingSane) expect(p.reasoning_effort).toBe("high");
   }, 30_000);
 });
