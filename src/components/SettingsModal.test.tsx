@@ -374,6 +374,29 @@ describe("SettingsModal — platform templates", () => {
     });
   });
 
+  it("selecting OpenCode Zen fills provider=openai and zen baseUrl, and Save persists both", async () => {
+    const { calls } = mockFetch();
+    renderModal();
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).not.toBeDisabled());
+
+    const platform = screen.getByRole("combobox", { name: "プラットフォーム" });
+    fireEvent.change(platform, { target: { value: "opencode-zen" } });
+
+    expect(screen.getByRole("combobox", { name: "プラットフォーム" })).toHaveValue("opencode-zen");
+    expect(screen.getByDisplayValue("https://opencode.ai/zen/v1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      const posts = settingsPostCalls(calls);
+      expect(posts.length).toBeGreaterThanOrEqual(1);
+      const body = JSON.parse(posts[0].init!.body as string);
+      expect(body).toMatchObject({
+        llmProvider: "openai",
+        llmBaseUrl: "https://opencode.ai/zen/v1",
+      });
+    });
+  });
+
   it("switches from cursor provider to openai and reveals the baseUrl field", async () => {
     mockFetch({ settings: { llmProvider: "cursor" } });
     renderModal();

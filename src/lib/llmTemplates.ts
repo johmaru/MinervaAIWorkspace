@@ -12,6 +12,7 @@
 export const LLM_PLATFORM_TEMPLATES = [
   { id: "umans",      name: "UmansAI",       baseUrl: "https://api.code.umans.ai/v1" },
   { id: "opencode",   name: "OpenCode Go",   baseUrl: "https://opencode.ai/zen/go/v1" },
+  { id: "opencode-zen", name: "OpenCode Zen", baseUrl: "https://opencode.ai/zen/v1" },
   { id: "openai",     name: "OpenAI",        baseUrl: "https://api.openai.com/v1" },
   { id: "openrouter", name: "OpenRouter",     baseUrl: "https://openrouter.ai/api/v1" },
   { id: "groq",       name: "Groq",          baseUrl: "https://api.groq.com/openai/v1" },

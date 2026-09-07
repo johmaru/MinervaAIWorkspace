@@ -11,4 +11,12 @@ describe("LLM_PLATFORM_TEMPLATES", () => {
     const urls = LLM_PLATFORM_TEMPLATES.map((t) => t.baseUrl);
     expect(new Set(urls).size).toBe(urls.length);
   });
+
+  it("includes OpenCode Zen template", () => {
+    expect(LLM_PLATFORM_TEMPLATES).toContainEqual({
+      id: "opencode-zen",
+      name: "OpenCode Zen",
+      baseUrl: "https://opencode.ai/zen/v1",
+    });
+  });
 });
