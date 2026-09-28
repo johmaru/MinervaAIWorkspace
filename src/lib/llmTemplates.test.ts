@@ -19,4 +19,12 @@ describe("LLM_PLATFORM_TEMPLATES", () => {
       baseUrl: "https://opencode.ai/zen/v1",
     });
   });
+
+  it("includes NVIDIA NIM template", () => {
+    expect(LLM_PLATFORM_TEMPLATES).toContainEqual({
+      id: "nvidia-nim",
+      name: "NVIDIA NIM",
+      baseUrl: "https://integrate.api.nvidia.com/v1",
+    });
+  });
 });

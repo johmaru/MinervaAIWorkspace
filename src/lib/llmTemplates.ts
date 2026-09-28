@@ -21,6 +21,7 @@ export const LLM_PLATFORM_TEMPLATES = [
   { id: "xai",        name: "xAI",           baseUrl: "https://api.x.ai/v1" },
   { id: "gemini",     name: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai" },
   { id: "github",     name: "GitHub Models", baseUrl: "https://models.github.ai/inference" },
+  { id: "nvidia-nim", name: "NVIDIA NIM",     baseUrl: "https://integrate.api.nvidia.com/v1" },
 ] as const;
 
 export type LlmPlatformId = (typeof LLM_PLATFORM_TEMPLATES)[number]["id"];
