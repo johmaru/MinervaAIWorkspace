@@ -213,6 +213,13 @@ async function processFeedbackLoop(
     .limit(1);
 
   if (!prevUserMsg) return;
+  const injectedMemory = await db.all(sql`
+    SELECT 1 FROM memory_injections mi
+    INNER JOIN memories m ON mi.memory_id = m.id
+    WHERE mi.message_id = ${prevUserMsg.id}
+    LIMIT 1
+  `);
+  if (injectedMemory.length === 0) return;
 
   // Find memories injected for the previous user message — with distance computed in SQL
   const queryVector = await embedText(newQuery, "query");

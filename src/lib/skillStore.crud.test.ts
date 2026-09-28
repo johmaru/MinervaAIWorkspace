@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { skills, users } from "@/db/schema";
+import { skills, threads, users } from "@/db/schema";
 
 // Mock embedText: produces deterministic vectors where similarity reflects
 // content overlap. Uses character n-gram hashing into a fixed-dimensional
@@ -33,7 +33,8 @@ vi.mock("@/lib/embed", () => ({
   }),
 }));
 
-import { listSkills, createSkill, deleteSkill, updateSkillContent } from "@/lib/skillStore";
+import { buildSkillContext, createSkill, deleteSkill, findRelevantSkills, listSkills, updateSkillContent } from "@/lib/skillStore";
+import { embedText } from "@/lib/embed";
 
 const createdUserIds: string[] = [];
 const createdSkillIds: string[] = [];
@@ -64,6 +65,39 @@ afterAll(async () => {
     await db.delete(skills).where(eq(skills.userId, id));
     await db.delete(users).where(eq(users.id, id));
   }
+});
+
+describe("findRelevantSkills active-owner guard", () => {
+  it("skips embedding for other users' or archived skills and searches active owned skills", async () => {
+    const [user] = await db.insert(users).values({
+      nickname: "skill-guard-test-user",
+      email: "skill-guard-test@minerva.test",
+    }).returning();
+    createdUserIds.push(user.id);
+    const otherSkill = await createSkill(otherUserId, {
+      name: "Other FPGA Workflow",
+      content: "FPGA 開発 の手順",
+    });
+    createdSkillIds.push(otherSkill.id);
+    const ownSkill = await createSkill(user.id, {
+      name: "FPGA Workflow",
+      content: "FPGA 開発 の手順",
+    });
+    createdSkillIds.push(ownSkill.id);
+    await db.update(skills).set({ status: "archived" }).where(eq(skills.id, ownSkill.id));
+
+    vi.mocked(embedText).mockClear();
+    expect(await findRelevantSkills("FPGA 開発", user.id)).toEqual([]);
+    expect(await buildSkillContext({ content: "use FPGA Workflow skill", userId: user.id })).toBeNull();
+    expect(embedText).not.toHaveBeenCalled();
+
+    await db.update(skills).set({ status: "active" }).where(eq(skills.id, ownSkill.id));
+    expect((await findRelevantSkills("FPGA 開発", user.id)).map((skill) => skill.id)).toContain(ownSkill.id);
+    const [thread] = await db.insert(threads).values({ userId: user.id, title: "manual skill test" }).returning();
+    const manual = await buildSkillContext({ content: "use FPGA Workflow skill", userId: user.id, threadId: thread.id });
+    expect(manual?.injected[0].skillId).toBe(ownSkill.id);
+    expect(manual?.injected[0].activationType).toBe("manual");
+  });
 });
 
 describe("createSkill", () => {

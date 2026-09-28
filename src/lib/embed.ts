@@ -60,6 +60,7 @@ type Pipeline = {
 };
 
 let pipelinePromise: Promise<Pipeline> | null = null;
+const inFlight = new Map<string, Promise<number[]>>();
 
 /**
  * Lazily initializes the transformers.js pipeline.
@@ -135,6 +136,7 @@ async function embedViaHttp(texts: string[], kind?: EmbedKind): Promise<number[]
  */
 export function resetEmbedPipeline(): void {
   pipelinePromise = null;
+  inFlight.clear();
   MODEL_ID = process.env.EMBED_MODEL || "LiquidAI/LFM2.5-Embedding-350M";
   EMBED_DIM = Number(process.env.EMBED_DIM) || 1024;
 }
@@ -157,19 +159,37 @@ export function hashContent(content: string): string {
  */
 export async function embedText(text: string, kind?: EmbedKind): Promise<number[]> {
   if (!text.trim()) return [];
-  if (isHttpProvider()) {
-    const [vec] = await embedViaHttp([text], kind);
-    return vec ?? [];
-  }
-  try {
-    const extractor = await getPipeline();
-    const output = await extractor([text], { pooling: "mean", normalize: true });
-    const vectors = output.tolist();
-    return vectors[0];
-  } catch (err) {
-    logger.error("embed", "embedding failed", { error: err instanceof Error ? err.message : String(err) });
-    return [];
-  }
+  const http = isHttpProvider();
+  const key = JSON.stringify([
+    http ? "http" : "local",
+    http ? process.env.EMBEDDER_URL : MODEL_ID,
+    process.env.EMBED_MODEL,
+    kind ?? null,
+    text,
+  ]);
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+
+  const operation = (async () => {
+    if (http) {
+      const [vec] = await embedViaHttp([text], kind);
+      return vec ?? [];
+    }
+    try {
+      const extractor = await getPipeline();
+      const output = await extractor([text], { pooling: "mean", normalize: true });
+      const vectors = output.tolist();
+      return vectors[0];
+    } catch (err) {
+      logger.error("embed", "embedding failed", { error: err instanceof Error ? err.message : String(err) });
+      return [];
+    }
+  })();
+  const pending = operation.finally(() => {
+    if (inFlight.get(key) === pending) inFlight.delete(key);
+  });
+  inFlight.set(key, pending);
+  return pending;
 }
 
 /**

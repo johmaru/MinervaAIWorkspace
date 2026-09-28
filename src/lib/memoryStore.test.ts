@@ -476,6 +476,45 @@ describe("buildMemoryContext feedback loop", () => {
     }
   });
 
+  it("searches current memories without embedding feedback when the previous turn had no injections", async () => {
+    const uid = fbUserIds[0];
+    const [thread] = await db.insert(threads).values({
+      userId: uid,
+      title: "feedback without injections",
+    }).returning();
+    fbThreadIds.push(thread.id);
+    const memId = await insertMemory(thread.id, null, "ユーザーは FPGA 開発をしている");
+    fbMemoryIds.push(memId);
+    const [previous] = await db.insert(messages).values({
+      threadId: thread.id,
+      role: "user",
+      content: "最初の発話",
+    }).returning();
+    fbMessageIds.push(previous.id);
+    const [current] = await db.insert(messages).values({
+      threadId: thread.id,
+      role: "user",
+      content: "FPGA 開発",
+    }).returning();
+    fbMessageIds.push(current.id);
+
+    vi.mocked(embedText).mockClear();
+    const context = await buildMemoryContext({
+      content: "FPGA 開発",
+      thread: { folderId: null, id: thread.id },
+      userId: uid,
+      currentThreadId: thread.id,
+      userMessageId: current.id,
+    });
+
+    expect(context?.content).toContain("ユーザーは FPGA 開発をしている");
+    expect(embedText).toHaveBeenCalledTimes(1);
+    const [memory] = await db.select({ importance: memories.importance }).from(memories).where(eq(memories.id, memId));
+    expect(memory.importance).toBe(0.5);
+    const previousInjections = await db.select().from(memoryInjections).where(eq(memoryInjections.messageId, previous.id));
+    expect(previousInjections).toEqual([]);
+  });
+
   it("boosts importance when user continues the same topic across turns", async () => {
     const uid = fbUserIds[0];
     const [thread] = await db.insert(threads).values({

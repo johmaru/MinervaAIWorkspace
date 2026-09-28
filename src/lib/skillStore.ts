@@ -49,6 +49,13 @@ export async function findRelevantSkills(
   userId: string,
   limit = 3,
 ): Promise<ScoredSkill[]> {
+  const [activeSkill] = await db
+    .select({ id: skills.id })
+    .from(skills)
+    .where(and(eq(skills.userId, userId), eq(skills.status, "active")))
+    .limit(1);
+  if (!activeSkill) return [];
+
   const queryVector = await embedText(query, "query");
   if (queryVector.length === 0) return [];
   const queryBuf = toVecBuffer(queryVector);

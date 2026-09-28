@@ -15,7 +15,7 @@ const updateSetWhereSpy = vi.fn(() => ({ catch: vi.fn() }));
 vi.mock("@/db", () => ({
   db: {
     select: vi.fn(() => ({
-      from: vi.fn(() => ({ where: vi.fn(() => []), limit: vi.fn(() => []) })),
+      from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn(async () => [{ id: "active-skill" }]) })), limit: vi.fn(() => []) })),
     })),
     insert: vi.fn(() => ({ values: insertValuesSpy })),
     update: vi.fn(() => ({
@@ -41,6 +41,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { buildSkillContext } from "@/lib/skillStore";
 import { db } from "@/db";
+import { embedText } from "@/lib/embed";
 
 describe("buildSkillContext empty-merged guard", () => {
   afterEach(() => {
@@ -62,6 +63,21 @@ describe("buildSkillContext empty-merged guard", () => {
     // insert().values() must not be called at all when merged is empty.
     expect(insertValuesSpy).not.toHaveBeenCalled();
     expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("does not embed a query when the user has no active skills", async () => {
+    vi.mocked(db.select).mockImplementationOnce(() => ({
+      from: () => ({ where: () => ({ limit: async () => [] }) }),
+    }) as never);
+    vi.mocked(embedText).mockClear();
+
+    const result = await buildSkillContext({
+      content: "question without matching skill",
+      userId: "user-without-skills",
+    });
+
+    expect(result).toBeNull();
+    expect(embedText).not.toHaveBeenCalled();
   });
 
   it("returns null when threadId is omitted and no skills match", async () => {
