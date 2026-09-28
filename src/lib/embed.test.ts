@@ -119,6 +119,24 @@ describe("embed — provider switching", () => {
     expect(vec).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("passes an AbortSignal timeout so a hung embedder cannot stall chat first-token", async () => {
+    process.env.EMBED_PROVIDER = "http";
+    process.env.EMBEDDER_URL = "http://embedder-test:8001";
+
+    let capturedSignal: unknown = null;
+    const fetchSpy = vi.fn().mockImplementation(async (_input: string | URL, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? null;
+      return new Response(JSON.stringify({ vectors: [[0.1]] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    global.fetch = fetchSpy as unknown as typeof fetch;
+
+    await embedText("hello", "query");
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 describe("resetEmbedPipeline", () => {

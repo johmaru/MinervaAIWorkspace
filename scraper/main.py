@@ -37,8 +37,26 @@ _runtime_scrape_proxy: str | None = os.environ.get("SCRAPE_PROXY") or None
 _runtime_scrape_timeout: int = SCRAPE_FETCH_TIMEOUT
 # Per-URL scrape cache (in-process, TTL 300s).
 # Prevents multiple queries in a single /search request from scraping the same URL.
+# Bounded to 500 entries (LRU-ish eviction of oldest) to avoid unbounded RAM growth
+# in a long-running container (each entry holds up to 50KB of content).
 _SCRAPE_CACHE: dict[str, tuple[float, dict]] = {}
 _SCRAPE_CACHE_TTL = 300.0  # seconds
+_SCRAPE_CACHE_MAX = 500
+# robots.txt verdicts per netloc (TTL 1h, bounded). Avoids refetching robots.txt
+# on every /scrape call for the same host.
+_ROBOTS_CACHE: dict[str, tuple[float, bool]] = {}
+_ROBOTS_CACHE_TTL = 3600.0
+_ROBOTS_CACHE_MAX = 1000
+
+
+def _cache_put(cache: dict, key: str, value: tuple[float, object], cap: int) -> None:
+    if key not in cache and len(cache) >= cap:
+        # Evict oldest inserted key (dicts preserve insertion order).
+        try:
+            cache.pop(next(iter(cache)))
+        except StopIteration:
+            pass
+    cache[key] = value  # type: ignore[assignment]
 
 
 def is_safe_host(hostname: str) -> bool:
@@ -396,7 +414,7 @@ async def scrape_url_safe(url: str) -> dict:
     if not content:
         return {}
     result = {"url": normalized, "title": title, "content": content}
-    _SCRAPE_CACHE[normalized] = (time.monotonic(), result)
+    _cache_put(_SCRAPE_CACHE, normalized, (time.monotonic(), result), _SCRAPE_CACHE_MAX)
     return result
 
 
@@ -446,24 +464,34 @@ def extract_text(page) -> str:
 async def is_allowed(url: str) -> bool:
     """Fetch robots.txt and decide. Fetch failure / 404 is allowed (fail-open)."""
     parsed = urlparse(url)
+    netloc = (parsed.netloc or "").lower()
+    now = time.monotonic()
+    cached = _ROBOTS_CACHE.get(netloc)
+    if cached and (now - cached[0]) < _ROBOTS_CACHE_TTL:
+        return cached[1]
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     try:
         page = await AsyncFetcher.get(robots_url, stealthy_headers=True, timeout=5, retries=1)
     except Exception:
         return True
     if page.status != 200:
-        # Allow if robots.txt cannot be fetched (including 404)
+        # Allow if robots.txt cannot be fetched (including 404) — cache to avoid refetch.
+        _cache_put(_ROBOTS_CACHE, netloc, (time.monotonic(), True), _ROBOTS_CACHE_MAX)
         return True
     try:
         rules = parse_robots_txt(str(page.body, encoding="utf-8", errors="replace"))
     except Exception:
         return True
+    allowed = True
     for path in rules["disallow_paths"]:
         if path == "/":
-            return False
+            allowed = False
+            break
         if parsed.path.startswith(path):
-            return False
-    return True
+            allowed = False
+            break
+    _cache_put(_ROBOTS_CACHE, netloc, (time.monotonic(), allowed), _ROBOTS_CACHE_MAX)
+    return allowed
 
 
 def parse_robots_txt(text: str) -> dict:

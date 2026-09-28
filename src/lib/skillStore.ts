@@ -181,10 +181,14 @@ export async function buildSkillContext({
           };
         })
         .filter((x): x is InjectedSkillInfo => x !== null);
-      db.update(skills)
-        .set({ lastUsedAt: new Date() })
-        .where(and(eq(skills.userId, userId), inArray(skills.id, merged.map((s) => s.id))))
-        .catch((e) => logger.error("skill", "lastUsedAt update failed", { error: e instanceof Error ? e.message : String(e) }));
+      try {
+        db.update(skills)
+          .set({ lastUsedAt: new Date() })
+          .where(and(eq(skills.userId, userId), inArray(skills.id, merged.map((s) => s.id))))
+          .run();
+      } catch (e) {
+        logger.error("skill", "lastUsedAt update failed", { error: e instanceof Error ? e.message : String(e) });
+      }
     } catch (e) {
       logger.error("skill", "usage log insert failed", { error: e instanceof Error ? e.message : String(e) });
     }

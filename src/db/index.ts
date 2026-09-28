@@ -92,6 +92,13 @@ function initDatabase(db: Database.Database) {
   db.pragma("journal_mode = DELETE");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  // Low-memory / low-contention tuning (keeps DELETE mode for Docker bind-mount safety).
+  // cache_size=-64000 → 64MB page cache (negative = KiB). temp_store=MEMORY avoids
+  // temp file I/O for ORDER BY / vec_distance sorts. busy_timeout avoids SQLITE_BUSY
+  // under concurrent RAG reads + message writes in the same turn.
+  try { db.pragma("cache_size = -64000"); } catch { /* older SQLite — ignore */ }
+  try { db.pragma("temp_store = MEMORY"); } catch { /* ignore */ }
+  try { db.pragma("busy_timeout = 5000"); } catch { /* ignore */ }
   sqliteVec.load(db);
   // One-time data migration: convert legacy JSON text embeddings to Float32 BLOB.
   // Uses vec_f32() which accepts JSON string input and returns a compact BLOB.

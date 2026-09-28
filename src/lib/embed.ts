@@ -111,6 +111,9 @@ async function embedViaHttp(texts: string[], kind?: EmbedKind): Promise<number[]
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ texts, kind }),
+      // Prevent a hung embedder from stalling chat SSE first-token indefinitely.
+      // Callers already treat [] as "skip RAG", so timeout degrades gracefully.
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
       // 503 = model loading. Return empty arrays so the caller skips.

@@ -127,6 +127,13 @@
       "when": 1785491753751,
       "tag": "0018_cursor_agent_id",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1790564935688,
+      "tag": "0020_perf_indexes",
+      "breakpoints": true
     }
   ]
 }

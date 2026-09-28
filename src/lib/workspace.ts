@@ -1,5 +1,5 @@
 import { join, resolve, sep, dirname, relative, isAbsolute } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { getUserDataRoot } from "@/lib/user-data";
 import { parseCommandTokens, isAllowedCommand } from "@/lib/commandWhitelist";
@@ -212,7 +212,15 @@ export async function readWorkspaceFile(relativePath: string, userId: string): P
   const abs = resolveWorkspacePath(relativePath, userId);
   const stat = statSync(abs);
   if (stat.size > MAX_READ_SIZE) {
-    return `File is too large (${stat.size} bytes, max ${MAX_READ_SIZE}). Showing first ${MAX_READ_SIZE} bytes.\n\n${readFileSync(abs, "utf8").slice(0, MAX_READ_SIZE)}`;
+    // Read only the first MAX_READ_SIZE bytes (avoids materializing a 100MB string then slicing).
+    const fd = openSync(abs, "r");
+    try {
+      const buf = Buffer.alloc(MAX_READ_SIZE);
+      const n = readSync(fd, buf, 0, MAX_READ_SIZE, 0);
+      return `File is too large (${stat.size} bytes, max ${MAX_READ_SIZE}). Showing first ${MAX_READ_SIZE} bytes.\n\n${buf.subarray(0, n).toString("utf8")}`;
+    } finally {
+      closeSync(fd);
+    }
   }
   return readFileSync(abs, "utf8");
 }

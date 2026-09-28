@@ -24,6 +24,7 @@ import {
   searchWorkspaceFiles,
   grepWorkspaceContent,
   getWorkspaceRoot,
+  readWorkspaceFile,
 } from "./workspace";
 
 const TEST_USER = "test-user";
@@ -264,5 +265,14 @@ describe("workspace exploration tools", () => {
   it("grep_content rejects invalid regex", async () => {
     const result = await grepWorkspaceContent("([unclosed", EXPLORE_USER);
     expect(result).toContain("[GREP error]");
+  });
+
+  it("readWorkspaceFile caps large files at 1MB without loading the whole file", async () => {
+    const big = "a".repeat(1024 * 1024 + 100);
+    writeFileSync(join(root, "big.txt"), big);
+    const out = await readWorkspaceFile("big.txt", EXPLORE_USER);
+    expect(out).toContain("File is too large");
+    // Header + at most 1MB of content (with small margin for the header text).
+    expect(out.length).toBeLessThan(1024 * 1024 + 1024);
   });
 });

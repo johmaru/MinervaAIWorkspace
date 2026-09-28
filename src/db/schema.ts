@@ -155,7 +155,9 @@ export const skills = sqliteTable("skills", {
   lastEvolutionAt: ts("last_evolution_at"), // nullable — last time an evolution proposal was approved & applied
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),
-});
+}, (t) => ({
+  userStatusIdx: index("skills_user_status_idx").on(t.userId, t.status),
+}));
 
 /**
  * skill_candidates — skill candidates automatically extracted from conversations.
@@ -348,7 +350,9 @@ export const threads = sqliteTable("threads", {
   userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),
-});
+}, (t) => ({
+  userIdx: index("threads_user_idx").on(t.userId),
+}));
 
 /**
  * folders — folders that group threads.

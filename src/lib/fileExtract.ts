@@ -9,7 +9,11 @@
  * routes share the same extraction logic without duplicating the cast.
  */
 
-import { readFileSync } from "node:fs";
+import { openSync, readSync, closeSync, readFileSync, statSync } from "node:fs";
+
+// Cap folder-ingestion reads to avoid blocking the event loop on multi-MB files.
+// PDFs are still fully parsed (pdf-parse needs the whole buffer); text reads truncate.
+const MAX_DISK_TEXT_BYTES = 2 * 1024 * 1024;
 
 export type ExtractedFile = {
   text: string;
@@ -94,7 +98,19 @@ export async function extractFileTextFromPath(filePath: string, filename: string
     return { text: data.text || "", empty: data.text.length === 0 };
   }
 
-  // All other files: try reading as UTF-8
+  // All other files: try reading as UTF-8 (capped — folder ingest path)
+  const st = (() => { try { return statSync(filePath); } catch { return null; } })();
+  if (st && st.size > MAX_DISK_TEXT_BYTES) {
+    const fd = openSync(filePath, "r");
+    try {
+      const buf = Buffer.alloc(MAX_DISK_TEXT_BYTES);
+      const n = readSync(fd, buf, 0, MAX_DISK_TEXT_BYTES, 0);
+      const text = buf.subarray(0, n).toString("utf8");
+      return { text, empty: text.trim().length === 0 };
+    } finally {
+      closeSync(fd);
+    }
+  }
   const text = readFileSync(filePath, "utf8");
   return { text, empty: text.trim().length === 0 };
 }

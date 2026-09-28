@@ -59,7 +59,11 @@ export async function upsertPage(url: string, title: string, content: string): P
   }
 
   // embed + save page_embeddings (delete existing then insert)
-  const vector = await embedText(content, "document");
+  // Bound ONNX/HTTP encode work: transformers truncates to ~512 tokens silently, so
+  // embedding the full 50KB page wastes CPU/RAM without improving the vector.
+  // 8000 chars ≈ covers title + lead while keeping encode time flat.
+  const embedInput = content.length > 8000 ? content.slice(0, 8000) : content;
+  const vector = await embedText(embedInput, "document");
   if (vector.length > 0) {
     await db.delete(pageEmbeddings).where(eq(pageEmbeddings.pageId, pageRow.id));
     await db.insert(pageEmbeddings).values({

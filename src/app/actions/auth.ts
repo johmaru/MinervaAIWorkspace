@@ -71,6 +71,16 @@ const loginAttempts = new Map<string, { count: number; lastFail: number }>();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
 
+function pruneLoginAttempts(): void {
+  // Bound memory: evict expired entries when the map grows (e.g. email cycling).
+  if (loginAttempts.size <= 1000) return;
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (now - entry.lastFail >= LOCKOUT_MS) loginAttempts.delete(key);
+    if (loginAttempts.size <= 500) break;
+  }
+}
+
 export async function login(state: FormState, formData: FormData): Promise<FormState> {
   const email = String(formData.get("email") ?? "").toLowerCase().trim();
   const password = String(formData.get("password") ?? "");
@@ -93,6 +103,7 @@ export async function login(state: FormState, formData: FormData): Promise<FormS
     current.count += 1;
     current.lastFail = Date.now();
     loginAttempts.set(email, current);
+    pruneLoginAttempts();
     return { error: "auth.invalidCredentials" };
   }
   loginAttempts.delete(email);

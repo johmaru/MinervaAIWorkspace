@@ -8,7 +8,7 @@
  */
 import { db } from "@/db";
 import { pages } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { hashContent } from "@/lib/embed";
 import { upsertPage } from "@/lib/pageStore";
 import { logger } from "@/lib/logger";
@@ -159,11 +159,19 @@ export async function searchWeb(
   }
   const response = (await res.json()) as WebSearchResponse;
 
-  // Supplement body text from DB cache: fill in results where scraped=false or content is empty using the pages table
-  for (const r of response.results) {
-    if (!r.scraped || !r.content) {
-      const urlHash = hashContent(r.url);
-      const [existing] = await db.select().from(pages).where(eq(pages.urlHash, urlHash));
+  // Supplement body text from DB cache: fill in results where scraped=false or content is empty using the pages table.
+  // Single batched lookup (selects only needed columns) instead of N per-URL SELECT * queries
+  // that each pull full 50KB content blobs.
+  const missing = response.results.filter((r) => !r.scraped || !r.content);
+  if (missing.length > 0) {
+    const hashes = missing.map((r) => hashContent(r.url));
+    const cached = await db
+      .select({ urlHash: pages.urlHash, title: pages.title, content: pages.content })
+      .from(pages)
+      .where(inArray(pages.urlHash, hashes));
+    const byHash = new Map(cached.map((c) => [c.urlHash, c]));
+    for (const r of missing) {
+      const existing = byHash.get(hashContent(r.url));
       if (existing && existing.content) {
         r.scraped = true;
         r.content = existing.content;

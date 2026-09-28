@@ -131,9 +131,17 @@ def embed(req: EmbedRequest) -> EmbedResponse:
 
         raise HTTPException(status_code=503, detail={"error": "model_loading"})
 
+    # Guard against OOM: reject unbounded bulk requests (KB ingest uses batches of ≤64).
+    if len(req.texts) > 128:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=413, detail={"error": "too many texts (max 128)"})
+
     transformer = _model["transformer"]
     model_config = _model["config"]
-    texts = req.texts
+    # Truncate pathological inputs (e.g. 50KB pages) — the model truncates to its
+    # max sequence length anyway; this bounds tokenizer CPU/RAM per request.
+    texts = [t[:8000] for t in req.texts]
 
     # Apply prefix based on model configuration and kind.
     # ruri-v3 uses text prefixes ("検索クエリ: " / "検索文書: ").
@@ -153,6 +161,8 @@ def embed(req: EmbedRequest) -> EmbedResponse:
     # sentence-transformers handles batching internally.
     vectors = transformer.encode(
         texts,
+        batch_size=32,
+        show_progress_bar=False,
         normalize_embeddings=True,
         **encode_kwargs,
     )
